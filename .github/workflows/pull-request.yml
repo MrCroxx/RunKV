@@ -40,10 +40,10 @@ jobs:
       - name: Run rust format check
         run: |
           make rust_fmt_check
-      # - name: Run rust clippy check
-      #   run: |
-      #     # If new CI checks are added, the one with `--locked` must be run first.
-      #     make rust_clippy_check_locked
+      - name: Run rust clippy check
+        run: |
+          # If new CI checks are added, the one with `--locked` must be run first.
+          make rust_clippy_check_locked
       - name: Install cargo-tarpaulin
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
