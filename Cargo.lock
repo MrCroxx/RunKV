@@ -30,9 +30,6 @@ name = "cc"
 version = "1.0.73"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2fff2a6927b3bb87f9595d67196a70493f627687a71d87a0d692242c33f58c11"
-dependencies = [
- "jobserver",
-]
 
 [[package]]
 name = "cfg-if"
@@ -65,27 +62,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "jobserver"
-version = "0.1.24"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af25a77299a7f711a01975c35a6a424eb6862092cc2d6c72c4ed6cbc56dfc1fa"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.119"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1bf2e165bb3457c8e098ea76f3e3bc9db55f87aa90d52d0e6be741470916aaa4"
 
 [[package]]
-name = "lzzzz"
-version = "1.0.2"
+name = "lz4"
+version = "1.23.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8be9301236955fb2b31545b8d4be8b28b8057cd5fbfa30dfef899e5c64b7079"
+checksum = "4edcb94251b1c375c459e5abe9fb0168c1c826c3370172684844f8f3f8d1a885"
+dependencies = [
+ "libc",
+ "lz4-sys",
+]
+
+[[package]]
+name = "lz4-sys"
+version = "1.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7be8908e2ed6f31c02db8a9fa962f03e36c53fbfde437363eae3306b85d7e17"
 dependencies = [
  "cc",
+ "libc",
 ]
 
 [[package]]
@@ -143,7 +142,7 @@ dependencies = [
  "bytes",
  "crc32fast",
  "farmhash",
- "lzzzz",
+ "lz4",
  "thiserror",
  "tokio",
 ]

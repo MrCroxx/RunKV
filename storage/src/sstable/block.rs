@@ -1,9 +1,12 @@
+use std::cmp::Ordering;
+use std::io::{Read, Write};
 use std::ops::{Range, RangeBounds};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use lz4::Decoder;
 
+use super::key_diff;
 use super::utils::{crc32sum, CompressionAlgorighm};
-use super::{key_diff, user_key};
 use crate::sstable::utils::crc32check;
 use crate::{Error, Result};
 
@@ -19,7 +22,7 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn decode(buf: &Bytes) -> Result<Self> {
+    pub fn decode(buf: Bytes) -> Result<Self> {
         // Verify checksum.
         let crc32sum = (&buf[buf.len() - 4..]).get_u32_le();
         if !crc32check(&buf[..buf.len() - 4], crc32sum) {
@@ -31,11 +34,15 @@ impl Block {
         let buf = match compression {
             CompressionAlgorighm::None => buf.slice(..buf.len() - 5),
             CompressionAlgorighm::LZ4 => {
-                use lzzzz::lz4;
-                let mut decoded = BytesMut::with_capacity(buf.len() - 5);
-                lz4::decompress(&buf[..buf.len() - 5], &mut decoded)
-                    .map_err(Error::decode_error)?;
-                decoded.freeze()
+                let mut decoder = Decoder::new(buf.reader())
+                    .map_err(Error::decode_error)
+                    .unwrap();
+                let mut decoded = Vec::with_capacity(DEFAULT_BLOCK_SIZE);
+                decoder
+                    .read_to_end(&mut decoded)
+                    .map_err(Error::decode_error)
+                    .unwrap();
+                Bytes::from(decoded)
             }
         };
 
@@ -66,9 +73,25 @@ impl Block {
         self.restart_points[index]
     }
 
-    /// Decode [`KeyPrefix`] at given index.
-    pub fn decode_prefix_at(&self, index: usize) -> KeyPrefix {
-        KeyPrefix::decode(&mut &self.data[index..index + KeyPrefix::len()])
+    /// Get restart point len.
+    pub fn restart_point_len(&self) -> usize {
+        self.restart_points.len()
+    }
+
+    /// Search the index of the restart point that the given `offset` belongs to.
+    pub fn search_restart_point(&self, offset: usize) -> usize {
+        self.restart_points
+            .binary_search(&(offset as u32))
+            .unwrap_or_else(|x| x - 1)
+    }
+
+    pub fn search_restart_point_by<F>(&self, f: F) -> usize
+    where
+        F: FnMut(&u32) -> Ordering,
+    {
+        self.restart_points
+            .binary_search_by(f)
+            .unwrap_or_else(|x| x - 1)
     }
 
     pub fn slice(&self, range: impl RangeBounds<usize>) -> Bytes {
@@ -79,9 +102,11 @@ impl Block {
 /// [`KeyPrefix`] contains info for prefix compression.
 #[derive(Debug)]
 pub struct KeyPrefix {
-    pub overlap: usize,
-    pub diff: usize,
-    pub value: usize,
+    overlap: usize,
+    diff: usize,
+    value: usize,
+    /// Used for calculating range, won't be encoded.
+    offset: usize,
 }
 
 impl KeyPrefix {
@@ -91,7 +116,7 @@ impl KeyPrefix {
         buf.put_u32_le(self.value as u32);
     }
 
-    pub fn decode(buf: &mut impl Buf) -> Self {
+    pub fn decode(buf: &mut impl Buf, offset: usize) -> Self {
         let overlap = buf.get_u16_le() as usize;
         let diff = buf.get_u16_le() as usize;
         let value = buf.get_u32_le() as usize;
@@ -99,12 +124,34 @@ impl KeyPrefix {
             overlap,
             diff,
             value,
+            offset,
         }
     }
 
     /// Encoded length.
-    pub fn len() -> usize {
+    fn len(&self) -> usize {
+        // TODO: Use `varint` coding.
         8
+    }
+
+    /// Get overlap len.
+    pub fn overlap_len(&self) -> usize {
+        self.overlap
+    }
+
+    /// Get diff key range.
+    pub fn diff_key_range(&self) -> Range<usize> {
+        self.offset + self.len()..self.offset + self.len() + self.diff
+    }
+
+    /// Get value range.
+    pub fn value_range(&self) -> Range<usize> {
+        self.offset + self.len() + self.diff..self.offset + self.len() + self.diff + self.value
+    }
+
+    /// Get entry len.
+    pub fn entry_len(&self) -> usize {
+        self.len() + self.diff + self.value
     }
 }
 
@@ -160,11 +207,13 @@ impl BlockBuilder {
     ///
     /// # Format
     ///
-    ///     entry (kv pair): | overlap len (2B) | diff len (2B) | value len(4B) | diff key | value |
+    /// ```plain
+    /// entry (kv pair): | overlap len (2B) | diff len (2B) | value len(4B) | diff key | value |
+    /// ```
     ///
     /// # Panics
     ///
-    ///     Panic if key is not added in ASCEND order.
+    /// Panic if key is not added in ASCEND order.
     pub fn add(&mut self, key: &[u8], value: &[u8]) {
         if self.entry_count > 0 {
             assert!(self.last_key < key);
@@ -182,6 +231,7 @@ impl BlockBuilder {
             overlap: key.len() - diff_key.len(),
             diff: diff_key.len(),
             value: value.len(),
+            offset: self.buf.len(),
         };
 
         prefix.encode(&mut self.buf);
@@ -195,14 +245,15 @@ impl BlockBuilder {
     /// Finish building sst.
     ///
     /// # Format
+    ///
     /// ```plain
-    ///     compressed: | entries | restart point 0 (4B) | ... | restart point N-1 (4B) | N (4B) |
-    ///     uncompressed: | compression method (1B) | crc32sum (4B) |
+    /// compressed: | entries | restart point 0 (4B) | ... | restart point N-1 (4B) | N (4B) |
+    /// uncompressed: | compression method (1B) | crc32sum (4B) |
     /// ```
     ///
     /// # Panics
     ///
-    ///     Panic if there is compression error.
+    /// Panic if there is compression error.
     pub fn build(mut self) -> Bytes {
         for restart_point in &self.restart_points {
             self.buf.put_u32_le(*restart_point);
@@ -211,12 +262,18 @@ impl BlockBuilder {
         let mut buf = match self.compression_algorithm {
             CompressionAlgorighm::None => self.buf,
             CompressionAlgorighm::LZ4 => {
-                use lzzzz::lz4;
-                let mut encoded = BytesMut::with_capacity(self.buf.len());
-                lz4::compress(&self.buf, &mut encoded, lz4::ACC_LEVEL_DEFAULT)
+                let mut encoder = lz4::EncoderBuilder::new()
+                    .level(4)
+                    .build(BytesMut::with_capacity(self.buf.len()).writer())
                     .map_err(Error::encode_error)
                     .unwrap();
-                encoded
+                encoder
+                    .write(&self.buf[..])
+                    .map_err(Error::encode_error)
+                    .unwrap();
+                let (writer, result) = encoder.finish();
+                result.map_err(Error::encode_error).unwrap();
+                writer.into_inner()
             }
         };
         self.compression_algorithm.encode(&mut buf);
@@ -237,7 +294,7 @@ mod tests {
 
     use super::*;
     use crate::test_utils::full_key;
-    use crate::{BlockIterator, Iterator};
+    use crate::{BlockIterator, Iterator, Seek};
 
     #[tokio::test]
     async fn test_block_enc_dec() {
@@ -248,17 +305,69 @@ mod tests {
         builder.add(&full_key(b"k3", 3), b"v3");
         builder.add(&full_key(b"k4", 4), b"v4");
         let buf = builder.build();
-        let block = Arc::new(Block::decode(&buf).unwrap());
+        let block = Arc::new(Block::decode(buf).unwrap());
         let mut bi = BlockIterator::new(block);
 
-        // TODO: replace this with seek first.
+        bi.seek(Seek::First).await.unwrap();
+        assert!(bi.is_valid());
+        assert_eq!(&full_key(b"k1", 1)[..], bi.key());
+        assert_eq!(b"v1", bi.value());
+
         bi.next().await.unwrap();
-        assert_eq!(full_key(b"k1", 1), bi.key());
+        assert!(bi.is_valid());
+        assert_eq!(&full_key(b"k2", 2)[..], bi.key());
+        assert_eq!(b"v2", bi.value());
+
         bi.next().await.unwrap();
-        assert_eq!(full_key(b"k2", 2), bi.key());
+        assert!(bi.is_valid());
+        assert_eq!(&full_key(b"k3", 3)[..], bi.key());
+        assert_eq!(b"v3", bi.value());
+
         bi.next().await.unwrap();
-        assert_eq!(full_key(b"k3", 3), bi.key());
+        assert!(bi.is_valid());
+        assert_eq!(&full_key(b"k4", 4)[..], bi.key());
+        assert_eq!(b"v4", bi.value());
+
         bi.next().await.unwrap();
-        assert_eq!(full_key(b"k4", 4), bi.key());
+        assert!(!bi.is_valid());
+    }
+
+    #[tokio::test]
+    async fn test_compressed_block_enc_dec() {
+        let options = BlockBuilderOptions {
+            compression_algorithm: CompressionAlgorighm::LZ4,
+            ..Default::default()
+        };
+        let mut builder = BlockBuilder::new(options);
+        builder.add(&full_key(b"k1", 1), b"v1");
+        builder.add(&full_key(b"k2", 2), b"v2");
+        builder.add(&full_key(b"k3", 3), b"v3");
+        builder.add(&full_key(b"k4", 4), b"v4");
+        let buf = builder.build();
+        let block = Arc::new(Block::decode(buf).unwrap());
+        let mut bi = BlockIterator::new(block);
+
+        bi.seek(Seek::First).await.unwrap();
+        assert!(bi.is_valid());
+        assert_eq!(&full_key(b"k1", 1)[..], bi.key());
+        assert_eq!(b"v1", bi.value());
+
+        bi.next().await.unwrap();
+        assert!(bi.is_valid());
+        assert_eq!(&full_key(b"k2", 2)[..], bi.key());
+        assert_eq!(b"v2", bi.value());
+
+        bi.next().await.unwrap();
+        assert!(bi.is_valid());
+        assert_eq!(&full_key(b"k3", 3)[..], bi.key());
+        assert_eq!(b"v3", bi.value());
+
+        bi.next().await.unwrap();
+        assert!(bi.is_valid());
+        assert_eq!(&full_key(b"k4", 4)[..], bi.key());
+        assert_eq!(b"v4", bi.value());
+
+        bi.next().await.unwrap();
+        assert!(!bi.is_valid());
     }
 }
