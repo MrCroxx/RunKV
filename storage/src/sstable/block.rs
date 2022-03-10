@@ -253,12 +253,22 @@ mod tests {
 
         // TODO: replace this with seek first.
         bi.next().await.unwrap();
+        assert!(bi.is_valid());
         assert_eq!(full_key(b"k1", 1), bi.key());
+
         bi.next().await.unwrap();
+        assert!(bi.is_valid());
         assert_eq!(full_key(b"k2", 2), bi.key());
+
         bi.next().await.unwrap();
+        assert!(bi.is_valid());
         assert_eq!(full_key(b"k3", 3), bi.key());
+
         bi.next().await.unwrap();
+        assert!(bi.is_valid());
         assert_eq!(full_key(b"k4", 4), bi.key());
+
+        bi.next().await.unwrap();
+        assert!(!bi.is_valid());
     }
 }

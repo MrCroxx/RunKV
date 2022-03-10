@@ -52,6 +52,10 @@ impl Iterator for BlockIterator {
         Ok(())
     }
 
+    async fn prev(&mut self) -> Result<()> {
+        todo!()
+    }
+
     fn key(&self) -> &[u8] {
         assert!(self.is_valid());
         &self.key[..]
@@ -63,7 +67,7 @@ impl Iterator for BlockIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.offset <= self.block.len()
+        self.offset >= 0 && self.offset < self.block.len()
     }
 
     async fn seek<'s>(&mut self, position: Seek<'s>) -> Result<()> {

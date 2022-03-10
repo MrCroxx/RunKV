@@ -36,6 +36,21 @@ pub trait Iterator: Send + Sync {
     ///     This function will panic if the iterator is invalid.
     async fn next(&mut self) -> Result<()>;
 
+    /// Move a valid iterator to the next key.
+    ///
+    /// Note:
+    ///
+    ///     - Before calling this function, make sure the iterator `is_valid`.
+    ///     - After calling this function, you may first check whether the iterator `is_valid`
+    ///       again, then get the new data by calling `key` and `value`.
+    ///     - If the position after calling this is invalid, this function WON'T return an `Err`.
+    ///       You should check `is_valid` before continuing the iteration.
+    ///
+    /// # Panics
+    ///
+    ///     This function will panic if the iterator is invalid.
+    async fn prev(&mut self) -> Result<()>;
+
     /// Retrieve the current key.
     ///
     /// Note:
