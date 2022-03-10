@@ -1,6 +1,8 @@
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
 env:
   RUST_TOOLCHAIN: nightly-2022-02-21
   CARGO_TERM_COLOR: always
