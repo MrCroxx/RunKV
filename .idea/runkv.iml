@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="CPP_MODULE" version="4">
+  <component name="NewModuleRootManager">
+    <content url="file://$MODULE_DIR$">
+      <sourceFolder url="file://$MODULE_DIR$/common/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/exhauster/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/rudder/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/storage/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/wheel/src" isTestSource="false" />
+      <excludeFolder url="file://$MODULE_DIR$/target" />
+    </content>
+    <orderEntry type="inheritedJdk" />
+    <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+</module>
