@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use async_trait::async_trait;
 
 use super::{Iterator, Seek};
@@ -37,7 +39,8 @@ impl ConcatIterator {
                     Ok(())
                 } else {
                     self.offset += 1;
-                    self.iters[self.offset].seek(Seek::First).await
+                    self.iters[self.offset].seek(Seek::First).await?;
+                    Ok(())
                 }
             }
         }
@@ -56,7 +59,8 @@ impl ConcatIterator {
                     Ok(())
                 } else {
                     self.offset -= 1;
-                    self.iters[self.offset].seek(Seek::Last).await
+                    self.iters[self.offset].seek(Seek::Last).await?;
+                    Ok(())
                 }
             }
         }
@@ -89,28 +93,29 @@ impl Iterator for ConcatIterator {
         self.offset < self.iters.len()
     }
 
-    async fn seek<'s>(&mut self, position: Seek<'s>) -> Result<()> {
+    async fn seek<'s>(&mut self, position: Seek<'s>) -> Result<Ordering> {
         match position {
             Seek::First => {
                 self.offset = 0;
-                self.iters[self.offset].seek(Seek::First).await
+                self.iters[self.offset].seek(Seek::First).await?;
+                Ok(Ordering::Equal)
             }
             Seek::Last => {
                 self.offset = self.iters.len() - 1;
-                self.iters[self.offset].seek(Seek::Last).await
+                self.iters[self.offset].seek(Seek::Last).await?;
+                Ok(Ordering::Equal)
             }
             Seek::Random(key) => {
                 // TODO: Impl binary search seek.
                 for i in 0..self.iters.len() {
                     self.offset = i;
-                    println!("seek in : {}", i);
                     self.iters[self.offset].seek(Seek::Random(key)).await?;
                     if self.iters[self.offset].is_valid() {
-                        return Ok(());
+                        return Ok(self.key().cmp(key));
                     }
                 }
                 self.invalid();
-                Ok(())
+                Ok(Ordering::Greater)
             }
         }
     }

@@ -1,6 +1,8 @@
 mod block_iterator;
 mod concat_iterator;
 
+use std::cmp::Ordering;
+
 use async_trait::async_trait;
 pub use block_iterator::*;
 pub use concat_iterator::*;
@@ -88,10 +90,14 @@ pub trait Iterator: Send + Sync {
     /// Reset iterator and seek to the first position where the key >= provided key, or key <=
     /// provided key if this is a reverse iterator.
     ///
+    /// `seek` returns [`Ordering`] for binary search, which incidates the comparison between
+    /// expection key and result key. Seeking for first or last postion always returns
+    /// `Ordering::Equal` .
+    ///
     /// Note:
     ///
     /// - Do not decide whether the position is valid or not by checking the returned error of this
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
-    async fn seek<'s>(&mut self, position: Seek<'s>) -> Result<()>;
+    async fn seek<'s>(&mut self, position: Seek<'s>) -> Result<Ordering>;
 }
