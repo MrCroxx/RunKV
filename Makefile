@@ -13,10 +13,10 @@ rust_fmt_check:
 	cargo fmt --all -- --check
 
 rust_clippy_check:
-	cd rust && cargo clippy --all-targets -- -D warnings
+	cargo clippy --all-targets -- -D warnings
 
 rust_clippy_check_locked:
-	cd rust && cargo clippy --all-targets --locked -- -D warnings
+	cargo clippy --all-targets --locked -- -D warnings
 
 # Note: "--skip-clean" must be used along with "CARGO_TARGET_DIR=..."
 # See also https://github.com/xd009642/tarpaulin/issues/777
