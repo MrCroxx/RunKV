@@ -82,7 +82,7 @@ impl Block {
     pub fn search_restart_point(&self, offset: usize) -> usize {
         self.restart_points
             .binary_search(&(offset as u32))
-            .unwrap_or_else(|x| x - 1)
+            .unwrap_or_else(|x| x.saturating_sub(1))
     }
 
     pub fn search_restart_point_by<F>(&self, f: F) -> usize
@@ -91,7 +91,7 @@ impl Block {
     {
         self.restart_points
             .binary_search_by(f)
-            .unwrap_or_else(|x| x - 1)
+            .unwrap_or_else(|x| x.saturating_sub(1))
     }
 
     pub fn slice(&self, range: impl RangeBounds<usize>) -> Bytes {
