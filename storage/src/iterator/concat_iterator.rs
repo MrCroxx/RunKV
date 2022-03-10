@@ -139,7 +139,7 @@ mod tests {
         for i in range {
             builder.add(
                 &full_key(format!("k{:02}", i).as_bytes(), i as u64)[..],
-                &format!("v{:02}", i).as_bytes(),
+                format!("v{:02}", i).as_bytes(),
             );
         }
         let buf = builder.build();
@@ -217,7 +217,7 @@ mod tests {
                 &full_key(format!("k{:02}", i).as_bytes(), i as u64)[..],
                 ci.key()
             );
-            assert_eq!(&format!("v{:02}", i).as_bytes()[..], ci.value());
+            assert_eq!(format!("v{:02}", i).as_bytes(), ci.value());
             ci.next().await.unwrap();
         }
         assert!(!ci.is_valid())
@@ -234,7 +234,7 @@ mod tests {
                 &full_key(format!("k{:02}", i).as_bytes(), i as u64)[..],
                 ci.key()
             );
-            assert_eq!(&format!("v{:02}", i).as_bytes()[..], ci.value());
+            assert_eq!(format!("v{:02}", i).as_bytes(), ci.value());
             ci.prev().await.unwrap();
         }
         assert!(!ci.is_valid())
