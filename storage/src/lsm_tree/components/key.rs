@@ -13,7 +13,7 @@ use crate::lsm_tree::utils::*;
 pub fn full_key(user_key: &[u8], timestamp: u64) -> Bytes {
     let mut buf = BytesMut::with_capacity(user_key.len() + 8);
     buf.put_slice(user_key);
-    buf.put_u64_le(timestamp);
+    buf.put_u64_le(!timestamp);
     buf.freeze()
 }
 

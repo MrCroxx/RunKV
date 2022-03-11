@@ -146,3 +146,11 @@ impl SstableBuilder {
         self.last_full_key.clear();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn test_sstable_enc_dec() {
+        // todo!()
+    }
+}
