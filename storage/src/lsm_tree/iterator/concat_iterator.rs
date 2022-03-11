@@ -155,9 +155,10 @@ mod tests {
     use std::ops::RangeInclusive;
     use std::sync::Arc;
 
+    use bytes::Bytes;
+
     use super::*;
-    use crate::test_utils::full_key;
-    use crate::{Block, BlockBuilder, BlockBuilderOptions, BlockIterator};
+    use crate::{full_key, Block, BlockBuilder, BlockBuilderOptions, BlockIterator};
 
     fn build_iterator_for_test() -> ConcatIterator {
         ConcatIterator::new(vec![
@@ -172,8 +173,8 @@ mod tests {
         let mut builder = BlockBuilder::new(options);
         for i in range {
             builder.add(
-                &full_key(format!("k{:02}", i).as_bytes(), i as u64)[..],
-                format!("v{:02}", i).as_bytes(),
+                &full_key(format!("k{:02}", i).as_bytes(), i as u64),
+                &Bytes::from(format!("v{:02}", i)),
             );
         }
         let buf = builder.build();

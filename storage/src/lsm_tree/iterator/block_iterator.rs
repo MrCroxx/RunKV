@@ -168,16 +168,15 @@ impl Iterator for BlockIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::full_key;
-    use crate::{BlockBuilder, BlockBuilderOptions};
+    use crate::{full_key, BlockBuilder, BlockBuilderOptions};
 
     fn build_iterator_for_test() -> BlockIterator {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
-        builder.add(&full_key(b"k01", 1), b"v01");
-        builder.add(&full_key(b"k02", 2), b"v02");
-        builder.add(&full_key(b"k04", 4), b"v04");
-        builder.add(&full_key(b"k05", 5), b"v05");
+        builder.add(&full_key(b"k01", 1), &Bytes::from("v01"));
+        builder.add(&full_key(b"k02", 2), &Bytes::from("v01"));
+        builder.add(&full_key(b"k04", 4), &Bytes::from("v01"));
+        builder.add(&full_key(b"k05", 5), &Bytes::from("v01"));
         let buf = builder.build();
         BlockIterator::new(Arc::new(Block::decode(buf).unwrap()))
     }

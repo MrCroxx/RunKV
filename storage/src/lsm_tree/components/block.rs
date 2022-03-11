@@ -6,13 +6,14 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use lz4::Decoder;
 
 use super::key_diff;
-use super::utils::{crc32sum, var_u32_len, BufExt, BufMutExt, CompressionAlgorighm};
-use crate::sstable::utils::crc32check;
+use crate::lsm_tree::utils::{
+    crc32check, crc32sum, var_u32_len, BufExt, BufMutExt, CompressionAlgorighm,
+};
 use crate::{Error, Result};
 
-const DEFAULT_BLOCK_SIZE: usize = 64 * 1024; // 64KiB
-const DEFAULT_RESTART_COUNT: usize = 16;
-const DEFAULT_ENTRY_SIZE: usize = 1024; // 1 KiB
+pub const DEFAULT_BLOCK_SIZE: usize = 64 * 1024; // 64KiB
+pub const DEFAULT_RESTART_COUNT: usize = 16;
+pub const DEFAULT_ENTRY_SIZE: usize = 1024; // 1 KiB
 
 pub struct Block {
     /// Uncompressed entries data.
@@ -158,15 +159,15 @@ impl KeyPrefix {
 
 pub struct BlockBuilderOptions {
     /// Reserved bytes size when creating buffer to avoid frequent allocating.
-    reserved: usize,
+    pub capacity: usize,
     /// Compression algorithm.
-    compression_algorithm: CompressionAlgorighm,
+    pub compression_algorithm: CompressionAlgorighm,
 }
 
 impl Default for BlockBuilderOptions {
     fn default() -> Self {
         Self {
-            reserved: DEFAULT_BLOCK_SIZE,
+            capacity: DEFAULT_BLOCK_SIZE,
             compression_algorithm: CompressionAlgorighm::None,
         }
     }
@@ -191,10 +192,10 @@ pub struct BlockBuilder {
 impl BlockBuilder {
     pub fn new(options: BlockBuilderOptions) -> Self {
         Self {
-            buf: BytesMut::with_capacity(options.reserved),
+            buf: BytesMut::with_capacity(options.capacity),
             restart_count: DEFAULT_RESTART_COUNT,
             restart_points: Vec::with_capacity(
-                options.reserved / DEFAULT_ENTRY_SIZE / DEFAULT_RESTART_COUNT + 1,
+                options.capacity / DEFAULT_ENTRY_SIZE / DEFAULT_RESTART_COUNT + 1,
             ),
             last_key: Bytes::default(),
             entry_count: 0,
@@ -243,7 +244,7 @@ impl BlockBuilder {
         self.entry_count += 1;
     }
 
-    /// Finish building sst.
+    /// Finish building block.
     ///
     /// # Format
     ///
@@ -256,6 +257,7 @@ impl BlockBuilder {
     ///
     /// Panic if there is compression error.
     pub fn build(mut self) -> Bytes {
+        assert!(self.entry_count > 0);
         for restart_point in &self.restart_points {
             self.buf.put_u32_le(*restart_point);
         }
@@ -294,8 +296,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::test_utils::full_key;
-    use crate::{BlockIterator, Iterator, Seek};
+    use crate::{full_key, BlockIterator, Iterator, Seek};
 
     #[tokio::test]
     async fn test_block_enc_dec() {
