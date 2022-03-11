@@ -52,7 +52,7 @@ jobs:
         run: |
           make rust_test_with_coverage
       - uses: codecov/codecov-action@v2
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+        # with:
+        #   token: ${{ secrets.CODECOV_TOKEN }}
 
       
