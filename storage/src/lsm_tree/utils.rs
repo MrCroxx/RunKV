@@ -112,16 +112,17 @@ pub fn crc32check(data: &[u8], crc32sum: u32) -> bool {
     hasher.finalize() == crc32sum
 }
 
+#[derive(Clone, Debug)]
 pub enum CompressionAlgorighm {
     None,
-    LZ4,
+    Lz4,
 }
 
 impl CompressionAlgorighm {
     pub fn encode(&self, buf: &mut impl BufMut) {
         let v = match self {
             Self::None => 0,
-            Self::LZ4 => 1,
+            Self::Lz4 => 1,
         };
         buf.put_u8(v);
     }
@@ -129,7 +130,7 @@ impl CompressionAlgorighm {
     pub fn decode(buf: &mut impl Buf) -> Result<Self> {
         match buf.get_u8() {
             0 => Ok(Self::None),
-            1 => Ok(Self::LZ4),
+            1 => Ok(Self::Lz4),
             _ => Err(Error::DecodeError(
                 "not valid compression algorithm".to_string(),
             )),

@@ -168,8 +168,7 @@ impl Iterator for BlockIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::full_key;
-    use crate::{BlockBuilder, BlockBuilderOptions};
+    use crate::{full_key, BlockBuilder, BlockBuilderOptions};
 
     fn build_iterator_for_test() -> BlockIterator {
         let options = BlockBuilderOptions::default();

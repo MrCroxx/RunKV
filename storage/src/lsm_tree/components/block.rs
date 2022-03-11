@@ -5,14 +5,11 @@ use std::ops::{Range, RangeBounds};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use lz4::Decoder;
 
-use super::key_diff;
-use super::utils::{crc32sum, var_u32_len, BufExt, BufMutExt, CompressionAlgorighm};
-use crate::sstable::utils::crc32check;
+use super::{key_diff, DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_COUNT};
+use crate::lsm_tree::utils::{
+    crc32check, crc32sum, var_u32_len, BufExt, BufMutExt, CompressionAlgorighm,
+};
 use crate::{Error, Result};
-
-const DEFAULT_BLOCK_SIZE: usize = 64 * 1024; // 64KiB
-const DEFAULT_RESTART_COUNT: usize = 16;
-const DEFAULT_ENTRY_SIZE: usize = 1024; // 1 KiB
 
 pub struct Block {
     /// Uncompressed entries data.
@@ -33,7 +30,7 @@ impl Block {
         let compression = CompressionAlgorighm::decode(&mut &buf[buf.len() - 5..buf.len() - 4])?;
         let buf = match compression {
             CompressionAlgorighm::None => buf.slice(..buf.len() - 5),
-            CompressionAlgorighm::LZ4 => {
+            CompressionAlgorighm::Lz4 => {
                 let mut decoder = Decoder::new(buf.reader())
                     .map_err(Error::decode_error)
                     .unwrap();
@@ -158,15 +155,15 @@ impl KeyPrefix {
 
 pub struct BlockBuilderOptions {
     /// Reserved bytes size when creating buffer to avoid frequent allocating.
-    reserved: usize,
+    pub capacity: usize,
     /// Compression algorithm.
-    compression_algorithm: CompressionAlgorighm,
+    pub compression_algorithm: CompressionAlgorighm,
 }
 
 impl Default for BlockBuilderOptions {
     fn default() -> Self {
         Self {
-            reserved: DEFAULT_BLOCK_SIZE,
+            capacity: DEFAULT_BLOCK_SIZE,
             compression_algorithm: CompressionAlgorighm::None,
         }
     }
@@ -191,10 +188,10 @@ pub struct BlockBuilder {
 impl BlockBuilder {
     pub fn new(options: BlockBuilderOptions) -> Self {
         Self {
-            buf: BytesMut::with_capacity(options.reserved),
+            buf: BytesMut::with_capacity(options.capacity),
             restart_count: DEFAULT_RESTART_COUNT,
             restart_points: Vec::with_capacity(
-                options.reserved / DEFAULT_ENTRY_SIZE / DEFAULT_RESTART_COUNT + 1,
+                options.capacity / DEFAULT_ENTRY_SIZE / DEFAULT_RESTART_COUNT + 1,
             ),
             last_key: Bytes::default(),
             entry_count: 0,
@@ -243,7 +240,7 @@ impl BlockBuilder {
         self.entry_count += 1;
     }
 
-    /// Finish building sst.
+    /// Finish building block.
     ///
     /// # Format
     ///
@@ -256,13 +253,14 @@ impl BlockBuilder {
     ///
     /// Panic if there is compression error.
     pub fn build(mut self) -> Bytes {
+        assert!(self.entry_count > 0);
         for restart_point in &self.restart_points {
             self.buf.put_u32_le(*restart_point);
         }
         self.buf.put_u32_le(self.restart_points.len() as u32);
         let mut buf = match self.compression_algorithm {
             CompressionAlgorighm::None => self.buf,
-            CompressionAlgorighm::LZ4 => {
+            CompressionAlgorighm::Lz4 => {
                 let mut encoder = lz4::EncoderBuilder::new()
                     .level(4)
                     .build(BytesMut::with_capacity(self.buf.len()).writer())
@@ -294,17 +292,16 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::test_utils::full_key;
-    use crate::{BlockIterator, Iterator, Seek};
+    use crate::{full_key, BlockIterator, Iterator, Seek};
 
     #[tokio::test]
     async fn test_block_enc_dec() {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
-        builder.add(&full_key(b"k1", 1), b"v1");
-        builder.add(&full_key(b"k2", 2), b"v2");
-        builder.add(&full_key(b"k3", 3), b"v3");
-        builder.add(&full_key(b"k4", 4), b"v4");
+        builder.add(&full_key(b"k1", 1), b"v01");
+        builder.add(&full_key(b"k2", 2), b"v02");
+        builder.add(&full_key(b"k3", 3), b"v03");
+        builder.add(&full_key(b"k4", 4), b"v04");
         let buf = builder.build();
         let block = Arc::new(Block::decode(buf).unwrap());
         let mut bi = BlockIterator::new(block);
@@ -312,22 +309,22 @@ mod tests {
         bi.seek(Seek::First).await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k1", 1)[..], bi.key());
-        assert_eq!(b"v1", bi.value());
+        assert_eq!(b"v01", bi.value());
 
         bi.next().await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k2", 2)[..], bi.key());
-        assert_eq!(b"v2", bi.value());
+        assert_eq!(b"v02", bi.value());
 
         bi.next().await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k3", 3)[..], bi.key());
-        assert_eq!(b"v3", bi.value());
+        assert_eq!(b"v03", bi.value());
 
         bi.next().await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k4", 4)[..], bi.key());
-        assert_eq!(b"v4", bi.value());
+        assert_eq!(b"v04", bi.value());
 
         bi.next().await.unwrap();
         assert!(!bi.is_valid());
@@ -336,14 +333,14 @@ mod tests {
     #[tokio::test]
     async fn test_compressed_block_enc_dec() {
         let options = BlockBuilderOptions {
-            compression_algorithm: CompressionAlgorighm::LZ4,
+            compression_algorithm: CompressionAlgorighm::Lz4,
             ..Default::default()
         };
         let mut builder = BlockBuilder::new(options);
-        builder.add(&full_key(b"k1", 1), b"v1");
-        builder.add(&full_key(b"k2", 2), b"v2");
-        builder.add(&full_key(b"k3", 3), b"v3");
-        builder.add(&full_key(b"k4", 4), b"v4");
+        builder.add(&full_key(b"k1", 1), b"v01");
+        builder.add(&full_key(b"k2", 2), b"v02");
+        builder.add(&full_key(b"k3", 3), b"v03");
+        builder.add(&full_key(b"k4", 4), b"v04");
         let buf = builder.build();
         let block = Arc::new(Block::decode(buf).unwrap());
         let mut bi = BlockIterator::new(block);
@@ -351,22 +348,22 @@ mod tests {
         bi.seek(Seek::First).await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k1", 1)[..], bi.key());
-        assert_eq!(b"v1", bi.value());
+        assert_eq!(b"v01", bi.value());
 
         bi.next().await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k2", 2)[..], bi.key());
-        assert_eq!(b"v2", bi.value());
+        assert_eq!(b"v02", bi.value());
 
         bi.next().await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k3", 3)[..], bi.key());
-        assert_eq!(b"v3", bi.value());
+        assert_eq!(b"v03", bi.value());
 
         bi.next().await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k4", 4)[..], bi.key());
-        assert_eq!(b"v4", bi.value());
+        assert_eq!(b"v04", bi.value());
 
         bi.next().await.unwrap();
         assert!(!bi.is_valid());

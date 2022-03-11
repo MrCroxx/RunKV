@@ -6,9 +6,16 @@
 //!
 //! |<------- full key ------->|
 
-use bytes::Buf;
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-use super::utils::*;
+use crate::lsm_tree::utils::*;
+
+pub fn full_key(user_key: &[u8], timestamp: u64) -> Bytes {
+    let mut buf = BytesMut::with_capacity(user_key.len() + 8);
+    buf.put_slice(user_key);
+    buf.put_u64_le(!timestamp);
+    buf.freeze()
+}
 
 /// Get user key in full key.
 pub fn user_key(full_key: &[u8]) -> &[u8] {

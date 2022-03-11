@@ -1,6 +1,4 @@
 mod error;
 pub use error::*;
-mod iterator;
-pub use iterator::*;
-mod sstable;
-pub use sstable::*;
+mod lsm_tree;
+pub use lsm_tree::*;
