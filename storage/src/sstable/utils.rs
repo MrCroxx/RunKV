@@ -4,6 +4,70 @@ use bytes::{Buf, BufMut};
 
 use crate::error::{Error, Result};
 
+const MASK: u32 = 128;
+
+pub fn var_u32_len(n: u32) -> usize {
+    if n < (1 << 7) {
+        1
+    } else if n < (1 << 14) {
+        2
+    } else if n < (1 << 21) {
+        3
+    } else if n < (1 << 28) {
+        4
+    } else {
+        5
+    }
+}
+
+pub trait BufMutExt: BufMut {
+    fn put_var_u32(&mut self, n: u32) {
+        if n < (1 << 7) {
+            self.put_u8(n as u8);
+        } else if n < (1 << 14) {
+            self.put_u8((n | MASK) as u8);
+            self.put_u8((n >> 7) as u8);
+        } else if n < (1 << 21) {
+            self.put_u8((n | MASK) as u8);
+            self.put_u8(((n >> 7) | MASK) as u8);
+            self.put_u8((n >> 14) as u8);
+        } else if n < (1 << 28) {
+            self.put_u8((n | MASK) as u8);
+            self.put_u8(((n >> 7) | MASK) as u8);
+            self.put_u8(((n >> 14) | MASK) as u8);
+            self.put_u8((n >> 21) as u8);
+        } else {
+            self.put_u8((n | MASK) as u8);
+            self.put_u8(((n >> 7) | MASK) as u8);
+            self.put_u8(((n >> 14) | MASK) as u8);
+            self.put_u8(((n >> 21) | MASK) as u8);
+            self.put_u8((n >> 28) as u8);
+        }
+    }
+}
+
+pub trait BufExt: Buf {
+    fn get_var_u32(&mut self) -> u32 {
+        let mut n = 0u32;
+        let mut shift = 0;
+        loop {
+            let v = self.get_u8() as u32;
+            if v & MASK != 0 {
+                n |= (v & (MASK - 1)) << shift;
+            } else {
+                n |= v << shift;
+                break;
+            }
+            shift += 7;
+        }
+        n
+    }
+}
+
+impl<T: BufMut + ?Sized> BufMutExt for &mut T {}
+
+impl<T: Buf + ?Sized> BufExt for &mut T {}
+
 unsafe fn u64(ptr: *const u8) -> u64 {
     ptr::read_unaligned(ptr as *const u64)
 }
@@ -70,5 +134,50 @@ impl CompressionAlgorighm {
                 "not valid compression algorithm".to_string(),
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::BytesMut;
+
+    use super::*;
+
+    #[test]
+    fn test_var_u32_enc_dec() {
+        let mut buf = BytesMut::default();
+        (&mut buf).put_var_u32((1 << 7) - 1);
+        let mut buf = buf.freeze();
+        assert_eq!(1, buf.len());
+        assert_eq!((1 << 7) - 1, (&mut buf).get_var_u32());
+        assert!(buf.is_empty());
+
+        let mut buf = BytesMut::default();
+        (&mut buf).put_var_u32((1 << 14) - 1);
+        let mut buf = buf.freeze();
+        assert_eq!(2, buf.len());
+        assert_eq!((1 << 14) - 1, (&mut buf).get_var_u32());
+        assert!(buf.is_empty());
+
+        let mut buf = BytesMut::default();
+        (&mut buf).put_var_u32((1 << 21) - 1);
+        let mut buf = buf.freeze();
+        assert_eq!(3, buf.len());
+        assert_eq!((1 << 21) - 1, (&mut buf).get_var_u32());
+        assert!(buf.is_empty());
+
+        let mut buf = BytesMut::default();
+        (&mut buf).put_var_u32((1 << 28) - 1);
+        let mut buf = buf.freeze();
+        assert_eq!(4, buf.len());
+        assert_eq!((1 << 28) - 1, (&mut buf).get_var_u32());
+        assert!(buf.is_empty());
+
+        let mut buf = BytesMut::default();
+        (&mut buf).put_var_u32(u32::MAX);
+        let mut buf = buf.freeze();
+        assert_eq!(5, buf.len());
+        assert_eq!(u32::MAX, (&mut buf).get_var_u32());
+        assert!(buf.is_empty());
     }
 }

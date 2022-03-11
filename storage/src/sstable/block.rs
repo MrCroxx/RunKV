@@ -6,7 +6,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use lz4::Decoder;
 
 use super::key_diff;
-use super::utils::{crc32sum, CompressionAlgorighm};
+use super::utils::{crc32sum, var_u32_len, BufExt, BufMutExt, CompressionAlgorighm};
 use crate::sstable::utils::crc32check;
 use crate::{Error, Result};
 
@@ -110,16 +110,16 @@ pub struct KeyPrefix {
 }
 
 impl KeyPrefix {
-    pub fn encode(&self, buf: &mut impl BufMut) {
-        buf.put_u16_le(self.overlap as u16);
-        buf.put_u16_le(self.diff as u16);
-        buf.put_u32_le(self.value as u32);
+    pub fn encode(&self, mut buf: &mut impl BufMut) {
+        buf.put_var_u32(self.overlap as u32);
+        buf.put_var_u32(self.diff as u32);
+        buf.put_var_u32(self.value as u32);
     }
 
-    pub fn decode(buf: &mut impl Buf, offset: usize) -> Self {
-        let overlap = buf.get_u16_le() as usize;
-        let diff = buf.get_u16_le() as usize;
-        let value = buf.get_u32_le() as usize;
+    pub fn decode(mut buf: &mut impl Buf, offset: usize) -> Self {
+        let overlap = buf.get_var_u32() as usize;
+        let diff = buf.get_var_u32() as usize;
+        let value = buf.get_var_u32() as usize;
         Self {
             overlap,
             diff,
@@ -130,8 +130,9 @@ impl KeyPrefix {
 
     /// Encoded length.
     fn len(&self) -> usize {
-        // TODO: Use `varint` coding.
-        8
+        var_u32_len(self.overlap as u32)
+            + var_u32_len(self.diff as u32)
+            + var_u32_len(self.value as u32)
     }
 
     /// Get overlap len.
