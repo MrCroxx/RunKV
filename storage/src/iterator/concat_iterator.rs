@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use super::{Iterator, Seek};
+use super::{BinarySeekableIterator, Iterator, Seek};
 use crate::Result;
 
 pub struct ConcatIterator {
@@ -100,19 +100,39 @@ impl Iterator for ConcatIterator {
                 self.iters[self.offset].seek(Seek::Last).await
             }
             Seek::Random(key) => {
-                // TODO: Impl binary search seek.
-                for i in 0..self.iters.len() {
-                    self.offset = i;
-                    println!("seek in : {}", i);
+                self.binary_seek(key).await?;
+                println!("offset: {}", self.offset);
+                if self.offset >= self.iters.len() {
+                    self.invalid();
+                } else {
                     self.iters[self.offset].seek(Seek::Random(key)).await?;
-                    if self.iters[self.offset].is_valid() {
-                        return Ok(());
+                    if !self.iters[self.offset].is_valid() {
+                        // Move to the first entry of the next inner iter.
+                        self.offset += 1;
+                        if self.offset < self.iters.len() {
+                            self.iters[self.offset].seek(Seek::First).await?;
+                        } else {
+                            self.invalid();
+                        }
                     }
                 }
-                self.invalid();
                 Ok(())
             }
         }
+    }
+}
+
+impl BinarySeekableIterator for ConcatIterator {
+    fn len(&self) -> usize {
+        self.iters.len()
+    }
+
+    fn get_mut(&mut self, index: usize) -> &mut Box<dyn Iterator> {
+        &mut self.iters[index]
+    }
+
+    fn set_offset(&mut self, index: usize) {
+        self.offset = index;
     }
 }
 

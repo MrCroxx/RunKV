@@ -95,3 +95,53 @@ pub trait Iterator: Send + Sync {
     ///   before starting iteration.
     async fn seek<'s>(&mut self, position: Seek<'s>) -> Result<()>;
 }
+
+#[async_trait]
+trait BinarySeekableIterator: Iterator {
+    async fn binary_seek(&mut self, key: &[u8]) -> Result<()> {
+        let res = self.binary_seek_inner(key).await?;
+        println!("res: {:?}", res);
+        let index = match res {
+            Ok(i) => i,
+            Err(i) => i.saturating_sub(1),
+        };
+        self.set_offset(index);
+        Ok(())
+    }
+
+    async fn binary_seek_inner(&mut self, key: &[u8]) -> Result<std::result::Result<usize, usize>> {
+        let mut size = self.len();
+        let mut left = 0;
+        let mut right = size;
+        while left < right {
+            use std::cmp::Ordering::*;
+            let mid = left + size / 2;
+            println!("mid: {}", mid);
+            let iter_mid = self.get_mut(mid);
+            iter_mid.seek(Seek::Random(key)).await?;
+            println!("cmp");
+            let cmp = if iter_mid.is_valid() {
+                println!("valid");
+                iter_mid.key().cmp(key)
+            } else {
+                println!("invalid");
+                Less
+            };
+            println!("cmp: {:?}", cmp);
+            match cmp {
+                Less => left = mid + 1,
+                Equal => return Ok(Ok(mid)),
+                Greater => right = mid,
+            }
+
+            size = right - left;
+        }
+        Ok(Err(left))
+    }
+
+    fn len(&self) -> usize;
+
+    fn get_mut(&mut self, index: usize) -> &mut Box<dyn Iterator>;
+
+    fn set_offset(&mut self, index: usize);
+}
