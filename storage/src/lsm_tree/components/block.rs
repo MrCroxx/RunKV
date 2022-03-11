@@ -5,15 +5,11 @@ use std::ops::{Range, RangeBounds};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use lz4::Decoder;
 
-use super::key_diff;
+use super::{key_diff, DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_COUNT};
 use crate::lsm_tree::utils::{
     crc32check, crc32sum, var_u32_len, BufExt, BufMutExt, CompressionAlgorighm,
 };
 use crate::{Error, Result};
-
-pub const DEFAULT_BLOCK_SIZE: usize = 64 * 1024; // 64KiB
-pub const DEFAULT_RESTART_COUNT: usize = 16;
-pub const DEFAULT_ENTRY_SIZE: usize = 1024; // 1 KiB
 
 pub struct Block {
     /// Uncompressed entries data.
@@ -34,7 +30,7 @@ impl Block {
         let compression = CompressionAlgorighm::decode(&mut &buf[buf.len() - 5..buf.len() - 4])?;
         let buf = match compression {
             CompressionAlgorighm::None => buf.slice(..buf.len() - 5),
-            CompressionAlgorighm::LZ4 => {
+            CompressionAlgorighm::Lz4 => {
                 let mut decoder = Decoder::new(buf.reader())
                     .map_err(Error::decode_error)
                     .unwrap();
@@ -264,7 +260,7 @@ impl BlockBuilder {
         self.buf.put_u32_le(self.restart_points.len() as u32);
         let mut buf = match self.compression_algorithm {
             CompressionAlgorighm::None => self.buf,
-            CompressionAlgorighm::LZ4 => {
+            CompressionAlgorighm::Lz4 => {
                 let mut encoder = lz4::EncoderBuilder::new()
                     .level(4)
                     .build(BytesMut::with_capacity(self.buf.len()).writer())
@@ -302,10 +298,10 @@ mod tests {
     async fn test_block_enc_dec() {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
-        builder.add(&full_key(b"k1", 1), b"v1");
-        builder.add(&full_key(b"k2", 2), b"v2");
-        builder.add(&full_key(b"k3", 3), b"v3");
-        builder.add(&full_key(b"k4", 4), b"v4");
+        builder.add(&full_key(b"k1", 1), b"v01");
+        builder.add(&full_key(b"k2", 2), b"v02");
+        builder.add(&full_key(b"k3", 3), b"v03");
+        builder.add(&full_key(b"k4", 4), b"v04");
         let buf = builder.build();
         let block = Arc::new(Block::decode(buf).unwrap());
         let mut bi = BlockIterator::new(block);
@@ -313,22 +309,22 @@ mod tests {
         bi.seek(Seek::First).await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k1", 1)[..], bi.key());
-        assert_eq!(b"v1", bi.value());
+        assert_eq!(b"v01", bi.value());
 
         bi.next().await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k2", 2)[..], bi.key());
-        assert_eq!(b"v2", bi.value());
+        assert_eq!(b"v02", bi.value());
 
         bi.next().await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k3", 3)[..], bi.key());
-        assert_eq!(b"v3", bi.value());
+        assert_eq!(b"v03", bi.value());
 
         bi.next().await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k4", 4)[..], bi.key());
-        assert_eq!(b"v4", bi.value());
+        assert_eq!(b"v04", bi.value());
 
         bi.next().await.unwrap();
         assert!(!bi.is_valid());
@@ -337,14 +333,14 @@ mod tests {
     #[tokio::test]
     async fn test_compressed_block_enc_dec() {
         let options = BlockBuilderOptions {
-            compression_algorithm: CompressionAlgorighm::LZ4,
+            compression_algorithm: CompressionAlgorighm::Lz4,
             ..Default::default()
         };
         let mut builder = BlockBuilder::new(options);
-        builder.add(&full_key(b"k1", 1), b"v1");
-        builder.add(&full_key(b"k2", 2), b"v2");
-        builder.add(&full_key(b"k3", 3), b"v3");
-        builder.add(&full_key(b"k4", 4), b"v4");
+        builder.add(&full_key(b"k1", 1), b"v01");
+        builder.add(&full_key(b"k2", 2), b"v02");
+        builder.add(&full_key(b"k3", 3), b"v03");
+        builder.add(&full_key(b"k4", 4), b"v04");
         let buf = builder.build();
         let block = Arc::new(Block::decode(buf).unwrap());
         let mut bi = BlockIterator::new(block);
@@ -352,22 +348,22 @@ mod tests {
         bi.seek(Seek::First).await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k1", 1)[..], bi.key());
-        assert_eq!(b"v1", bi.value());
+        assert_eq!(b"v01", bi.value());
 
         bi.next().await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k2", 2)[..], bi.key());
-        assert_eq!(b"v2", bi.value());
+        assert_eq!(b"v02", bi.value());
 
         bi.next().await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k3", 3)[..], bi.key());
-        assert_eq!(b"v3", bi.value());
+        assert_eq!(b"v03", bi.value());
 
         bi.next().await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k4", 4)[..], bi.key());
-        assert_eq!(b"v4", bi.value());
+        assert_eq!(b"v04", bi.value());
 
         bi.next().await.unwrap();
         assert!(!bi.is_valid());
