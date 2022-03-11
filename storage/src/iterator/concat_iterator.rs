@@ -61,6 +61,52 @@ impl ConcatIterator {
             }
         }
     }
+
+    async fn binary_seek(&mut self, key: &[u8]) -> Result<()> {
+        let offset = self.binary_seek_inner(key).await?;
+        if offset >= self.iters.len() {
+            self.invalid();
+            return Ok(());
+        }
+        self.iters[offset].seek(Seek::Random(key)).await?;
+        if self.iters[offset].is_valid() {
+            self.offset = offset;
+        } else {
+            // Move to the first entry of the next inner iter.
+            self.offset = offset + 1;
+            if self.offset < self.iters.len() {
+                self.iters[self.offset].seek(Seek::First).await?;
+            } else {
+                // No more valid entry, set invalid state.
+                self.invalid()
+            }
+        }
+        Ok(())
+    }
+
+    async fn binary_seek_inner(&mut self, key: &[u8]) -> Result<usize> {
+        let mut size = self.iters.len();
+        let mut left = 0;
+        let mut right = size;
+        while left < right {
+            use std::cmp::Ordering::*;
+            let mid = left + size / 2;
+            let iter = &mut self.iters[mid];
+            iter.seek(Seek::Random(key)).await?;
+            let cmp = if iter.is_valid() {
+                iter.key().cmp(key)
+            } else {
+                Less
+            };
+            match cmp {
+                Less => left = mid + 1,
+                Equal => return Ok(mid),
+                Greater => right = mid,
+            }
+            size = right - left;
+        }
+        Ok(left.saturating_sub(1))
+    }
 }
 
 #[async_trait]
@@ -99,19 +145,7 @@ impl Iterator for ConcatIterator {
                 self.offset = self.iters.len() - 1;
                 self.iters[self.offset].seek(Seek::Last).await
             }
-            Seek::Random(key) => {
-                // TODO: Impl binary search seek.
-                for i in 0..self.iters.len() {
-                    self.offset = i;
-                    println!("seek in : {}", i);
-                    self.iters[self.offset].seek(Seek::Random(key)).await?;
-                    if self.iters[self.offset].is_valid() {
-                        return Ok(());
-                    }
-                }
-                self.invalid();
-                Ok(())
-            }
+            Seek::Random(key) => self.binary_seek(key).await,
         }
     }
 }
