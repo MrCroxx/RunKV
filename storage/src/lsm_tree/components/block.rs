@@ -5,12 +5,12 @@ use std::ops::{Range, RangeBounds};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use lz4::Decoder;
 
-use super::{
-    key_diff, DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL,
-    TEST_DEFAULT_RESTART_INTERVAL,
-};
+use super::key_diff;
 use crate::lsm_tree::utils::{
     crc32check, crc32sum, var_u32_len, BufExt, BufMutExt, CompressionAlgorighm,
+};
+use crate::lsm_tree::{
+    DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, TEST_DEFAULT_RESTART_INTERVAL,
 };
 use crate::{Error, Result};
 

@@ -2,11 +2,11 @@ use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-use super::{
+use crate::lsm_tree::utils::{crc32check, crc32sum, CompressionAlgorighm};
+use crate::lsm_tree::{
     DEFAULT_BLOCK_SIZE, DEFAULT_BLOOM_FALSE_POSITIVE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL,
     DEFAULT_SSTABLE_META_SIZE, DEFAULT_SSTABLE_SIZE, TEST_DEFAULT_RESTART_INTERVAL,
 };
-use crate::lsm_tree::utils::{crc32check, crc32sum, CompressionAlgorighm};
 use crate::{full_key, BlockBuilder, BlockBuilderOptions, Bloom, Result};
 
 /// [`BlockMeta`] contains block metadata, served as a part of [`Sstable`] meta.

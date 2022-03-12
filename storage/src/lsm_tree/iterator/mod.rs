@@ -1,9 +1,11 @@
 mod block_iterator;
 mod concat_iterator;
+mod sstable_iterator;
 
 use async_trait::async_trait;
 pub use block_iterator::*;
 pub use concat_iterator::*;
+pub use sstable_iterator::*;
 
 use crate::Result;
 

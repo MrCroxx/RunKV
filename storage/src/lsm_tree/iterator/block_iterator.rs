@@ -25,7 +25,7 @@ impl BlockIterator {
     pub fn new(block: Arc<Block>) -> Self {
         Self {
             block,
-            offset: 0,
+            offset: usize::MAX,
             key: BytesMut::default(),
             value: Bytes::default(),
             entry_len: 0,

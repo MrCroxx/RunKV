@@ -8,6 +8,7 @@ use crate::object_store::ObjectStoreRef;
 use crate::{Error, Result, SstableMeta};
 
 // TODO: Define policy based on use cases (read / comapction / ...).
+#[derive(Clone, Copy)]
 pub enum CachePolicy {
     Disable,
     Fill,
@@ -15,10 +16,10 @@ pub enum CachePolicy {
 }
 
 pub struct SstableStoreOptions {
-    path: String,
-    object_store: ObjectStoreRef,
-    block_cache: BlockCache,
-    meta_cache_capacity: usize,
+    pub path: String,
+    pub object_store: ObjectStoreRef,
+    pub block_cache: BlockCache,
+    pub meta_cache_capacity: usize,
 }
 
 pub struct SstableStore {
@@ -39,11 +40,11 @@ impl SstableStore {
     }
 
     pub async fn put(&self, sst: &Sstable, data: Bytes, policy: CachePolicy) -> Result<()> {
-        let data_path = self.get_sst_data_path(sst.id);
+        let data_path = self.data_path(sst.id);
         self.object_store.put(&data_path, data.clone()).await?;
 
         let meta = sst.meta.encode();
-        let meta_path = self.get_sst_meta_path(sst.id);
+        let meta_path = self.meta_path(sst.id);
         if let Err(e) = self.object_store.put(&meta_path, meta).await {
             self.object_store.remove(&data_path).await?;
             return Err(e);
@@ -76,7 +77,7 @@ impl SstableStore {
                         sst.id, block_index
                     ))
                 })?;
-            let data_path = self.get_sst_data_path(sst.id);
+            let data_path = self.data_path(sst.id);
             let block_data = self
                 .object_store
                 .get_range(&data_path, block_meta.data_range())
@@ -103,18 +104,18 @@ impl SstableStore {
         if let Some(meta) = self.meta_cache.get(&sst_id) {
             return Ok(meta);
         }
-        let path = self.get_sst_meta_path(sst_id);
+        let path = self.meta_path(sst_id);
         let buf = self.object_store.get(&path).await?;
         let meta = SstableMeta::decode(buf);
         self.meta_cache.insert(sst_id, meta.clone()).await;
         Ok(meta)
     }
 
-    pub fn get_sst_meta_path(&self, sst_id: u64) -> String {
+    pub fn meta_path(&self, sst_id: u64) -> String {
         format!("{}/{}.meta", self.path, sst_id)
     }
 
-    pub fn get_sst_data_path(&self, sst_id: u64) -> String {
+    pub fn data_path(&self, sst_id: u64) -> String {
         format!("{}/{}.data", self.path, sst_id)
     }
 
@@ -129,8 +130,8 @@ pub type SstableStoreRef = Arc<SstableStore>;
 mod tests {
 
     use super::*;
-    use crate::lsm_tree::components::TEST_DEFAULT_RESTART_INTERVAL;
     use crate::lsm_tree::utils::CompressionAlgorighm;
+    use crate::lsm_tree::TEST_DEFAULT_RESTART_INTERVAL;
     use crate::{MemObjectStore, SstableBuilder, SstableBuilderOptions};
 
     fn build_sstable_for_test() -> (SstableMeta, Bytes) {
