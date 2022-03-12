@@ -1,13 +1,16 @@
-use bytes::{BufMut, Bytes, BytesMut};
+use std::ops::Range;
+
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 use super::{
-    DEFAULT_BLOCK_SIZE, DEFAULT_BLOOM_FALSE_POSITIVE, DEFAULT_ENTRY_SIZE, DEFAULT_SSTABLE_SIZE,
+    DEFAULT_BLOCK_SIZE, DEFAULT_BLOOM_FALSE_POSITIVE, DEFAULT_ENTRY_SIZE,
+    DEFAULT_SSTABLE_META_SIZE, DEFAULT_SSTABLE_SIZE,
 };
-use crate::lsm_tree::utils::CompressionAlgorighm;
+use crate::lsm_tree::utils::{crc32check, crc32sum, CompressionAlgorighm};
 use crate::{full_key, BlockBuilder, BlockBuilderOptions, Bloom, Result};
 
 /// [`BlockMeta`] contains block metadata, served as a part of [`Sstable`] meta.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct BlockMeta {
     pub offset: usize,
     pub len: usize,
@@ -15,18 +18,93 @@ pub struct BlockMeta {
     pub last_key: Bytes,
 }
 
+impl BlockMeta {
+    /// Format:
+    ///
+    /// ```plain
+    /// | offset (4B) | len (4B) | first key len (4B) | last key len(4B) | first key | last key |
+    /// ```
+    pub fn encode(&self, buf: &mut impl BufMut) {
+        buf.put_u32_le(self.offset as u32);
+        buf.put_u32_le(self.len as u32);
+        buf.put_u32_le(self.first_key.len() as u32);
+        buf.put_u32_le(self.last_key.len() as u32);
+        buf.put_slice(&self.first_key);
+        buf.put_slice(&self.last_key);
+    }
+
+    pub fn decode(buf: &mut impl Buf) -> Self {
+        let offset = buf.get_u32_le() as usize;
+        let len = buf.get_u32_le() as usize;
+        let first_key_len = buf.get_u32_le() as usize;
+        let last_key_len = buf.get_u32_le() as usize;
+        let buf = buf.copy_to_bytes(first_key_len + last_key_len);
+        assert_eq!(buf.len(), first_key_len + last_key_len);
+        let first_key = buf.slice(..first_key_len);
+        let last_key = buf.slice(first_key_len..);
+        Self {
+            offset,
+            len,
+            first_key,
+            last_key,
+        }
+    }
+
+    pub fn data_range(&self) -> Range<usize> {
+        self.offset..self.offset + self.len
+    }
+}
+
 /// [`Sstable`] serves as a handle to retrieve actuall sstable data from the object store.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Sstable {
     pub id: u64,
     pub meta: SstableMeta,
 }
 
 /// [`SstableMeta`] contains sstable metadata.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SstableMeta {
     pub block_metas: Vec<BlockMeta>,
     pub bloom_filter: Vec<u8>,
+}
+
+impl SstableMeta {
+    /// Format:
+    ///
+    /// ```plain
+    /// | checksum (4B) | N (4B) | block meta 0 | ... | block meta N-1 |
+    /// | bloom filter len (4B) | bloom filter |
+    /// ```
+    pub fn encode(&self) -> Bytes {
+        let mut buf = BytesMut::with_capacity(DEFAULT_SSTABLE_META_SIZE);
+        buf.put_u32_le(0); // Reserved for checksum.
+        buf.put_u32_le(self.block_metas.len() as u32);
+        for block_meta in &self.block_metas {
+            block_meta.encode(&mut buf);
+        }
+        buf.put_u32_le(self.bloom_filter.len() as u32);
+        buf.put_slice(&self.bloom_filter);
+        let checksum = crc32sum(&buf[4..]);
+        (&mut buf[..4]).put_u32_le(checksum);
+        buf.freeze()
+    }
+
+    pub fn decode(mut buf: Bytes) -> Self {
+        let checksum = buf.get_u32_le();
+        crc32check(&buf, checksum);
+        let block_metas_len = buf.get_u32_le() as usize;
+        let mut block_metas = Vec::with_capacity(block_metas_len);
+        for _ in 0..block_metas_len {
+            block_metas.push(BlockMeta::decode(&mut buf));
+        }
+        let bloom_filter_len = buf.get_u32_le() as usize;
+        let bloom_filter = buf.copy_to_bytes(bloom_filter_len).to_vec();
+        Self {
+            block_metas,
+            bloom_filter,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -156,7 +234,7 @@ impl SstableBuilder {
         }
         let mut block_meta = self.block_metas.last_mut().unwrap();
         let block = self.block_builder.take().unwrap().build();
-        self.buf.put(&block[..]);
+        self.buf.put_slice(&block);
         block_meta.last_key = self.last_full_key.clone();
         block_meta.len = self.buf.len() - block_meta.offset;
         self.last_full_key.clear();
@@ -267,5 +345,33 @@ mod tests {
         assert_eq!(b"v05", bi.value());
         bi.next().await.unwrap();
         assert!(!bi.is_valid());
+    }
+
+    #[test]
+    fn test_sstable_meta_enc_dec() {
+        let options = SstableBuilderOptions {
+            capacity: 1024,
+            block_capacity: 32,
+            bloom_false_positive: 0.1,
+            compression_algorithm: CompressionAlgorighm::None,
+        };
+        let mut builder = SstableBuilder::new(options);
+        builder.add(b"k01", 1, b"v01").unwrap();
+        builder.add(b"k02", 2, b"v02").unwrap();
+        builder.add(b"k04", 4, b"v04").unwrap();
+        builder.add(b"k05", 5, b"v05").unwrap();
+        let (meta, _) = builder.build().unwrap();
+        let buf = meta.encode();
+        let decoded_meta = SstableMeta::decode(buf);
+        assert_eq!(meta.block_metas.len(), decoded_meta.block_metas.len());
+        for (block_meta, decoded_block_meta) in
+            meta.block_metas.iter().zip(decoded_meta.block_metas.iter())
+        {
+            assert_eq!(block_meta.offset, decoded_block_meta.offset);
+            assert_eq!(block_meta.len, decoded_block_meta.len);
+            assert_eq!(block_meta.first_key, decoded_block_meta.first_key);
+            assert_eq!(block_meta.last_key, decoded_block_meta.last_key);
+        }
+        assert_eq!(meta.bloom_filter, decoded_meta.bloom_filter);
     }
 }

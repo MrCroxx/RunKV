@@ -1,12 +1,14 @@
 #[cfg(test)]
 mod mem;
+#[cfg(test)]
+pub use mem::*;
 mod s3;
-
 use std::ops::Range;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+pub use s3::*;
 
 use crate::Result;
 

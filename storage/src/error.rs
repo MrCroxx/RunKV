@@ -8,6 +8,8 @@ pub enum Error {
     DecodeError(String),
     #[error("object store error: {0}")]
     ObjectStoreError(#[from] ObjectStoreError),
+    #[error("other: {0}")]
+    Other(String),
 }
 
 impl Error {
