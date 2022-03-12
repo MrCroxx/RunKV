@@ -1,11 +1,11 @@
 use async_trait::async_trait;
 
 use super::{Iterator, Seek};
-use crate::Result;
+use crate::{BoxedIterator, Result};
 
 pub struct ConcatIterator {
     /// Iterators to concat.
-    iters: Vec<Box<dyn Iterator>>,
+    iters: Vec<BoxedIterator>,
     /// Current iterator index.
     ///
     /// Note: If [`ConcatIterator`] is valid, current iterator must be valid, too.
@@ -14,7 +14,7 @@ pub struct ConcatIterator {
 
 impl ConcatIterator {
     /// Note: Input iterators must be in ASC order.
-    pub fn new(iters: Vec<Box<dyn Iterator>>) -> Self {
+    pub fn new(iters: Vec<BoxedIterator>) -> Self {
         Self {
             iters,
             offset: usize::MAX,
@@ -137,8 +137,8 @@ impl Iterator for ConcatIterator {
         self.offset < self.iters.len()
     }
 
-    async fn seek<'s>(&mut self, position: Seek<'s>) -> Result<()> {
-        match position {
+    async fn seek<'s>(&mut self, seek: Seek<'s>) -> Result<()> {
+        match seek {
             Seek::First => {
                 self.offset = 0;
                 self.iters[self.offset].seek(Seek::First).await

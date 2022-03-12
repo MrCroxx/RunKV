@@ -1,3 +1,5 @@
+#![feature(drain_filter)]
+
 mod error;
 pub use error::*;
 mod lsm_tree;

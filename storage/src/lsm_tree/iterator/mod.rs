@@ -1,10 +1,12 @@
 mod block_iterator;
 mod concat_iterator;
+mod merge_iterator;
 mod sstable_iterator;
 
 use async_trait::async_trait;
 pub use block_iterator::*;
 pub use concat_iterator::*;
+pub use merge_iterator::*;
 pub use sstable_iterator::*;
 
 use crate::Result;
@@ -95,5 +97,27 @@ pub trait Iterator: Send + Sync {
     /// - Do not decide whether the position is valid or not by checking the returned error of this
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
-    async fn seek<'s>(&mut self, position: Seek<'s>) -> Result<()>;
+    async fn seek<'s>(&mut self, seek: Seek<'s>) -> Result<()>;
+}
+
+pub type BoxedIterator = Box<dyn Iterator>;
+
+impl PartialEq for BoxedIterator {
+    fn eq(&self, other: &Self) -> bool {
+        self.key() == other.key()
+    }
+}
+
+impl Eq for BoxedIterator {}
+
+impl PartialOrd for BoxedIterator {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for BoxedIterator {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.key().cmp(other.key())
+    }
 }
