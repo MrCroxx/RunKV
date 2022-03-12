@@ -1,7 +1,10 @@
+use std::ops::Range;
+
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 use super::{
-    DEFAULT_BLOCK_SIZE, DEFAULT_BLOOM_FALSE_POSITIVE, DEFAULT_ENTRY_SIZE, DEFAULT_SSTABLE_SIZE,
+    DEFAULT_BLOCK_SIZE, DEFAULT_BLOOM_FALSE_POSITIVE, DEFAULT_ENTRY_SIZE,
+    DEFAULT_SSTABLE_META_SIZE, DEFAULT_SSTABLE_SIZE,
 };
 use crate::lsm_tree::utils::{crc32check, crc32sum, CompressionAlgorighm};
 use crate::{full_key, BlockBuilder, BlockBuilderOptions, Bloom, Result};
@@ -46,6 +49,10 @@ impl BlockMeta {
             last_key,
         }
     }
+
+    pub fn data_range(&self) -> Range<usize> {
+        self.offset..self.offset + self.len
+    }
 }
 
 /// [`Sstable`] serves as a handle to retrieve actuall sstable data from the object store.
@@ -70,7 +77,7 @@ impl SstableMeta {
     /// | bloom filter len (4B) | bloom filter |
     /// ```
     pub fn encode(&self) -> Bytes {
-        let mut buf = BytesMut::with_capacity(4096);
+        let mut buf = BytesMut::with_capacity(DEFAULT_SSTABLE_META_SIZE);
         buf.put_u32_le(0); // Reserved for checksum.
         buf.put_u32_le(self.block_metas.len() as u32);
         for block_meta in &self.block_metas {
