@@ -17,18 +17,18 @@ impl BlockCache {
         }
     }
 
-    pub fn get(&self, sst_id: u64, block_idx: u64) -> Option<Arc<Block>> {
+    pub fn get(&self, sst_id: u64, block_idx: usize) -> Option<Arc<Block>> {
         self.inner.get(&Self::key(sst_id, block_idx))
     }
 
-    pub async fn insert(&self, sst_id: u64, block_idx: u64, block: Arc<Block>) {
+    pub async fn insert(&self, sst_id: u64, block_idx: usize, block: Arc<Block>) {
         self.inner.insert(Self::key(sst_id, block_idx), block).await
     }
 
     pub async fn get_or_insert_with<F>(
         &self,
         sst_id: u64,
-        block_idx: u64,
+        block_idx: usize,
         f: F,
     ) -> Result<Arc<Block>>
     where
@@ -44,10 +44,10 @@ impl BlockCache {
         }
     }
 
-    fn key(sst_id: u64, block_idx: u64) -> Bytes {
+    fn key(sst_id: u64, block_idx: usize) -> Bytes {
         let mut key = BytesMut::with_capacity(16);
         key.put_u64_le(sst_id);
-        key.put_u64_le(block_idx);
+        key.put_u64_le(block_idx as u64);
         key.freeze()
     }
 }

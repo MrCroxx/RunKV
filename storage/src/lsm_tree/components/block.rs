@@ -94,6 +94,11 @@ impl Block {
     pub fn slice(&self, range: impl RangeBounds<usize>) -> Bytes {
         self.data.slice(range)
     }
+
+    #[cfg(test)]
+    pub fn raw(&self) -> Bytes {
+        self.data.clone()
+    }
 }
 
 /// [`KeyPrefix`] contains info for prefix compression.
