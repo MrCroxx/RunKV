@@ -39,19 +39,18 @@ impl MergeIterator {
         }
     }
 
-    fn may_rebuild_heap(&mut self, direction: Direction) {
+    async fn may_rebuild_heap(&mut self, direction: Direction) -> Result<()> {
         if self.direction == direction {
-            return;
+            return Ok(());
         }
+        let key = self.key().to_vec();
         self.direction = direction;
         self.iters.extend(self.min_heap.drain().map(|r| r.0));
         self.iters.extend(self.max_heap.drain());
-        println!("all iters:");
-        for iter in self.iters.iter() {
-            if iter.is_valid() {
-                println!("{:?}", iter.key());
-            } else {
-                println!("invalid");
+        for iter in self.iters.iter_mut() {
+            match self.direction {
+                Direction::Forward => iter.seek(Seek::RandomForward(&key)).await?,
+                Direction::Backward => iter.seek(Seek::RandomBackward(&key)).await?,
             }
         }
         match self.direction {
@@ -63,10 +62,11 @@ impl MergeIterator {
                 .max_heap
                 .extend(self.iters.drain_filter(|iter| iter.is_valid())),
         }
+        Ok(())
     }
 
     async fn next_inner(&mut self) -> Result<()> {
-        self.may_rebuild_heap(Direction::Forward);
+        self.may_rebuild_heap(Direction::Forward).await?;
         let mut iter = self.min_heap.peek_mut().unwrap();
         iter.0.next().await?;
         if !iter.0.is_valid() {
@@ -77,7 +77,7 @@ impl MergeIterator {
     }
 
     async fn prev_inner(&mut self) -> Result<()> {
-        self.may_rebuild_heap(Direction::Backward);
+        self.may_rebuild_heap(Direction::Backward).await?;
         let mut iter = self.max_heap.peek_mut().unwrap();
         iter.prev().await?;
         if !iter.is_valid() {
@@ -145,16 +145,27 @@ impl Iterator for MergeIterator {
                     self.max_heap.push(iter);
                 }
             }
-            Seek::Random(key) => {
-                // TODO: Assume forward for now.
+            Seek::RandomForward(key) => {
                 self.direction = Direction::Forward;
                 self.iters.extend(self.min_heap.drain().map(|r| r.0));
                 self.iters.extend(self.max_heap.drain());
                 while !self.iters.is_empty() {
                     let mut iter = self.iters.pop_back().unwrap();
-                    iter.seek(Seek::Random(key)).await?;
+                    iter.seek(Seek::RandomForward(key)).await?;
                     if iter.is_valid() {
                         self.min_heap.push(Reverse(iter));
+                    }
+                }
+            }
+            Seek::RandomBackward(key) => {
+                self.direction = Direction::Backward;
+                self.iters.extend(self.min_heap.drain().map(|r| r.0));
+                self.iters.extend(self.max_heap.drain());
+                while !self.iters.is_empty() {
+                    let mut iter = self.iters.pop_back().unwrap();
+                    iter.seek(Seek::RandomBackward(key)).await?;
+                    if iter.is_valid() {
+                        self.max_heap.push(iter);
                     }
                 }
             }
@@ -214,7 +225,7 @@ mod tests {
     #[tokio::test]
     async fn test_seek_random() {
         let mut mi = build_iterator_for_test();
-        mi.seek(Seek::Random(&full_key(b"k06", 6)[..]))
+        mi.seek(Seek::RandomForward(&full_key(b"k06", 6)[..]))
             .await
             .unwrap();
         assert!(mi.is_valid());
@@ -225,7 +236,7 @@ mod tests {
     #[tokio::test]
     async fn test_seek_none_front() {
         let mut mi = build_iterator_for_test();
-        mi.seek(Seek::Random(&full_key(b"k00", 0)[..]))
+        mi.seek(Seek::RandomForward(&full_key(b"k00", 0)[..]))
             .await
             .unwrap();
         assert!(mi.is_valid());
@@ -236,7 +247,7 @@ mod tests {
     #[tokio::test]
     async fn test_seek_none_middle() {
         let mut mi = build_iterator_for_test();
-        mi.seek(Seek::Random(&full_key(b"k04", 4)[..]))
+        mi.seek(Seek::RandomForward(&full_key(b"k04", 4)[..]))
             .await
             .unwrap();
         assert!(mi.is_valid());
@@ -247,7 +258,7 @@ mod tests {
     #[tokio::test]
     async fn test_seek_none_back() {
         let mut mi = build_iterator_for_test();
-        mi.seek(Seek::Random(&full_key(b"k12", 12)[..]))
+        mi.seek(Seek::RandomForward(&full_key(b"k12", 12)[..]))
             .await
             .unwrap();
         assert!(!mi.is_valid());
@@ -287,32 +298,39 @@ mod tests {
         assert!(!mi.is_valid())
     }
 
-    // FIXME: #26 #25
-    // #[tokio::test]
-    // async fn test_seek_forward_backward_iterate() {
-    //     let mut mi = build_iterator_for_test();
+    #[tokio::test]
+    async fn test_seek_forward_backward_iterate() {
+        let mut mi = build_iterator_for_test();
 
-    //     mi.seek(Seek::Random(&full_key(b"k06", 6)[..]))
-    //         .await
-    //         .unwrap();
-    //     assert_eq!(&full_key(format!("k{:02}", 6).as_bytes(), 6)[..], mi.key());
+        mi.seek(Seek::RandomForward(&full_key(b"k06", 6)[..]))
+            .await
+            .unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 6).as_bytes(), 6)[..], mi.key());
 
-    //     mi.next().await.unwrap();
-    //     assert_eq!(&full_key(format!("k{:02}", 7).as_bytes(), 7)[..], mi.key());
+        mi.prev().await.unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 5).as_bytes(), 5)[..], mi.key());
 
-    //     mi.prev().await.unwrap();
-    //     assert_eq!(&full_key(format!("k{:02}", 6).as_bytes(), 6)[..], mi.key());
+        mi.prev().await.unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 3).as_bytes(), 3)[..], mi.key());
 
-    //     mi.prev().await.unwrap();
-    //     assert_eq!(&full_key(format!("k{:02}", 5).as_bytes(), 5)[..], mi.key());
+        mi.next().await.unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 5).as_bytes(), 5)[..], mi.key());
 
-    //     mi.prev().await.unwrap();
-    //     assert_eq!(&full_key(format!("k{:02}", 3).as_bytes(), 3)[..], mi.key());
+        mi.next().await.unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 6).as_bytes(), 6)[..], mi.key());
+    }
 
-    //     mi.next().await.unwrap();
-    //     assert_eq!(&full_key(format!("k{:02}", 5).as_bytes(), 5)[..], mi.key());
+    #[tokio::test]
+    async fn bi_direction_seek() {
+        let mut mi = build_iterator_for_test();
+        mi.seek(Seek::RandomForward(&full_key(b"k04", 4)[..]))
+            .await
+            .unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 5).as_bytes(), 5)[..], mi.key());
 
-    //     mi.next().await.unwrap();
-    //     assert_eq!(&full_key(format!("k{:02}", 6).as_bytes(), 6)[..], mi.key());
-    // }
+        mi.seek(Seek::RandomBackward(&full_key(b"k04", 4)[..]))
+            .await
+            .unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 3).as_bytes(), 3)[..], mi.key());
+    }
 }

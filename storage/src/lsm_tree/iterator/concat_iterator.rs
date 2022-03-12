@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use async_trait::async_trait;
 
 use super::{Iterator, Seek};
@@ -64,13 +66,21 @@ impl ConcatIterator {
         }
     }
 
+    /// Move backward until the position that the given `key` can be inserted in DESC order or EOF.
+    async fn prev_until_key(&mut self, key: &[u8]) -> Result<()> {
+        while self.is_valid() && self.key().cmp(key) == Ordering::Greater {
+            self.prev_inner().await?;
+        }
+        Ok(())
+    }
+
     async fn binary_seek(&mut self, key: &[u8]) -> Result<()> {
         let offset = self.binary_seek_inner(key).await?;
         if offset >= self.iters.len() {
             self.invalid();
             return Ok(());
         }
-        self.iters[offset].seek(Seek::Random(key)).await?;
+        self.iters[offset].seek(Seek::RandomForward(key)).await?;
         if self.iters[offset].is_valid() {
             self.offset = offset;
         } else {
@@ -94,7 +104,7 @@ impl ConcatIterator {
             use std::cmp::Ordering::*;
             let mid = left + size / 2;
             let iter = &mut self.iters[mid];
-            iter.seek(Seek::Random(key)).await?;
+            iter.seek(Seek::RandomForward(key)).await?;
             let cmp = if iter.is_valid() {
                 iter.key().cmp(key)
             } else {
@@ -147,7 +157,11 @@ impl Iterator for ConcatIterator {
                 self.offset = self.iters.len() - 1;
                 self.iters[self.offset].seek(Seek::Last).await
             }
-            Seek::Random(key) => self.binary_seek(key).await,
+            Seek::RandomForward(key) => self.binary_seek(key).await,
+            Seek::RandomBackward(key) => {
+                self.binary_seek(key).await?;
+                self.prev_until_key(key).await
+            }
         }
     }
 }
@@ -204,7 +218,7 @@ mod tests {
     #[tokio::test]
     async fn test_seek_random() {
         let mut ci = build_iterator_for_test();
-        ci.seek(Seek::Random(&full_key(b"k06", 6)[..]))
+        ci.seek(Seek::RandomForward(&full_key(b"k06", 6)[..]))
             .await
             .unwrap();
         assert!(ci.is_valid());
@@ -215,7 +229,7 @@ mod tests {
     #[tokio::test]
     async fn test_seek_none_front() {
         let mut ci = build_iterator_for_test();
-        ci.seek(Seek::Random(&full_key(b"k00", 0)[..]))
+        ci.seek(Seek::RandomForward(&full_key(b"k00", 0)[..]))
             .await
             .unwrap();
         assert!(ci.is_valid());
@@ -226,7 +240,7 @@ mod tests {
     #[tokio::test]
     async fn test_seek_none_middle() {
         let mut ci = build_iterator_for_test();
-        ci.seek(Seek::Random(&full_key(b"k04", 4)[..]))
+        ci.seek(Seek::RandomForward(&full_key(b"k04", 4)[..]))
             .await
             .unwrap();
         assert!(ci.is_valid());
@@ -237,7 +251,7 @@ mod tests {
     #[tokio::test]
     async fn test_seek_none_back() {
         let mut ci = build_iterator_for_test();
-        ci.seek(Seek::Random(&full_key(b"k12", 12)[..]))
+        ci.seek(Seek::RandomForward(&full_key(b"k12", 12)[..]))
             .await
             .unwrap();
         assert!(!ci.is_valid());
@@ -281,7 +295,7 @@ mod tests {
     async fn test_seek_forward_backward_iterate() {
         let mut ci = build_iterator_for_test();
 
-        ci.seek(Seek::Random(&full_key(b"k06", 6)[..]))
+        ci.seek(Seek::RandomForward(&full_key(b"k06", 6)[..]))
             .await
             .unwrap();
         assert_eq!(&full_key(format!("k{:02}", 6).as_bytes(), 6)[..], ci.key());
@@ -297,5 +311,19 @@ mod tests {
 
         ci.next().await.unwrap();
         assert_eq!(&full_key(format!("k{:02}", 6).as_bytes(), 6)[..], ci.key());
+    }
+
+    #[tokio::test]
+    async fn bi_direction_seek() {
+        let mut ci = build_iterator_for_test();
+        ci.seek(Seek::RandomForward(&full_key(b"k04", 4)[..]))
+            .await
+            .unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 5).as_bytes(), 5)[..], ci.key());
+
+        ci.seek(Seek::RandomBackward(&full_key(b"k04", 4)[..]))
+            .await
+            .unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 3).as_bytes(), 3)[..], ci.key());
     }
 }
