@@ -149,8 +149,8 @@ impl Iterator for BlockIterator {
         self.offset < self.block.len()
     }
 
-    async fn seek<'s>(&mut self, position: Seek<'s>) -> Result<()> {
-        match position {
+    async fn seek<'s>(&mut self, seek: Seek<'s>) -> Result<()> {
+        match seek {
             Seek::First => self.seek_restart_point_by_index(0),
             Seek::Last => {
                 self.seek_restart_point_by_index(self.block.restart_point_len() - 1);
