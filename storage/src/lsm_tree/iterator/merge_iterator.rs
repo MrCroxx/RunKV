@@ -46,6 +46,14 @@ impl MergeIterator {
         self.direction = direction;
         self.iters.extend(self.min_heap.drain().map(|r| r.0));
         self.iters.extend(self.max_heap.drain());
+        println!("all iters:");
+        for iter in self.iters.iter() {
+            if iter.is_valid() {
+                println!("{:?}", iter.key());
+            } else {
+                println!("invalid");
+            }
+        }
         match self.direction {
             Direction::Forward => {
                 self.min_heap
@@ -278,4 +286,33 @@ mod tests {
         }
         assert!(!mi.is_valid())
     }
+
+    // FIXME: #26 #25
+    // #[tokio::test]
+    // async fn test_seek_forward_backward_iterate() {
+    //     let mut mi = build_iterator_for_test();
+
+    //     mi.seek(Seek::Random(&full_key(b"k06", 6)[..]))
+    //         .await
+    //         .unwrap();
+    //     assert_eq!(&full_key(format!("k{:02}", 6).as_bytes(), 6)[..], mi.key());
+
+    //     mi.next().await.unwrap();
+    //     assert_eq!(&full_key(format!("k{:02}", 7).as_bytes(), 7)[..], mi.key());
+
+    //     mi.prev().await.unwrap();
+    //     assert_eq!(&full_key(format!("k{:02}", 6).as_bytes(), 6)[..], mi.key());
+
+    //     mi.prev().await.unwrap();
+    //     assert_eq!(&full_key(format!("k{:02}", 5).as_bytes(), 5)[..], mi.key());
+
+    //     mi.prev().await.unwrap();
+    //     assert_eq!(&full_key(format!("k{:02}", 3).as_bytes(), 3)[..], mi.key());
+
+    //     mi.next().await.unwrap();
+    //     assert_eq!(&full_key(format!("k{:02}", 5).as_bytes(), 5)[..], mi.key());
+
+    //     mi.next().await.unwrap();
+    //     assert_eq!(&full_key(format!("k{:02}", 6).as_bytes(), 6)[..], mi.key());
+    // }
 }
