@@ -276,4 +276,26 @@ mod tests {
         }
         assert!(!ci.is_valid())
     }
+
+    #[tokio::test]
+    async fn test_seek_forward_backward_iterate() {
+        let mut ci = build_iterator_for_test();
+
+        ci.seek(Seek::Random(&full_key(b"k06", 6)[..]))
+            .await
+            .unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 6).as_bytes(), 6)[..], ci.key());
+
+        ci.prev().await.unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 5).as_bytes(), 5)[..], ci.key());
+
+        ci.prev().await.unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 3).as_bytes(), 3)[..], ci.key());
+
+        ci.next().await.unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 5).as_bytes(), 5)[..], ci.key());
+
+        ci.next().await.unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 6).as_bytes(), 6)[..], ci.key());
+    }
 }
