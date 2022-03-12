@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use async_trait::async_trait;
 
 use super::{Iterator, Seek};
@@ -77,6 +79,14 @@ impl SstableIterator {
         Ok(())
     }
 
+    /// Move backward until the position that the given `key` can be inserted in DESC order or EOF.
+    async fn prev_until_key(&mut self, key: &[u8]) -> Result<()> {
+        while self.is_valid() && self.key().cmp(key) == Ordering::Greater {
+            self.prev_inner().await?;
+        }
+        Ok(())
+    }
+
     async fn binary_seek_inner(&mut self, key: &[u8]) -> Result<usize> {
         let mut size = self.sstable.meta.block_metas.len();
         let mut left = 0;
@@ -89,7 +99,7 @@ impl SstableIterator {
                 .block(&self.sstable, mid, self.cache_policy)
                 .await?;
             let mut iter = BlockIterator::new(block);
-            iter.seek(Seek::Random(key)).await?;
+            iter.seek(Seek::RandomForward(key)).await?;
             let cmp = if iter.is_valid() {
                 iter.key().cmp(key)
             } else {
@@ -116,7 +126,7 @@ impl SstableIterator {
             .block(&self.sstable, offset, self.cache_policy)
             .await?;
         let mut iter = BlockIterator::new(block);
-        iter.seek(Seek::Random(key)).await?;
+        iter.seek(Seek::RandomForward(key)).await?;
         if iter.is_valid() {
             self.offset = offset;
             self.iterator = Some(iter)
@@ -129,7 +139,7 @@ impl SstableIterator {
                     .block(&self.sstable, self.offset, self.cache_policy)
                     .await?;
                 let mut iter = BlockIterator::new(block);
-                iter.seek(Seek::Random(key)).await?;
+                iter.seek(Seek::RandomForward(key)).await?;
                 self.iterator = Some(iter)
             } else {
                 // No more valid entry, set invalid state.
@@ -166,8 +176,8 @@ impl Iterator for SstableIterator {
         self.offset < self.sstable.meta.block_metas.len()
     }
 
-    async fn seek<'s>(&mut self, position: Seek<'s>) -> Result<()> {
-        match position {
+    async fn seek<'s>(&mut self, seek: Seek<'s>) -> Result<()> {
+        match seek {
             Seek::First => {
                 self.offset = 0;
                 let block = self
@@ -186,7 +196,11 @@ impl Iterator for SstableIterator {
                 self.iterator = Some(BlockIterator::new(block));
                 self.iterator.as_mut().unwrap().seek(Seek::Last).await
             }
-            Seek::Random(key) => self.binary_seek(key).await,
+            Seek::RandomForward(key) => self.binary_seek(key).await,
+            Seek::RandomBackward(key) => {
+                self.binary_seek(key).await?;
+                self.prev_until_key(key).await
+            }
         }
     }
 }
@@ -265,7 +279,7 @@ mod tests {
     #[tokio::test]
     async fn test_seek_random() {
         let mut si = build_iterator_for_test().await;
-        si.seek(Seek::Random(&full_key(b"k05", 5)[..]))
+        si.seek(Seek::RandomForward(&full_key(b"k05", 5)[..]))
             .await
             .unwrap();
         assert!(si.is_valid());
@@ -276,7 +290,7 @@ mod tests {
     #[tokio::test]
     async fn test_seek_none_front() {
         let mut si = build_iterator_for_test().await;
-        si.seek(Seek::Random(&full_key(b"k00", 0)[..]))
+        si.seek(Seek::RandomForward(&full_key(b"k00", 0)[..]))
             .await
             .unwrap();
         assert!(si.is_valid());
@@ -287,7 +301,7 @@ mod tests {
     #[tokio::test]
     async fn test_seek_none_middle() {
         let mut si = build_iterator_for_test().await;
-        si.seek(Seek::Random(&full_key(b"k03", 3)[..]))
+        si.seek(Seek::RandomForward(&full_key(b"k03", 3)[..]))
             .await
             .unwrap();
         assert!(si.is_valid());
@@ -298,7 +312,7 @@ mod tests {
     #[tokio::test]
     async fn test_seek_none_back() {
         let mut si = build_iterator_for_test().await;
-        si.seek(Seek::Random(&full_key(b"k09", 9)[..]))
+        si.seek(Seek::RandomForward(&full_key(b"k09", 9)[..]))
             .await
             .unwrap();
         assert!(!si.is_valid());
@@ -342,7 +356,7 @@ mod tests {
     async fn test_seek_forward_backward_iterate() {
         let mut si = build_iterator_for_test().await;
 
-        si.seek(Seek::Random(&full_key(b"k03", 3)[..]))
+        si.seek(Seek::RandomForward(&full_key(b"k03", 3)[..]))
             .await
             .unwrap();
         assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], si.key());
@@ -352,5 +366,19 @@ mod tests {
 
         si.next().await.unwrap();
         assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], si.key());
+    }
+
+    #[tokio::test]
+    async fn bi_direction_seek() {
+        let mut si = build_iterator_for_test().await;
+        si.seek(Seek::RandomForward(&full_key(b"k03", 3)[..]))
+            .await
+            .unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], si.key());
+
+        si.seek(Seek::RandomBackward(&full_key(b"k03", 3)[..]))
+            .await
+            .unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 2).as_bytes(), 2)[..], si.key());
     }
 }

@@ -58,10 +58,17 @@ impl BlockIterator {
         self.entry_len = prefix.entry_len();
     }
 
-    /// Move forward until the position that the given `key` can be inserted in order or EOF.
+    /// Move forward until the position that the given `key` can be inserted in ASC order or EOF.
     fn next_until_key(&mut self, key: &[u8]) {
         while self.is_valid() && (&self.key[..]).cmp(key) == Ordering::Less {
             self.next_inner();
+        }
+    }
+
+    /// Move backward until the position that the given `key` can be inserted in DESC order or EOF.
+    fn prev_until_key(&mut self, key: &[u8]) {
+        while self.is_valid() && (&self.key[..]).cmp(key) == Ordering::Greater {
+            self.prev_inner();
         }
     }
 
@@ -69,7 +76,7 @@ impl BlockIterator {
     /// the last valid position if exists.
     fn next_until_next_offset(&mut self, next_offset: usize) {
         while self.offset + self.entry_len < std::cmp::min(self.block.len(), next_offset) {
-            self.next_inner()
+            self.next_inner();
         }
     }
 
@@ -156,9 +163,14 @@ impl Iterator for BlockIterator {
                 self.seek_restart_point_by_index(self.block.restart_point_len() - 1);
                 self.next_until_next_offset(self.block.len())
             }
-            Seek::Random(key) => {
+            Seek::RandomForward(key) => {
                 self.seek_restart_point_by_key(key);
                 self.next_until_key(key);
+            }
+            Seek::RandomBackward(key) => {
+                self.seek_restart_point_by_key(key);
+                self.next_until_key(key);
+                self.prev_until_key(key);
             }
         }
         Ok(())
@@ -202,7 +214,7 @@ mod tests {
     #[tokio::test]
     async fn test_seek_random() {
         let mut bi = build_iterator_for_test();
-        bi.seek(Seek::Random(&full_key(b"k04", 4)[..]))
+        bi.seek(Seek::RandomForward(&full_key(b"k04", 4)[..]))
             .await
             .unwrap();
         assert!(bi.is_valid());
@@ -213,7 +225,7 @@ mod tests {
     #[tokio::test]
     async fn test_seek_none_front() {
         let mut bi = build_iterator_for_test();
-        bi.seek(Seek::Random(&full_key(b"k00", 0)[..]))
+        bi.seek(Seek::RandomForward(&full_key(b"k00", 0)[..]))
             .await
             .unwrap();
         assert!(bi.is_valid());
@@ -224,7 +236,7 @@ mod tests {
     #[tokio::test]
     async fn test_seek_none_middle() {
         let mut bi = build_iterator_for_test();
-        bi.seek(Seek::Random(&full_key(b"k03", 3)[..]))
+        bi.seek(Seek::RandomForward(&full_key(b"k03", 3)[..]))
             .await
             .unwrap();
         assert!(bi.is_valid());
@@ -235,7 +247,7 @@ mod tests {
     #[tokio::test]
     async fn test_seek_none_back() {
         let mut bi = build_iterator_for_test();
-        bi.seek(Seek::Random(&full_key(b"k06", 6)[..]))
+        bi.seek(Seek::RandomForward(&full_key(b"k06", 6)[..]))
             .await
             .unwrap();
         assert!(!bi.is_valid());
@@ -301,7 +313,7 @@ mod tests {
     async fn test_seek_forward_backward_iterate() {
         let mut bi = build_iterator_for_test();
 
-        bi.seek(Seek::Random(&full_key(b"k03", 3)[..]))
+        bi.seek(Seek::RandomForward(&full_key(b"k03", 3)[..]))
             .await
             .unwrap();
         assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], bi.key());
@@ -311,5 +323,19 @@ mod tests {
 
         bi.next().await.unwrap();
         assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], bi.key());
+    }
+
+    #[tokio::test]
+    async fn bi_direction_seek() {
+        let mut bi = build_iterator_for_test();
+        bi.seek(Seek::RandomForward(&full_key(b"k03", 3)[..]))
+            .await
+            .unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], bi.key());
+
+        bi.seek(Seek::RandomBackward(&full_key(b"k03", 3)[..]))
+            .await
+            .unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 2).as_bytes(), 2)[..], bi.key());
     }
 }

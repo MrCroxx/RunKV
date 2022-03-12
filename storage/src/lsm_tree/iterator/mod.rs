@@ -17,7 +17,8 @@ pub enum Seek<'s> {
     /// Seek to the last valid position in order if exists.
     Last,
     /// Seek to the position that the given key can be inserted into in order if exists.
-    Random(&'s [u8]),
+    RandomForward(&'s [u8]),
+    RandomBackward(&'s [u8]),
 }
 
 /// [`Iterator`] defines shared behaviours for all iterators.
