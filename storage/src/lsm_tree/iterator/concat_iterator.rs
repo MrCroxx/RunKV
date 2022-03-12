@@ -14,9 +14,11 @@ pub struct ConcatIterator {
 
 impl ConcatIterator {
     /// Note: Input iterators must be in ASC order.
-
     pub fn new(iters: Vec<Box<dyn Iterator>>) -> Self {
-        Self { iters, offset: 0 }
+        Self {
+            iters,
+            offset: usize::MAX,
+        }
     }
 
     /// Invalidate current state after reaching a invalid state.
