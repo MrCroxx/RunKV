@@ -1,5 +1,8 @@
 # RunKV
 
+![main](https://github.com/MrCroxx/RunKV/actions/workflows/main.yml/badge.svg)
+[![codecov](https://codecov.io/gh/MrCroxx/RunKV/branch/main/graph/badge.svg?token=LKT7JWROUW)](https://codecov.io/gh/MrCroxx/RunKV)
+
 **Still working in progress.**
 
 **TOY ONLY!**

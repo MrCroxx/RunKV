@@ -1,6 +1,6 @@
-name: CI - PR
+name: CI - main
 on:
-  pull_request:
+  push:
     branches: [main]
 env:
   RUST_TOOLCHAIN: nightly-2022-02-21
