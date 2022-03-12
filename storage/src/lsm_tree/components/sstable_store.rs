@@ -63,7 +63,7 @@ impl SstableStore {
         Ok(())
     }
 
-    pub async fn get(
+    pub async fn block(
         &self,
         sst: &Sstable,
         block_index: u64,
