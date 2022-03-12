@@ -1,9 +1,13 @@
+use crate::object_store::ObjectStoreError;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("encode error: {0}")]
     EncodeError(String),
     #[error("decode error: {0}")]
     DecodeError(String),
+    #[error("object store error: {0}")]
+    ObjectStoreError(#[from] ObjectStoreError),
 }
 
 impl Error {
