@@ -129,6 +129,7 @@ pub type SstableStoreRef = Arc<SstableStore>;
 mod tests {
 
     use super::*;
+    use crate::lsm_tree::components::TEST_DEFAULT_RESTART_INTERVAL;
     use crate::lsm_tree::utils::CompressionAlgorighm;
     use crate::{MemObjectStore, SstableBuilder, SstableBuilderOptions};
 
@@ -136,6 +137,7 @@ mod tests {
         let options = SstableBuilderOptions {
             capacity: 1024,
             block_capacity: 32,
+            restart_interval: TEST_DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorighm::None,
         };

@@ -5,7 +5,10 @@ use std::ops::{Range, RangeBounds};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use lz4::Decoder;
 
-use super::{key_diff, DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_COUNT};
+use super::{
+    key_diff, DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL,
+    TEST_DEFAULT_RESTART_INTERVAL,
+};
 use crate::lsm_tree::utils::{
     crc32check, crc32sum, var_u32_len, BufExt, BufMutExt, CompressionAlgorighm,
 };
@@ -163,6 +166,8 @@ pub struct BlockBuilderOptions {
     pub capacity: usize,
     /// Compression algorithm.
     pub compression_algorithm: CompressionAlgorighm,
+    /// Restart point interval.
+    pub restart_interval: usize,
 }
 
 impl Default for BlockBuilderOptions {
@@ -170,6 +175,11 @@ impl Default for BlockBuilderOptions {
         Self {
             capacity: DEFAULT_BLOCK_SIZE,
             compression_algorithm: CompressionAlgorighm::None,
+            restart_interval: if cfg!(test) {
+                DEFAULT_RESTART_INTERVAL
+            } else {
+                TEST_DEFAULT_RESTART_INTERVAL
+            },
         }
     }
 }
@@ -194,9 +204,9 @@ impl BlockBuilder {
     pub fn new(options: BlockBuilderOptions) -> Self {
         Self {
             buf: BytesMut::with_capacity(options.capacity),
-            restart_count: DEFAULT_RESTART_COUNT,
+            restart_count: options.restart_interval,
             restart_points: Vec::with_capacity(
-                options.capacity / DEFAULT_ENTRY_SIZE / DEFAULT_RESTART_COUNT + 1,
+                options.capacity / DEFAULT_ENTRY_SIZE / options.restart_interval + 1,
             ),
             last_key: Bytes::default(),
             entry_count: 0,

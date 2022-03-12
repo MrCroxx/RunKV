@@ -3,8 +3,8 @@ use std::ops::Range;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 use super::{
-    DEFAULT_BLOCK_SIZE, DEFAULT_BLOOM_FALSE_POSITIVE, DEFAULT_ENTRY_SIZE,
-    DEFAULT_SSTABLE_META_SIZE, DEFAULT_SSTABLE_SIZE,
+    DEFAULT_BLOCK_SIZE, DEFAULT_BLOOM_FALSE_POSITIVE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL,
+    DEFAULT_SSTABLE_META_SIZE, DEFAULT_SSTABLE_SIZE, TEST_DEFAULT_RESTART_INTERVAL,
 };
 use crate::lsm_tree::utils::{crc32check, crc32sum, CompressionAlgorighm};
 use crate::{full_key, BlockBuilder, BlockBuilderOptions, Bloom, Result};
@@ -113,6 +113,8 @@ pub struct SstableBuilderOptions {
     pub capacity: usize,
     /// Approximate block capacity.
     pub block_capacity: usize,
+    /// Restart point interval.
+    pub restart_interval: usize,
     /// False prsitive probability of bloom filter.
     pub bloom_false_positive: f64,
     /// Compression algorithm.
@@ -124,6 +126,11 @@ impl Default for SstableBuilderOptions {
         Self {
             capacity: DEFAULT_SSTABLE_SIZE,
             block_capacity: DEFAULT_BLOCK_SIZE,
+            restart_interval: if cfg!(test) {
+                DEFAULT_RESTART_INTERVAL
+            } else {
+                TEST_DEFAULT_RESTART_INTERVAL
+            },
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
             compression_algorithm: CompressionAlgorighm::None,
         }
@@ -163,6 +170,7 @@ impl SstableBuilder {
         if self.block_builder.is_none() {
             self.block_builder = Some(BlockBuilder::new(BlockBuilderOptions {
                 capacity: self.options.capacity,
+                restart_interval: self.options.restart_interval,
                 compression_algorithm: self.options.compression_algorithm.clone(),
             }));
             self.block_metas.push(BlockMeta {
@@ -254,6 +262,7 @@ mod tests {
         let options = SstableBuilderOptions {
             capacity: 1024,
             block_capacity: 32,
+            restart_interval: TEST_DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorighm::None,
         };
@@ -303,6 +312,7 @@ mod tests {
         let options = SstableBuilderOptions {
             capacity: 1024,
             block_capacity: 32,
+            restart_interval: TEST_DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorighm::Lz4,
         };
@@ -352,6 +362,7 @@ mod tests {
         let options = SstableBuilderOptions {
             capacity: 1024,
             block_capacity: 32,
+            restart_interval: TEST_DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorighm::None,
         };
