@@ -8,8 +8,8 @@ edition = "2021"
 anyhow = "1.0"
 async-trait = "0.1"
 prost = "0.9"
-runkv-storage = { path = "../storage" }
 runkv-proto = { path = "../proto" }
+runkv-storage = { path = "../storage" }
 thiserror = "1.0"
 tokio = { version = "1", features = [
     "rt-multi-thread",
