@@ -5,9 +5,8 @@ use std::ops::{Range, RangeBounds};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use lz4::Decoder;
 
-use super::key_diff;
 use crate::lsm_tree::utils::{
-    crc32check, crc32sum, var_u32_len, BufExt, BufMutExt, CompressionAlgorighm,
+    crc32check, crc32sum, key_diff, var_u32_len, BufExt, BufMutExt, CompressionAlgorighm,
 };
 use crate::lsm_tree::{
     DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, TEST_DEFAULT_RESTART_INTERVAL,
@@ -307,7 +306,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::{full_key, BlockIterator, Iterator, Seek};
+    use crate::lsm_tree::utils::full_key;
+    use crate::{BlockIterator, Iterator, Seek};
 
     #[tokio::test]
     async fn test_block_enc_dec() {

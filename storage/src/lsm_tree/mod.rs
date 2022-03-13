@@ -4,6 +4,8 @@ mod iterator;
 pub use iterator::*;
 mod components;
 pub use components::*;
+mod manifest;
+pub use manifest::*;
 mod utils;
 
 const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024; // 4 MiB

@@ -66,7 +66,7 @@ impl ConcatIterator {
         }
     }
 
-    /// Move backward until the position that the given `key` can be inserted in DESC order or EOF.
+    /// Move backward until reach the first key that equals or smaller than the given `key`.
     async fn prev_until_key(&mut self, key: &[u8]) -> Result<()> {
         while self.is_valid() && self.key().cmp(key) == Ordering::Greater {
             self.prev_inner().await?;
@@ -177,7 +177,8 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
-    use crate::{full_key, Block, BlockBuilder, BlockBuilderOptions, BlockIterator};
+    use crate::lsm_tree::utils::full_key;
+    use crate::{Block, BlockBuilder, BlockBuilderOptions, BlockIterator};
 
     fn build_iterator_for_test() -> ConcatIterator {
         ConcatIterator::new(vec![

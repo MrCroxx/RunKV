@@ -2,12 +2,12 @@ use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-use crate::lsm_tree::utils::{crc32check, crc32sum, CompressionAlgorighm};
+use crate::lsm_tree::utils::{crc32check, crc32sum, full_key, raw_value, CompressionAlgorighm};
 use crate::lsm_tree::{
     DEFAULT_BLOCK_SIZE, DEFAULT_BLOOM_FALSE_POSITIVE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL,
     DEFAULT_SSTABLE_META_SIZE, DEFAULT_SSTABLE_SIZE, TEST_DEFAULT_RESTART_INTERVAL,
 };
-use crate::{full_key, BlockBuilder, BlockBuilderOptions, Bloom, Result};
+use crate::{BlockBuilder, BlockBuilderOptions, Bloom, Result};
 
 /// [`BlockMeta`] contains block metadata, served as a part of [`Sstable`] meta.
 #[derive(Clone, Debug)]
@@ -165,7 +165,7 @@ impl SstableBuilder {
     }
 
     /// Add kv pair to sstable.
-    pub fn add(&mut self, user_key: &[u8], timestamp: u64, value: &[u8]) -> Result<()> {
+    pub fn add(&mut self, user_key: &[u8], timestamp: u64, value: Option<&[u8]>) -> Result<()> {
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_none() {
             self.block_builder = Some(BlockBuilder::new(BlockBuilderOptions {
@@ -184,7 +184,7 @@ impl SstableBuilder {
         let block_builder = self.block_builder.as_mut().unwrap();
         let full_key = full_key(user_key, timestamp);
 
-        block_builder.add(&full_key, value);
+        block_builder.add(&full_key, &raw_value(value));
 
         self.user_key_hashes.push(farmhash::fingerprint32(user_key));
 
@@ -267,10 +267,10 @@ mod tests {
             compression_algorithm: CompressionAlgorighm::None,
         };
         let mut builder = SstableBuilder::new(options);
-        builder.add(b"k01", 1, b"v01").unwrap();
-        builder.add(b"k02", 2, b"v02").unwrap();
-        builder.add(b"k04", 4, b"v04").unwrap();
-        builder.add(b"k05", 5, b"v05").unwrap();
+        builder.add(b"k01", 1, Some(b"v01")).unwrap();
+        builder.add(b"k02", 2, None).unwrap();
+        builder.add(b"k04", 4, Some(b"v04")).unwrap();
+        builder.add(b"k05", 5, None).unwrap();
         let (meta, data) = builder.build().unwrap();
         assert_eq!(2, meta.block_metas.len());
         assert_eq!(&full_key(b"k01", 1), &meta.block_metas[0].first_key);
@@ -284,11 +284,11 @@ mod tests {
         bi.seek(Seek::First).await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k01", 1)[..], bi.key());
-        assert_eq!(b"v01", bi.value());
+        assert_eq!(raw_value(Some(b"v01")), bi.value());
         bi.next().await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k02", 2)[..], bi.key());
-        assert_eq!(b"v02", bi.value());
+        assert_eq!(raw_value(None), bi.value());
         bi.next().await.unwrap();
         assert!(!bi.is_valid());
 
@@ -298,11 +298,11 @@ mod tests {
         bi.seek(Seek::First).await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k04", 4)[..], bi.key());
-        assert_eq!(b"v04", bi.value());
+        assert_eq!(raw_value(Some(b"v04")), bi.value());
         bi.next().await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k05", 5)[..], bi.key());
-        assert_eq!(b"v05", bi.value());
+        assert_eq!(raw_value(None), bi.value());
         bi.next().await.unwrap();
         assert!(!bi.is_valid());
     }
@@ -317,10 +317,10 @@ mod tests {
             compression_algorithm: CompressionAlgorighm::Lz4,
         };
         let mut builder = SstableBuilder::new(options);
-        builder.add(b"k01", 1, b"v01").unwrap();
-        builder.add(b"k02", 2, b"v02").unwrap();
-        builder.add(b"k04", 4, b"v04").unwrap();
-        builder.add(b"k05", 5, b"v05").unwrap();
+        builder.add(b"k01", 1, Some(b"v01")).unwrap();
+        builder.add(b"k02", 2, None).unwrap();
+        builder.add(b"k04", 4, Some(b"v04")).unwrap();
+        builder.add(b"k05", 5, None).unwrap();
         let (meta, data) = builder.build().unwrap();
         assert_eq!(2, meta.block_metas.len());
         assert_eq!(&full_key(b"k01", 1), &meta.block_metas[0].first_key);
@@ -334,11 +334,11 @@ mod tests {
         bi.seek(Seek::First).await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k01", 1)[..], bi.key());
-        assert_eq!(b"v01", bi.value());
+        assert_eq!(raw_value(Some(b"v01")), bi.value());
         bi.next().await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k02", 2)[..], bi.key());
-        assert_eq!(b"v02", bi.value());
+        assert_eq!(raw_value(None), bi.value());
         bi.next().await.unwrap();
         assert!(!bi.is_valid());
 
@@ -348,11 +348,11 @@ mod tests {
         bi.seek(Seek::First).await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k04", 4)[..], bi.key());
-        assert_eq!(b"v04", bi.value());
+        assert_eq!(raw_value(Some(b"v04")), bi.value());
         bi.next().await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k05", 5)[..], bi.key());
-        assert_eq!(b"v05", bi.value());
+        assert_eq!(raw_value(None), bi.value());
         bi.next().await.unwrap();
         assert!(!bi.is_valid());
     }
@@ -367,10 +367,10 @@ mod tests {
             compression_algorithm: CompressionAlgorighm::None,
         };
         let mut builder = SstableBuilder::new(options);
-        builder.add(b"k01", 1, b"v01").unwrap();
-        builder.add(b"k02", 2, b"v02").unwrap();
-        builder.add(b"k04", 4, b"v04").unwrap();
-        builder.add(b"k05", 5, b"v05").unwrap();
+        builder.add(b"k01", 1, Some(b"v01")).unwrap();
+        builder.add(b"k02", 2, None).unwrap();
+        builder.add(b"k04", 4, Some(b"v04")).unwrap();
+        builder.add(b"k05", 5, None).unwrap();
         let (meta, _) = builder.build().unwrap();
         let buf = meta.encode();
         let decoded_meta = SstableMeta::decode(buf);

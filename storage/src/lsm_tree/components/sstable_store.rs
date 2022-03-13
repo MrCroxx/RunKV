@@ -143,10 +143,10 @@ mod tests {
             compression_algorithm: CompressionAlgorighm::None,
         };
         let mut builder = SstableBuilder::new(options);
-        builder.add(b"k01", 1, b"v01").unwrap();
-        builder.add(b"k02", 2, b"v02").unwrap();
-        builder.add(b"k04", 4, b"v04").unwrap();
-        builder.add(b"k05", 5, b"v05").unwrap();
+        builder.add(b"k01", 1, Some(b"v01")).unwrap();
+        builder.add(b"k02", 2, Some(b"v02")).unwrap();
+        builder.add(b"k04", 4, Some(b"v04")).unwrap();
+        builder.add(b"k05", 5, Some(b"v05")).unwrap();
         builder.build().unwrap()
     }
 

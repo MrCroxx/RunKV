@@ -1,6 +1,6 @@
 use std::{cmp, ptr};
 
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 use crate::error::{Error, Result};
 
@@ -138,6 +138,52 @@ impl CompressionAlgorighm {
     }
 }
 
+/// Key categories:
+///
+/// A full key value pair looks like:
+///
+/// ```plain
+/// | user key | timestamp (8B) | value |
+///
+/// |<------- full key ------->|
+/// ```
+pub fn full_key(user_key: &[u8], timestamp: u64) -> Bytes {
+    let mut buf = BytesMut::with_capacity(user_key.len() + 8);
+    buf.put_slice(user_key);
+    buf.put_u64_le(!timestamp);
+    buf.freeze()
+}
+
+/// Get user key in full key.
+pub fn user_key(full_key: &[u8]) -> &[u8] {
+    &full_key[..full_key.len() - 8]
+}
+
+/// Get timestamp in full key.
+pub fn timestamp(full_key: &[u8]) -> u64 {
+    !(&full_key[full_key.len() - 8..]).get_u64_le()
+}
+
+/// Calculate the difference between two keys.
+pub fn key_diff<'a, 'b>(base: &'a [u8], target: &'b [u8]) -> &'b [u8] {
+    bytes_diff(base, target)
+}
+
+pub fn raw_value(v: Option<&[u8]>) -> Vec<u8> {
+    match v {
+        None => vec![0],
+        Some(v) => [&[1], v].concat(),
+    }
+}
+
+pub fn value(raw: &[u8]) -> Option<&[u8]> {
+    match raw[0] {
+        0 => None,
+        1 => Some(&raw[1..]),
+        _ => unreachable!(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bytes::BytesMut;
@@ -180,5 +226,20 @@ mod tests {
         assert_eq!(5, buf.len());
         assert_eq!(u32::MAX, (&mut buf).get_var_u32());
         assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn test_value_enc_dec() {
+        assert_eq!(
+            raw_value(Some(b"something")),
+            [vec![1], b"something".to_vec()].concat()
+        );
+        assert_eq!(raw_value(None), vec![0]);
+
+        assert_eq!(
+            value(&[vec![1], b"something".to_vec()].concat()),
+            Some(&b"something".to_vec()[..])
+        );
+        assert_eq!(value(&vec![0][..]), None);
     }
 }
