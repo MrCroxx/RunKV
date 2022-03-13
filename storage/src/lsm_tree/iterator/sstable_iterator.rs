@@ -13,7 +13,7 @@ pub struct SstableIterator {
     /// Current block index.
     offset: usize,
     /// Current block iterator.
-    iterator: Option<BlockIterator>,
+    iter: Option<BlockIterator>,
     /// Cache policy.
     cache_policy: CachePolicy,
 }
@@ -28,7 +28,7 @@ impl SstableIterator {
             sstable_store,
             sstable,
             offset: usize::MAX,
-            iterator: None,
+            iter: None,
             cache_policy,
         }
     }
@@ -36,12 +36,12 @@ impl SstableIterator {
     /// Invalidate current state after reaching a invalid state.
     fn invalid(&mut self) {
         self.offset = self.sstable.meta.block_metas.len();
-        self.iterator = None;
+        self.iter = None;
     }
 
     /// Note: Ensure that the current state is valid.
     async fn next_inner(&mut self) -> Result<()> {
-        let iter = self.iterator.as_mut().unwrap();
+        let iter = self.iter.as_mut().unwrap();
         iter.next().await?;
         if !iter.is_valid() {
             if self.offset + 1 < self.sstable.meta.block_metas.len() {
@@ -50,8 +50,8 @@ impl SstableIterator {
                     .sstable_store
                     .block(&self.sstable, self.offset, self.cache_policy)
                     .await?;
-                self.iterator = Some(BlockIterator::new(block));
-                self.iterator.as_mut().unwrap().seek(Seek::First).await?;
+                self.iter = Some(BlockIterator::new(block));
+                self.iter.as_mut().unwrap().seek(Seek::First).await?;
             } else {
                 self.invalid();
             }
@@ -61,7 +61,7 @@ impl SstableIterator {
 
     /// Note: Ensure that the current state is valid.
     async fn prev_inner(&mut self) -> Result<()> {
-        let iter = self.iterator.as_mut().unwrap();
+        let iter = self.iter.as_mut().unwrap();
         iter.prev().await?;
         if !iter.is_valid() {
             if self.offset > 0 {
@@ -70,8 +70,8 @@ impl SstableIterator {
                     .sstable_store
                     .block(&self.sstable, self.offset, self.cache_policy)
                     .await?;
-                self.iterator = Some(BlockIterator::new(block));
-                self.iterator.as_mut().unwrap().seek(Seek::Last).await?;
+                self.iter = Some(BlockIterator::new(block));
+                self.iter.as_mut().unwrap().seek(Seek::Last).await?;
             } else {
                 self.invalid();
             }
@@ -129,7 +129,7 @@ impl SstableIterator {
         iter.seek(Seek::RandomForward(key)).await?;
         if iter.is_valid() {
             self.offset = offset;
-            self.iterator = Some(iter)
+            self.iter = Some(iter)
         } else {
             // Move to the first entry of the next inner iter.
             self.offset = offset + 1;
@@ -140,7 +140,7 @@ impl SstableIterator {
                     .await?;
                 let mut iter = BlockIterator::new(block);
                 iter.seek(Seek::RandomForward(key)).await?;
-                self.iterator = Some(iter)
+                self.iter = Some(iter)
             } else {
                 // No more valid entry, set invalid state.
                 self.invalid()
@@ -164,12 +164,12 @@ impl Iterator for SstableIterator {
 
     fn key(&self) -> &[u8] {
         assert!(self.is_valid());
-        self.iterator.as_ref().unwrap().key()
+        self.iter.as_ref().unwrap().key()
     }
 
     fn value(&self) -> &[u8] {
         assert!(self.is_valid());
-        self.iterator.as_ref().unwrap().value()
+        self.iter.as_ref().unwrap().value()
     }
 
     fn is_valid(&self) -> bool {
@@ -184,8 +184,8 @@ impl Iterator for SstableIterator {
                     .sstable_store
                     .block(&self.sstable, self.offset, self.cache_policy)
                     .await?;
-                self.iterator = Some(BlockIterator::new(block));
-                self.iterator.as_mut().unwrap().seek(Seek::First).await
+                self.iter = Some(BlockIterator::new(block));
+                self.iter.as_mut().unwrap().seek(Seek::First).await
             }
             Seek::Last => {
                 self.offset = self.sstable.meta.block_metas.len() - 1;
@@ -193,8 +193,8 @@ impl Iterator for SstableIterator {
                     .sstable_store
                     .block(&self.sstable, self.offset, self.cache_policy)
                     .await?;
-                self.iterator = Some(BlockIterator::new(block));
-                self.iterator.as_mut().unwrap().seek(Seek::Last).await
+                self.iter = Some(BlockIterator::new(block));
+                self.iter.as_mut().unwrap().seek(Seek::Last).await
             }
             Seek::RandomForward(key) => self.binary_seek(key).await,
             Seek::RandomBackward(key) => {
