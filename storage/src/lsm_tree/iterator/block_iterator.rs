@@ -58,14 +58,14 @@ impl BlockIterator {
         self.entry_len = prefix.entry_len();
     }
 
-    /// Move forward until the position that the given `key` can be inserted in ASC order or EOF.
+    /// Move forward until reach the first that equals or larger than the given `key`.
     fn next_until_key(&mut self, key: &[u8]) {
         while self.is_valid() && (&self.key[..]).cmp(key) == Ordering::Less {
             self.next_inner();
         }
     }
 
-    /// Move backward until the position that the given `key` can be inserted in DESC order or EOF.
+    /// Move backward until reach the first key that equals or smaller than the given `key`.
     fn prev_until_key(&mut self, key: &[u8]) {
         while self.is_valid() && (&self.key[..]).cmp(key) == Ordering::Greater {
             self.prev_inner();
@@ -183,7 +183,8 @@ impl Iterator for BlockIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{full_key, BlockBuilder, BlockBuilderOptions};
+    use crate::lsm_tree::utils::full_key;
+    use crate::{BlockBuilder, BlockBuilderOptions};
 
     fn build_iterator_for_test() -> BlockIterator {
         let options = BlockBuilderOptions::default();

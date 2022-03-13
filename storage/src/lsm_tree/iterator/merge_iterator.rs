@@ -181,7 +181,8 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
-    use crate::{full_key, Block, BlockBuilder, BlockBuilderOptions, BlockIterator};
+    use crate::lsm_tree::utils::full_key;
+    use crate::{Block, BlockBuilder, BlockBuilderOptions, BlockIterator};
 
     fn build_iterator_for_test() -> MergeIterator {
         MergeIterator::new(vec![
