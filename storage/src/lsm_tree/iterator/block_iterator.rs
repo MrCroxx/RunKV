@@ -170,6 +170,9 @@ impl Iterator for BlockIterator {
             Seek::RandomBackward(key) => {
                 self.seek_restart_point_by_key(key);
                 self.next_until_key(key);
+                if !self.is_valid() {
+                    self.seek(Seek::Last).await?;
+                }
                 self.prev_until_key(key);
             }
         }
@@ -195,147 +198,139 @@ mod tests {
 
     #[tokio::test]
     async fn test_seek_first() {
-        let mut bi = build_iterator_for_test();
-        bi.seek(Seek::First).await.unwrap();
-        assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k01", 1)[..], bi.key());
-        assert_eq!(b"v01", bi.value());
+        let mut it = build_iterator_for_test();
+        it.seek(Seek::First).await.unwrap();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k01", 1)[..], it.key());
+        assert_eq!(b"v01", it.value());
     }
 
     #[tokio::test]
     async fn test_seek_last() {
-        let mut bi = build_iterator_for_test();
-        bi.seek(Seek::Last).await.unwrap();
-        assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k05", 5)[..], bi.key());
-        assert_eq!(b"v05", bi.value());
-    }
-
-    #[tokio::test]
-    async fn test_seek_random() {
-        let mut bi = build_iterator_for_test();
-        bi.seek(Seek::RandomForward(&full_key(b"k04", 4)[..]))
-            .await
-            .unwrap();
-        assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k04", 4)[..], bi.key());
-        assert_eq!(b"v04", bi.value());
+        let mut it = build_iterator_for_test();
+        it.seek(Seek::Last).await.unwrap();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k05", 5)[..], it.key());
+        assert_eq!(b"v05", it.value());
     }
 
     #[tokio::test]
     async fn test_seek_none_front() {
-        let mut bi = build_iterator_for_test();
-        bi.seek(Seek::RandomForward(&full_key(b"k00", 0)[..]))
+        let mut it = build_iterator_for_test();
+        it.seek(Seek::RandomForward(&full_key(b"k00", 0)[..]))
             .await
             .unwrap();
-        assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k01", 1)[..], bi.key());
-        assert_eq!(b"v01", bi.value());
-    }
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k01", 1)[..], it.key());
+        assert_eq!(b"v01", it.value());
 
-    #[tokio::test]
-    async fn test_seek_none_middle() {
-        let mut bi = build_iterator_for_test();
-        bi.seek(Seek::RandomForward(&full_key(b"k03", 3)[..]))
+        let mut it = build_iterator_for_test();
+        it.seek(Seek::RandomBackward(&full_key(b"k00", 0)[..]))
             .await
             .unwrap();
-        assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k04", 4)[..], bi.key());
-        assert_eq!(b"v04", bi.value());
+        assert!(!it.is_valid());
     }
 
     #[tokio::test]
     async fn test_seek_none_back() {
-        let mut bi = build_iterator_for_test();
-        bi.seek(Seek::RandomForward(&full_key(b"k06", 6)[..]))
+        let mut it = build_iterator_for_test();
+        it.seek(Seek::RandomForward(&full_key(b"k06", 6)[..]))
             .await
             .unwrap();
-        assert!(!bi.is_valid());
-    }
+        assert!(!it.is_valid());
 
-    #[tokio::test]
-    async fn test_forward_iterate() {
-        let mut bi = build_iterator_for_test();
-
-        bi.seek(Seek::First).await.unwrap();
-        assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k01", 1)[..], bi.key());
-        assert_eq!(b"v01", bi.value());
-
-        bi.next().await.unwrap();
-        assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k02", 2)[..], bi.key());
-        assert_eq!(b"v02", bi.value());
-
-        bi.next().await.unwrap();
-        assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k04", 4)[..], bi.key());
-        assert_eq!(b"v04", bi.value());
-
-        bi.next().await.unwrap();
-        assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k05", 5)[..], bi.key());
-        assert_eq!(b"v05", bi.value());
-
-        bi.next().await.unwrap();
-        assert!(!bi.is_valid());
-    }
-
-    #[tokio::test]
-    async fn test_backward_iterate() {
-        let mut bi = build_iterator_for_test();
-
-        bi.seek(Seek::Last).await.unwrap();
-        assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k05", 5)[..], bi.key());
-        assert_eq!(b"v05", bi.value());
-
-        bi.prev().await.unwrap();
-        assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k04", 4)[..], bi.key());
-        assert_eq!(b"v04", bi.value());
-
-        bi.prev().await.unwrap();
-        assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k02", 2)[..], bi.key());
-        assert_eq!(b"v02", bi.value());
-
-        bi.prev().await.unwrap();
-        assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k01", 1)[..], bi.key());
-        assert_eq!(b"v01", bi.value());
-
-        bi.prev().await.unwrap();
-        assert!(!bi.is_valid());
-    }
-
-    #[tokio::test]
-    async fn test_seek_forward_backward_iterate() {
-        let mut bi = build_iterator_for_test();
-
-        bi.seek(Seek::RandomForward(&full_key(b"k03", 3)[..]))
+        let mut it = build_iterator_for_test();
+        it.seek(Seek::RandomBackward(&full_key(b"k06", 6)[..]))
             .await
             .unwrap();
-        assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], bi.key());
-
-        bi.prev().await.unwrap();
-        assert_eq!(&full_key(format!("k{:02}", 2).as_bytes(), 2)[..], bi.key());
-
-        bi.next().await.unwrap();
-        assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], bi.key());
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k05", 5)[..], it.key());
+        assert_eq!(b"v05", it.value());
     }
 
     #[tokio::test]
     async fn bi_direction_seek() {
-        let mut bi = build_iterator_for_test();
-        bi.seek(Seek::RandomForward(&full_key(b"k03", 3)[..]))
+        let mut it = build_iterator_for_test();
+        it.seek(Seek::RandomForward(&full_key(b"k03", 3)[..]))
             .await
             .unwrap();
-        assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], bi.key());
+        assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], it.key());
 
-        bi.seek(Seek::RandomBackward(&full_key(b"k03", 3)[..]))
+        it.seek(Seek::RandomBackward(&full_key(b"k03", 3)[..]))
             .await
             .unwrap();
-        assert_eq!(&full_key(format!("k{:02}", 2).as_bytes(), 2)[..], bi.key());
+        assert_eq!(&full_key(format!("k{:02}", 2).as_bytes(), 2)[..], it.key());
+    }
+
+    #[tokio::test]
+    async fn test_forward_iterate() {
+        let mut it = build_iterator_for_test();
+
+        it.seek(Seek::First).await.unwrap();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k01", 1)[..], it.key());
+        assert_eq!(b"v01", it.value());
+
+        it.next().await.unwrap();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k02", 2)[..], it.key());
+        assert_eq!(b"v02", it.value());
+
+        it.next().await.unwrap();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k04", 4)[..], it.key());
+        assert_eq!(b"v04", it.value());
+
+        it.next().await.unwrap();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k05", 5)[..], it.key());
+        assert_eq!(b"v05", it.value());
+
+        it.next().await.unwrap();
+        assert!(!it.is_valid());
+    }
+
+    #[tokio::test]
+    async fn test_backward_iterate() {
+        let mut it = build_iterator_for_test();
+
+        it.seek(Seek::Last).await.unwrap();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k05", 5)[..], it.key());
+        assert_eq!(b"v05", it.value());
+
+        it.prev().await.unwrap();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k04", 4)[..], it.key());
+        assert_eq!(b"v04", it.value());
+
+        it.prev().await.unwrap();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k02", 2)[..], it.key());
+        assert_eq!(b"v02", it.value());
+
+        it.prev().await.unwrap();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k01", 1)[..], it.key());
+        assert_eq!(b"v01", it.value());
+
+        it.prev().await.unwrap();
+        assert!(!it.is_valid());
+    }
+
+    #[tokio::test]
+    async fn test_seek_forward_backward_iterate() {
+        let mut it = build_iterator_for_test();
+
+        it.seek(Seek::RandomForward(&full_key(b"k03", 3)[..]))
+            .await
+            .unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], it.key());
+
+        it.prev().await.unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 2).as_bytes(), 2)[..], it.key());
+
+        it.next().await.unwrap();
+        assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], it.key());
     }
 }
