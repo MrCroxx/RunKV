@@ -1,4 +1,5 @@
 use crate::object_store::ObjectStoreError;
+use crate::ManifestError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -8,6 +9,8 @@ pub enum Error {
     DecodeError(String),
     #[error("object store error: {0}")]
     ObjectStoreError(#[from] ObjectStoreError),
+    #[error("manifest error: {0}")]
+    ManifestError(#[from] ManifestError),
     #[error("other: {0}")]
     Other(String),
 }

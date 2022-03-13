@@ -1,6 +1,4 @@
-#[cfg(test)]
 mod mem;
-#[cfg(test)]
 pub use mem::*;
 mod s3;
 use std::ops::Range;

@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package runkv;
+
+message HeartbeatRequest {
+  uint64 node_id = 1;
+  uint64 watermark = 2;
+  uint64 latest_version_id = 3;
+}
+
+message HeartbeatResponse {}
+
+service RudderService {
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}

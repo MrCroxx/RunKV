@@ -7,6 +7,7 @@ pub use components::*;
 mod manifest;
 pub use manifest::*;
 mod utils;
+pub use utils::CompressionAlgorighm;
 
 const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024; // 4 MiB
 const DEFAULT_BLOCK_SIZE: usize = 64 * 1024; // 64 KiB
