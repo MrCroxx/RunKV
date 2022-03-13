@@ -1,5 +1,3 @@
-// TODO: Refine the comments of this file.
-
 mod block_iterator;
 mod concat_iterator;
 mod merge_iterator;
@@ -95,8 +93,7 @@ pub trait Iterator: Send + Sync {
     /// - This function should be straightforward and return immediately.
     fn is_valid(&self) -> bool;
 
-    /// Reset iterator and seek to the first position where the key >= provided key, or key <=
-    /// provided key if this is a reverse iterator.
+    /// Initialize or reset iterator with the given seek mode. For more details, refer to [`Seek`].
     ///
     /// Note:
     ///
