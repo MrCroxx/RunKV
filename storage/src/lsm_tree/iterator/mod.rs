@@ -1,13 +1,17 @@
+// TODO: Refine the comments of this file.
+
 mod block_iterator;
 mod concat_iterator;
 mod merge_iterator;
 mod sstable_iterator;
+mod user_key_iterator;
 
 use async_trait::async_trait;
 pub use block_iterator::*;
 pub use concat_iterator::*;
 pub use merge_iterator::*;
 pub use sstable_iterator::*;
+pub use user_key_iterator::*;
 
 use crate::Result;
 
@@ -16,8 +20,9 @@ pub enum Seek<'s> {
     First,
     /// Seek to the last valid position in order if exists.
     Last,
-    /// Seek to the position that the given key can be inserted into in order if exists.
+    /// Seek forward for the first key euqals the given key or the frist key bigger than it.
     RandomForward(&'s [u8]),
+    /// Seek backward for the first key equals the given key or the first key smaller than it.
     RandomBackward(&'s [u8]),
 }
 

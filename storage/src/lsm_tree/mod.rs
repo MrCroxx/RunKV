@@ -1,3 +1,5 @@
+// TODO: Restrict pub use. Export only necessary components.
+
 mod iterator;
 pub use iterator::*;
 mod components;
