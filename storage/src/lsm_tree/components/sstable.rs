@@ -114,8 +114,8 @@ impl SstableMeta {
     }
 
     pub fn is_overlap_with_range(&self, range: RangeInclusive<&Bytes>) -> bool {
-        self.block_metas.first().as_ref().unwrap().first_key > range.end()
-            || self.block_metas.last().as_ref().unwrap().last_key < range.start()
+        self.block_metas.first().as_ref().unwrap().first_key <= range.end()
+            && self.block_metas.last().as_ref().unwrap().last_key >= range.start()
     }
 }
 
