@@ -264,6 +264,7 @@ impl VersionManager {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches::assert_matches;
     use std::sync::Arc;
 
     use itertools::Itertools;
@@ -386,6 +387,37 @@ mod tests {
             })
             .await
             .is_err());
+
+        let sstable_store = build_sstable_store_for_test();
+        let mut version_manager = build_version_manager_for_test(sstable_store.clone());
+        version_manager.levels = vec![
+            vec![],
+            vec![1, 2, 3],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        ];
+        ingest_meta(&sstable_store, 1, key(b"aaa"), key(b"bbb")).await;
+        ingest_meta(&sstable_store, 2, key(b"ccc"), key(b"ddd")).await;
+        ingest_meta(&sstable_store, 3, key(b"eee"), key(b"fff")).await;
+        ingest_meta(&sstable_store, 4, key(b"abb"), key(b"bdd")).await;
+        assert_matches!(
+            version_manager
+                .update(VersionDiff {
+                    id: 1,
+                    sstable_diffs: vec![SsTableDiff {
+                        id: 4,
+                        level: 1,
+                        op: SsTableOp::Insert.into(),
+                    }],
+                })
+                .await,
+            Err(crate::Error::ManifestError(
+                ManifestError::InvalidVersionDiff(_)
+            ))
+        )
     }
 
     #[tokio::test]

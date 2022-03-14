@@ -1,4 +1,5 @@
 #![feature(drain_filter)]
+#![feature(assert_matches)]
 
 mod error;
 pub use error::*;
