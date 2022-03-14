@@ -4,7 +4,7 @@ use std::ops::{Range, RangeInclusive};
 use bytes::Bytes;
 use runkv_proto::manifest::{SsTableOp, VersionDiff};
 
-use crate::lsm_tree::utils::CompressionAlgorighm;
+use crate::lsm_tree::utils::{full_key, CompressionAlgorighm};
 use crate::{ManifestError, Result, SstableStoreRef};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -200,7 +200,11 @@ impl VersionManager {
         &self,
         levels: Range<usize>,
         range: RangeInclusive<&Bytes>,
+        timestamp: u64,
     ) -> Result<Vec<Vec<u64>>> {
+        let full_start_key = full_key(range.start(), timestamp);
+        let full_end_key = full_key(range.end(), timestamp);
+        let range = &full_start_key..=&full_end_key;
         let mut result = vec![vec![]; levels.end - levels.start];
         for level in levels {
             let compaction_strategy = self
@@ -233,8 +237,10 @@ impl VersionManager {
     pub async fn pick_overlap_ssts_by_key(
         &self,
         _levels: Range<usize>,
-        _key: &Bytes,
+        key: &Bytes,
+        timestamp: u64,
     ) -> Result<Vec<Vec<u64>>> {
+        let _key = full_key(key, timestamp);
         todo!()
     }
 
@@ -442,7 +448,7 @@ mod tests {
         ingest_meta(&sstable_store, 7, key(b"eee"), key(b"fff")).await;
         assert_eq!(
             version_manager
-                .pick_overlap_ssts(0..7, &key(b"eee")..=&key(b"fff"))
+                .pick_overlap_ssts(0..7, &key(b"eee")..=&key(b"fff"), u64::MAX)
                 .await
                 .unwrap(),
             vec![vec![1, 2], vec![4], vec![], vec![], vec![7], vec![], vec![]]
@@ -597,6 +603,6 @@ mod tests {
     }
 
     fn key(s: &'static [u8]) -> Bytes {
-        Bytes::from_static(s)
+        full_key(s, 1)
     }
 }
