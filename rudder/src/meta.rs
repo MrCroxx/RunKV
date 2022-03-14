@@ -98,9 +98,10 @@ mod tests {
         let sstable_store = Arc::new(SstableStore::new(sstable_store_options));
         let version_manager_options = VersionManagerOptions {
             level_options,
+            levels: vec![vec![]; 7],
             sstable_store: sstable_store.clone(),
         };
-        let version_manager = VersionManager::new(version_manager_options);
+        let version_manager = VersionManager::new(version_manager_options).unwrap();
         let meta_manager_options = MetaManagerOptions {
             version: version_manager,
             watermark: 0,

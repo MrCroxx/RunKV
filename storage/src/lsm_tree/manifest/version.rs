@@ -24,6 +24,11 @@ pub struct VersionManagerOptions {
     ///
     /// Usually, L0 uses `Overlap`, the others use `NonOverlap`.
     pub level_options: Vec<LevelOptions>,
+    /// Initial sst ids of each level.
+    ///
+    /// If the compaction strategy is `NonOverlap`, the sstable ids of the level must be guaranteed
+    /// sorted in ASC order.
+    pub levels: Vec<Vec<u64>>,
     /// `sstable_store` is used to fetch sstable meta.
     pub sstable_store: SstableStoreRef,
 }
@@ -39,25 +44,31 @@ pub struct VersionManager {
     /// sorted in ASC order.
     levels: Vec<Vec<u64>>,
     /// List of history version diffs. Used for syncing with other nodes.
+    ///
+    /// TODO: Restore diff from `MetaStore`.
     diffs: LinkedList<VersionDiff>,
     /// `sstable_store` is used to fetch sstable meta.
     sstable_store: SstableStoreRef,
 }
 
 impl VersionManager {
-    pub fn new(options: VersionManagerOptions) -> Self {
-        let levels = vec![vec![]; options.level_options.len()];
-        Self {
+    pub fn new(options: VersionManagerOptions) -> Result<Self> {
+        if options.levels.len() != options.level_options.len() {
+            return Err(
+                ManifestError::Other("level.len() != level_options.len()".to_string()).into(),
+            );
+        }
+        Ok(Self {
             level_options: options.level_options,
-            levels,
+            levels: options.levels,
             diffs: LinkedList::default(),
             sstable_store: options.sstable_store,
-        }
+        })
     }
 
     pub async fn update(&mut self, diff: VersionDiff) -> Result<()> {
         let current_diff_id = self.diffs.back().map(|diff| diff.id).unwrap_or_else(|| 0);
-        if current_diff_id + 1 != diff.id {
+        if !self.diffs.is_empty() && current_diff_id + 1 != diff.id {
             return Err(ManifestError::VersionDiffIdNotMatch(current_diff_id, diff.id).into());
         }
 
@@ -130,7 +141,7 @@ impl VersionManager {
     }
 
     /// Revoke all version diffs whose id is smaller than given `diff_id`.
-    pub fn squash(&mut self, diff_id: u64) -> Result<()> {
+    pub fn squash(&mut self, diff_id: u64) {
         while self
             .diffs
             .front()
@@ -139,7 +150,6 @@ impl VersionManager {
         {
             self.diffs.pop_front();
         }
-        Ok(())
     }
 
     pub fn level_compression_algorithm(&self, level_idx: u64) -> Result<CompressionAlgorighm> {
@@ -162,6 +172,23 @@ impl VersionManager {
                     self.level_options.len() as u64,
                 ))?;
         Ok(options.compaction_strategy)
+    }
+
+    /// Get at most `max_len` version diffs from given `start_id`.
+    pub fn version_diffs_from(&self, start_id: u64, max_len: usize) -> Result<Vec<VersionDiff>> {
+        if self.diffs.is_empty() || start_id < self.diffs.front().as_ref().unwrap().id {
+            return Err(ManifestError::VersionDiffExpired(start_id).into());
+        }
+        let mut diffs = Vec::with_capacity(std::cmp::min(max_len, 1024));
+        for diff in self.diffs.iter() {
+            if diff.id >= start_id {
+                diffs.push(diff.clone());
+            }
+            if diffs.len() >= max_len {
+                break;
+            }
+        }
+        Ok(diffs)
     }
 
     /// Pick sstable ids of given `levels` that overlaps with given key `range`.
@@ -197,9 +224,268 @@ impl VersionManager {
         }
         Ok(result)
     }
+
+    /// Pick sstable ids of given `levels` that overlaps with given key. Bloom filters are supposed
+    /// to be used. The length of the retrun vector matches the length of the given levels.
+    ///
+    /// If the compaction strategy is `NonOverlap`, the retrun sstable ids of the level are
+    /// guaranteed sorted in ASC order.
+    pub async fn pick_overlap_ssts_by_key(
+        &self,
+        _levels: Range<usize>,
+        _key: &Bytes,
+    ) -> Result<Vec<Vec<u64>>> {
+        todo!()
+    }
+
+    /// Verify if ASC order is guaranteed with non-overlap levels.
+    ///
+    /// Return `Ok(true)` or `Ok(false)` for verifing, `Err(_)` for other errors.
+    pub async fn verify_non_overlap(&self) -> Result<bool> {
+        for level in 0..self.level_options.len() {
+            if self.level_compaction_strategy(level as u64).unwrap()
+                == LevelCompactionStrategy::NonOverlap
+                && self.levels[level].len() > 1
+            {
+                let last_meta = self.sstable_store.meta(self.levels[level][0]).await?;
+                for sst_id in self.levels[level][1..].iter() {
+                    let meta = self.sstable_store.meta(*sst_id).await?;
+                    if meta.block_metas.first().as_ref().unwrap().first_key
+                        <= last_meta.block_metas.last().as_ref().unwrap().last_key
+                    {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+        Ok(true)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    // TODO: Fill me please.
+    use std::sync::Arc;
+
+    use itertools::Itertools;
+    use runkv_proto::manifest::SsTableDiff;
+
+    use super::*;
+    use crate::{
+        BlockCache, BlockMeta, CachePolicy, MemObjectStore, Sstable, SstableMeta, SstableStore,
+        SstableStoreOptions,
+    };
+
+    #[tokio::test]
+    async fn test_update_squash_version_diffs() {
+        let sstable_store = build_sstable_store_for_test();
+        let mut version_manager = build_version_manager_for_test(sstable_store.clone());
+        ingest_init_meta_for_test(sstable_store.clone()).await;
+
+        ingest_meta(
+            sstable_store.clone(),
+            8,
+            Bytes::from_static(b"aaa"),
+            Bytes::from_static(b"ccc"),
+        )
+        .await;
+        ingest_meta(
+            sstable_store.clone(),
+            9,
+            Bytes::from_static(b"yyy"),
+            Bytes::from_static(b"zzz"),
+        )
+        .await;
+
+        let insert_diffs = vec![
+            VersionDiff {
+                id: 1,
+                sstable_diffs: vec![SsTableDiff {
+                    id: 8,
+                    level: 1,
+                    op: SsTableOp::Insert.into(),
+                }],
+            },
+            VersionDiff {
+                id: 2,
+                sstable_diffs: vec![SsTableDiff {
+                    id: 9,
+                    level: 2,
+                    op: SsTableOp::Insert.into(),
+                }],
+            },
+        ];
+
+        for diff in &insert_diffs {
+            version_manager.update(diff.clone()).await.unwrap()
+        }
+
+        assert_eq!(
+            version_manager.levels,
+            vec![
+                vec![0],
+                vec![8, 1],
+                vec![2, 9],
+                vec![3],
+                vec![4],
+                vec![5],
+                vec![6],
+            ]
+        );
+
+        let delete_diffs = vec![
+            VersionDiff {
+                id: 3,
+                sstable_diffs: vec![SsTableDiff {
+                    id: 1,
+                    level: 1,
+                    op: SsTableOp::Delete.into(),
+                }],
+            },
+            VersionDiff {
+                id: 4,
+                sstable_diffs: vec![SsTableDiff {
+                    id: 2,
+                    level: 2,
+                    op: SsTableOp::Delete.into(),
+                }],
+            },
+        ];
+
+        for diff in &delete_diffs {
+            version_manager.update(diff.clone()).await.unwrap()
+        }
+
+        assert_eq!(
+            version_manager.levels,
+            vec![
+                vec![0],
+                vec![8],
+                vec![9],
+                vec![3],
+                vec![4],
+                vec![5],
+                vec![6],
+            ]
+        );
+
+        assert_eq!(
+            version_manager.version_diffs_from(1, 10).unwrap(),
+            [insert_diffs.clone(), delete_diffs.clone()].concat()
+        );
+
+        version_manager.squash(3);
+
+        assert!(version_manager.version_diffs_from(1, 10).is_err());
+
+        assert_eq!(
+            version_manager.version_diffs_from(3, 10).unwrap(),
+            delete_diffs.clone()
+        );
+
+        assert!(version_manager
+            .update(VersionDiff {
+                id: 10,
+                sstable_diffs: vec![SsTableDiff {
+                    id: 10,
+                    level: 1,
+                    op: SsTableOp::Insert.into(),
+                }],
+            })
+            .await
+            .is_err());
+    }
+
+    async fn ingest_meta(
+        sstable_store: SstableStoreRef,
+        sst_id: u64,
+        first_key: Bytes,
+        last_key: Bytes,
+    ) {
+        sstable_store
+            .put(
+                &Sstable {
+                    id: sst_id,
+                    meta: SstableMeta {
+                        block_metas: vec![BlockMeta {
+                            offset: 0,
+                            len: 0,
+                            first_key,
+                            last_key,
+                        }],
+                        bloom_filter: vec![],
+                    },
+                },
+                Bytes::default(),
+                // Disable block cache, inserting block cache need to decode block data, which is
+                // empty for test.
+                CachePolicy::Disable,
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn ingest_init_meta_for_test(sstable_store: SstableStoreRef) {
+        // Ingest sst with id {i} into level {i}.
+        // All sst key range are: [b"fff"..=b"hhh"].
+        for i in 0..7 {
+            ingest_meta(
+                sstable_store.clone(),
+                i,
+                Bytes::from_static(b"fff"),
+                Bytes::from_static(b"hhh"),
+            )
+            .await;
+        }
+    }
+
+    fn build_sstable_store_for_test() -> SstableStoreRef {
+        let object_store = Arc::new(MemObjectStore::default());
+        let block_cache = BlockCache::new(0);
+        let sstable_store_options = SstableStoreOptions {
+            path: "test".to_string(),
+            object_store,
+            block_cache,
+            meta_cache_capacity: 65536,
+        };
+        Arc::new(SstableStore::new(sstable_store_options))
+    }
+
+    fn build_version_manager_for_test(sstable_store: SstableStoreRef) -> VersionManager {
+        let level_options = vec![
+            LevelOptions {
+                compaction_strategy: LevelCompactionStrategy::Overlap,
+                compression_algorighm: CompressionAlgorighm::None,
+            },
+            LevelOptions {
+                compaction_strategy: LevelCompactionStrategy::NonOverlap,
+                compression_algorighm: CompressionAlgorighm::None,
+            },
+            LevelOptions {
+                compaction_strategy: LevelCompactionStrategy::NonOverlap,
+                compression_algorighm: CompressionAlgorighm::None,
+            },
+            LevelOptions {
+                compaction_strategy: LevelCompactionStrategy::NonOverlap,
+                compression_algorighm: CompressionAlgorighm::Lz4,
+            },
+            LevelOptions {
+                compaction_strategy: LevelCompactionStrategy::NonOverlap,
+                compression_algorighm: CompressionAlgorighm::Lz4,
+            },
+            LevelOptions {
+                compaction_strategy: LevelCompactionStrategy::NonOverlap,
+                compression_algorighm: CompressionAlgorighm::Lz4,
+            },
+            LevelOptions {
+                compaction_strategy: LevelCompactionStrategy::NonOverlap,
+                compression_algorighm: CompressionAlgorighm::Lz4,
+            },
+        ];
+        let version_manager_options = VersionManagerOptions {
+            level_options,
+            levels: (0..7).into_iter().map(|i| vec![i]).collect_vec(),
+            sstable_store,
+        };
+        VersionManager::new(version_manager_options).unwrap()
+    }
 }
