@@ -4,6 +4,8 @@ mod meta;
 pub use meta::*;
 mod service;
 pub use service::*;
+mod store;
+pub use store::*;
 mod version_manager;
 pub use version_manager::*;
 

@@ -7,6 +7,8 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
+base64 = "0.13"
+bytes = "1"
 prost = "0.9"
 runkv-proto = { path = "../proto" }
 runkv-storage = { path = "../storage" }

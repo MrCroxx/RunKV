@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package meta;
+
+import "common.proto";
+
+message KeyRange {
+  bytes start_key = 1;
+  bytes end_key = 2;
+}
+
+message WheelMeta {
+  uint64 id = 1;
+  KeyRange key_range = 2;
+  common.Endpoint endpoint = 3;
+}

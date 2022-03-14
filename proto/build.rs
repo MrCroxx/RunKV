@@ -4,6 +4,7 @@ fn main() {
             &[
                 "src/proto/common.proto",
                 "src/proto/manifest.proto",
+                "src/proto/meta.proto",
                 "src/proto/runkv.proto",
             ],
             &["src/proto"],

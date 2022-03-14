@@ -1,0 +1,59 @@
+extend = [{ path = "common.toml" }, { path = "minio.toml" }]
+
+[env]
+RUST_BACKTRACE = 1
+CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
+
+[config]
+skip_core_tasks = true
+
+[tasks.clean-all]
+category = "Misc"
+description = "Clean all downloaded binaries by deleting .run folder."
+script = '''
+#!@duckscript
+rm -rf "${PREFIX}"
+'''
+
+[tasks.clean-data]
+category = "Misc"
+description = "Clean data by deleting .run/data folder."
+script = '''
+#!@duckscript
+rm -rf "${PREFIX_DATA}"
+'''
+
+[tasks.d]
+alias = "dev"
+
+[tasks.dev]
+category = "Develop"
+description = "Start development envirorment."
+dependencies = ["pre-dev"]
+script = '''
+#!@duckscript
+echo success
+'''
+
+[tasks.pre-dev]
+category = "Develop"
+description = "Downloads necessary tools and build required components."
+dependencies = [
+    "download-minio",
+    # "download-mcli",
+]
+script = '''
+#!/bin/bash
+tmux new -d -s runkv-minio ${PREFIX_BIN}/minio server ${PREFIX_DATA}
+'''
+
+[tasks.k]
+alias = "kill"
+
+[tasks.kill]
+category = "Develop"
+description = "Kill development environment."
+script = '''
+#!/bin/bash
+tmux kill-session -t runkv-minio
+'''

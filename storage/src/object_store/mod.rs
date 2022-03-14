@@ -16,6 +16,8 @@ pub enum ObjectStoreError {
     ObjectNotFound(String),
     #[error("invalid range: {0}")]
     InvalidRange(String),
+    #[error("S3 error: {0}")]
+    S3(String),
     #[error("other: {0}")]
     Other(String),
 }
