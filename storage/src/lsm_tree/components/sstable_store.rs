@@ -190,7 +190,7 @@ mod tests {
             assert_eq!(block_meta.first_key, decoded_block_meta.first_key);
             assert_eq!(block_meta.last_key, decoded_block_meta.last_key);
         }
-        assert_eq!(sst.meta.bloom_filter, fetched_meta.bloom_filter);
+        assert_eq!(sst.meta.bloom_filter_bytes, fetched_meta.bloom_filter_bytes);
         // Test fetch from block cache.
         for (block_idx, block_meta) in sst.meta.block_metas.iter().enumerate() {
             let block = sstable_store

@@ -2,12 +2,14 @@ use std::ops::{Range, RangeInclusive};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-use crate::lsm_tree::utils::{crc32check, crc32sum, full_key, raw_value, CompressionAlgorighm};
+use crate::lsm_tree::utils::{
+    crc32check, crc32sum, full_key, raw_value, Bloom, CompressionAlgorighm,
+};
 use crate::lsm_tree::{
     DEFAULT_BLOCK_SIZE, DEFAULT_BLOOM_FALSE_POSITIVE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL,
     DEFAULT_SSTABLE_META_SIZE, DEFAULT_SSTABLE_SIZE, TEST_DEFAULT_RESTART_INTERVAL,
 };
-use crate::{BlockBuilder, BlockBuilderOptions, Bloom, Result};
+use crate::{BlockBuilder, BlockBuilderOptions, Result};
 
 /// [`BlockMeta`] contains block metadata, served as a part of [`Sstable`] meta.
 #[derive(Clone, Debug)]
@@ -66,7 +68,7 @@ pub struct Sstable {
 #[derive(Debug)]
 pub struct SstableMeta {
     pub block_metas: Vec<BlockMeta>,
-    pub bloom_filter: Vec<u8>,
+    pub bloom_filter_bytes: Vec<u8>,
 }
 
 impl SstableMeta {
@@ -83,8 +85,8 @@ impl SstableMeta {
         for block_meta in &self.block_metas {
             block_meta.encode(&mut buf);
         }
-        buf.put_u32_le(self.bloom_filter.len() as u32);
-        buf.put_slice(&self.bloom_filter);
+        buf.put_u32_le(self.bloom_filter_bytes.len() as u32);
+        buf.put_slice(&self.bloom_filter_bytes);
         let checksum = crc32sum(&buf[4..]);
         (&mut buf[..4]).put_u32_le(checksum);
         buf.freeze()
@@ -99,10 +101,10 @@ impl SstableMeta {
             block_metas.push(BlockMeta::decode(&mut buf));
         }
         let bloom_filter_len = buf.get_u32_le() as usize;
-        let bloom_filter = buf.copy_to_bytes(bloom_filter_len).to_vec();
+        let bloom_filter_bytes = buf.copy_to_bytes(bloom_filter_len).to_vec();
         Self {
             block_metas,
-            bloom_filter,
+            bloom_filter_bytes,
         }
     }
 
@@ -116,6 +118,12 @@ impl SstableMeta {
     pub fn is_overlap_with_range(&self, range: RangeInclusive<&Bytes>) -> bool {
         self.block_metas.first().as_ref().unwrap().first_key <= range.end()
             && self.block_metas.last().as_ref().unwrap().last_key >= range.start()
+    }
+
+    /// Judge whether the given `key` may be in the sstable with bloom filter.
+    pub fn may_contain_key(&self, key: &Bytes) -> bool {
+        let bloom_filter = Bloom::new(&self.bloom_filter_bytes);
+        bloom_filter.may_contain(farmhash::fingerprint32(key))
     }
 }
 
@@ -229,7 +237,7 @@ impl SstableBuilder {
 
         let meta = SstableMeta {
             block_metas: self.block_metas,
-            bloom_filter: if self.options.bloom_false_positive > 0.0 {
+            bloom_filter_bytes: if self.options.bloom_false_positive > 0.0 {
                 let bits_per_key = Bloom::bloom_bits_per_key(
                     self.user_key_hashes.len(),
                     self.options.bloom_false_positive,
@@ -395,6 +403,6 @@ mod tests {
             assert_eq!(block_meta.first_key, decoded_block_meta.first_key);
             assert_eq!(block_meta.last_key, decoded_block_meta.last_key);
         }
-        assert_eq!(meta.bloom_filter, decoded_meta.bloom_filter);
+        assert_eq!(meta.bloom_filter_bytes, decoded_meta.bloom_filter_bytes);
     }
 }

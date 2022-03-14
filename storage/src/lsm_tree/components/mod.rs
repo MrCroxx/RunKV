@@ -2,8 +2,6 @@ mod block;
 pub use block::*;
 mod block_cache;
 pub use block_cache::*;
-mod bloom;
-pub use bloom::*;
 mod sstable;
 pub use sstable::*;
 mod sstable_store;

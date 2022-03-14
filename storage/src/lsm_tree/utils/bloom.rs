@@ -1,6 +1,6 @@
-// Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
+// Ported from [AgateDB](https://github.com/tikv/agatedb) with [license](https://github.com/tikv/agatedb/blob/master/LICENSE).
 
-use std::f64;
+// TODO: Refactor this in rusty style.
 
 use bytes::{BufMut, Bytes, BytesMut};
 
@@ -37,7 +37,8 @@ impl<'a, T: AsMut<[u8]>> BitSliceMut for T {
     }
 }
 
-/// Bloom implements Bloom filter functionalities over a bit-slice of data.
+/// Bloom implements bloom filter functionalities over
+/// a bit-slice of data.
 pub struct Bloom<'a> {
     /// data of filter in bits
     filter: &'a [u8],
@@ -46,27 +47,28 @@ pub struct Bloom<'a> {
 }
 
 impl<'a> Bloom<'a> {
-    /// Create a Bloom filter from a byte slice
+    /// Create a bloom filter from a byte slice
     pub fn new(buf: &'a [u8]) -> Self {
         let filter = &buf[..buf.len() - 1];
         let k = buf[buf.len() - 1];
         Self { filter, k }
     }
 
-    /// Get Bloom filter bits per key from entries count and FPR
+    /// Get bloom filter bits per key from entries count and FPR
     pub fn bloom_bits_per_key(entries: usize, false_positive_rate: f64) -> usize {
-        let size = -1.0 * (entries as f64) * false_positive_rate.ln() / f64::consts::LN_2.powi(2);
-        let locs = (f64::consts::LN_2 * size / (entries as f64)).ceil();
+        let size =
+            -1.0 * (entries as f64) * false_positive_rate.ln() / std::f64::consts::LN_2.powi(2);
+        let locs = (std::f64::consts::LN_2 * size / (entries as f64)).ceil();
         locs as usize
     }
 
-    /// Build Bloom filter from key hashes
+    /// Build bloom filter from key hashes
     pub fn build_from_key_hashes(keys: &[u32], bits_per_key: usize) -> Bytes {
         // 0.69 is approximately ln(2)
         let k = ((bits_per_key as f64) * 0.69) as u32;
         // limit k in [1, 30]
         let k = k.min(30).max(1);
-        // For small len(keys), we set a minimum Bloom filter length to avoid high FPR
+        // For small len(keys), we set a minimum bloom filter length to avoid high FPR
         let nbits = (keys.len() * bits_per_key).max(64);
         let nbytes = (nbits + 7) / 8;
         // nbits is always multiplication of 8
@@ -86,28 +88,22 @@ impl<'a> Bloom<'a> {
         filter.freeze()
     }
 
-    /// Judge whether the hash value is in the table with the given false positive rate.
-    ///
-    /// Note:
-    ///   - if the return value is true, then the table surely does not have the user key that has
-    ///     the hash;
-    ///   - if the return value is false, then the table may or may not have the user key that has
-    ///     the hash actually, a.k.a. we don't know the answer.
-    pub fn surely_not_have_hash(&self, mut h: u32) -> bool {
+    /// Check if a bloom filter may contain some data
+    pub fn may_contain(&self, mut h: u32) -> bool {
         if self.k > 30 {
-            // potential new encoding for short Bloom filters
-            false
+            // potential new encoding for short bloom filters
+            true
         } else {
             let nbits = self.filter.bit_len();
             let delta = (h >> 17) | (h << 15);
             for _ in 0..self.k {
                 let bit_pos = h % (nbits as u32);
                 if !self.filter.get_bit(bit_pos as usize) {
-                    return true;
+                    return false;
                 }
                 h = h.wrapping_add(delta);
             }
-            false
+            true
         }
     }
 }
@@ -137,9 +133,9 @@ mod tests {
         let f = Bloom::new(&buf);
         assert_eq!(f.k, 6);
 
-        assert!(!f.surely_not_have_hash(check_hash[0]));
-        assert!(!f.surely_not_have_hash(check_hash[1]));
-        assert!(f.surely_not_have_hash(check_hash[2]));
-        assert!(f.surely_not_have_hash(check_hash[3]));
+        assert!(f.may_contain(check_hash[0]));
+        assert!(f.may_contain(check_hash[1]));
+        assert!(!f.may_contain(check_hash[2]));
+        assert!(!f.may_contain(check_hash[3]));
     }
 }

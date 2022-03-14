@@ -236,12 +236,33 @@ impl VersionManager {
     /// guaranteed sorted in ASC order.
     pub async fn pick_overlap_ssts_by_key(
         &self,
-        _levels: Range<usize>,
+        levels: Range<usize>,
         key: &Bytes,
         timestamp: u64,
     ) -> Result<Vec<Vec<u64>>> {
-        let _key = full_key(key, timestamp);
-        todo!()
+        let full_key = full_key(key, timestamp);
+        let mut result = vec![vec![]; levels.end - levels.start];
+        for level in levels {
+            let compaction_strategy = self
+                .level_options
+                .get(level)
+                .ok_or_else(|| {
+                    ManifestError::InvalidVersionDiff(format!("invalid level idx: {}", level))
+                })?
+                .compaction_strategy;
+            for sst_id in &self.levels[level] {
+                let meta = self.sstable_store.meta(*sst_id).await?;
+                if meta.may_contain_key(key) && meta.is_overlap_with_range(&full_key..=&full_key) {
+                    result[level].push(*sst_id);
+                }
+                if compaction_strategy == LevelCompactionStrategy::NonOverlap
+                    && meta.block_metas.first().as_ref().unwrap().first_key > key
+                {
+                    break;
+                }
+            }
+        }
+        Ok(result)
     }
 
     /// Verify if ASC order and non-overlap is guaranteed with non-overlap levels.
@@ -278,8 +299,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        BlockCache, BlockMeta, CachePolicy, MemObjectStore, Sstable, SstableMeta, SstableStore,
-        SstableStoreOptions,
+        BlockCache, BlockMeta, CachePolicy, MemObjectStore, Sstable, SstableBuilder,
+        SstableBuilderOptions, SstableMeta, SstableStore, SstableStoreOptions,
     };
 
     #[tokio::test]
@@ -290,11 +311,11 @@ mod tests {
         // All sst key range are: [b"fff"..=b"hhh"].
         version_manager.levels = (0..7).map(|i| vec![i + 1]).collect_vec();
         for i in 1..=7 {
-            ingest_meta(&sstable_store, i, key(b"fff"), key(b"hhh")).await;
+            ingest_meta(&sstable_store, i, fkey(b"fff"), fkey(b"hhh")).await;
         }
 
-        ingest_meta(&sstable_store, 8, key(b"aaa"), key(b"ccc")).await;
-        ingest_meta(&sstable_store, 9, key(b"yyy"), key(b"zzz")).await;
+        ingest_meta(&sstable_store, 8, fkey(b"aaa"), fkey(b"ccc")).await;
+        ingest_meta(&sstable_store, 9, fkey(b"yyy"), fkey(b"zzz")).await;
 
         let insert_diffs = vec![
             VersionDiff {
@@ -405,10 +426,10 @@ mod tests {
             vec![],
             vec![],
         ];
-        ingest_meta(&sstable_store, 1, key(b"aaa"), key(b"bbb")).await;
-        ingest_meta(&sstable_store, 2, key(b"ccc"), key(b"ddd")).await;
-        ingest_meta(&sstable_store, 3, key(b"eee"), key(b"fff")).await;
-        ingest_meta(&sstable_store, 4, key(b"abb"), key(b"bdd")).await;
+        ingest_meta(&sstable_store, 1, fkey(b"aaa"), fkey(b"bbb")).await;
+        ingest_meta(&sstable_store, 2, fkey(b"ccc"), fkey(b"ddd")).await;
+        ingest_meta(&sstable_store, 3, fkey(b"eee"), fkey(b"fff")).await;
+        ingest_meta(&sstable_store, 4, fkey(b"abb"), fkey(b"bdd")).await;
         assert_matches!(
             version_manager
                 .update(VersionDiff {
@@ -439,19 +460,84 @@ mod tests {
             vec![],
             vec![],
         ];
-        ingest_meta(&sstable_store, 1, key(b"aaa"), key(b"fff")).await;
-        ingest_meta(&sstable_store, 2, key(b"bbb"), key(b"ggg")).await;
-        ingest_meta(&sstable_store, 3, key(b"xxx"), key(b"zzz")).await;
-        ingest_meta(&sstable_store, 4, key(b"bbb"), key(b"fff")).await;
-        ingest_meta(&sstable_store, 5, key(b"xxx"), key(b"zzz")).await;
-        ingest_meta(&sstable_store, 6, key(b"aaa"), key(b"ddd")).await;
-        ingest_meta(&sstable_store, 7, key(b"eee"), key(b"fff")).await;
+        ingest_meta(&sstable_store, 1, fkey(b"aaa"), fkey(b"fff")).await;
+        ingest_meta(&sstable_store, 2, fkey(b"bbb"), fkey(b"ggg")).await;
+        ingest_meta(&sstable_store, 3, fkey(b"xxx"), fkey(b"zzz")).await;
+        ingest_meta(&sstable_store, 4, fkey(b"bbb"), fkey(b"fff")).await;
+        ingest_meta(&sstable_store, 5, fkey(b"xxx"), fkey(b"zzz")).await;
+        ingest_meta(&sstable_store, 6, fkey(b"aaa"), fkey(b"ddd")).await;
+        ingest_meta(&sstable_store, 7, fkey(b"eee"), fkey(b"fff")).await;
         assert_eq!(
             version_manager
-                .pick_overlap_ssts(0..7, &key(b"eee")..=&key(b"fff"), u64::MAX)
+                .pick_overlap_ssts(0..7, &fkey(b"eee")..=&fkey(b"fff"), u64::MAX)
                 .await
                 .unwrap(),
             vec![vec![1, 2], vec![4], vec![], vec![], vec![7], vec![], vec![]]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pick_overlap_ssts_by_key() {
+        let sstable_store = build_sstable_store_for_test();
+        let mut version_manager = build_version_manager_for_test(sstable_store.clone());
+        version_manager.levels = vec![
+            vec![1, 2, 3],
+            vec![],
+            vec![],
+            vec![4],
+            vec![5, 6],
+            vec![],
+            vec![],
+        ];
+        build_and_ingest_sst(
+            sstable_store.clone(),
+            1,
+            &[(b"k1", b"v1"), (b"k2", b"v2"), (b"k3", b"v3")],
+            4,
+        )
+        .await;
+        build_and_ingest_sst(
+            sstable_store.clone(),
+            2,
+            &[(b"k1", b"v1"), (b"k2", b"v2"), (b"k3", b"v3")],
+            3,
+        )
+        .await;
+        build_and_ingest_sst(
+            sstable_store.clone(),
+            3,
+            &[(b"k7", b"v7"), (b"k8", b"v8"), (b"k9", b"v9")],
+            4,
+        )
+        .await;
+        build_and_ingest_sst(
+            sstable_store.clone(),
+            4,
+            &[(b"k1", b"v1"), (b"k2", b"v2"), (b"k3", b"v3")],
+            2,
+        )
+        .await;
+        build_and_ingest_sst(
+            sstable_store.clone(),
+            5,
+            &[(b"k1", b"v1"), (b"k2", b"v2"), (b"k3", b"v3")],
+            1,
+        )
+        .await;
+        build_and_ingest_sst(
+            sstable_store.clone(),
+            6,
+            &[(b"k7", b"v7"), (b"k8", b"v8"), (b"k9", b"v9")],
+            1,
+        )
+        .await;
+
+        assert_eq!(
+            version_manager
+                .pick_overlap_ssts_by_key(0..7, &key(b"k2"), u64::MAX)
+                .await
+                .unwrap(),
+            vec![vec![1, 2], vec![], vec![], vec![4], vec![5], vec![], vec![]]
         );
     }
 
@@ -468,9 +554,9 @@ mod tests {
             vec![],
             vec![],
         ];
-        ingest_meta(&sstable_store, 1, key(b"aaa"), key(b"bbb")).await;
-        ingest_meta(&sstable_store, 2, key(b"ccc"), key(b"ddd")).await;
-        ingest_meta(&sstable_store, 3, key(b"eee"), key(b"fff")).await;
+        ingest_meta(&sstable_store, 1, fkey(b"aaa"), fkey(b"bbb")).await;
+        ingest_meta(&sstable_store, 2, fkey(b"ccc"), fkey(b"ddd")).await;
+        ingest_meta(&sstable_store, 3, fkey(b"eee"), fkey(b"fff")).await;
         assert!(version_manager.verify_non_overlap().await.unwrap());
 
         let sstable_store = build_sstable_store_for_test();
@@ -484,9 +570,9 @@ mod tests {
             vec![],
             vec![],
         ];
-        ingest_meta(&sstable_store, 1, key(b"aaa"), key(b"fff")).await;
-        ingest_meta(&sstable_store, 2, key(b"bbb"), key(b"ggg")).await;
-        ingest_meta(&sstable_store, 3, key(b"ccc"), key(b"hhh")).await;
+        ingest_meta(&sstable_store, 1, fkey(b"aaa"), fkey(b"fff")).await;
+        ingest_meta(&sstable_store, 2, fkey(b"bbb"), fkey(b"ggg")).await;
+        ingest_meta(&sstable_store, 3, fkey(b"ccc"), fkey(b"hhh")).await;
         assert!(!version_manager.verify_non_overlap().await.unwrap());
 
         let sstable_store = build_sstable_store_for_test();
@@ -500,9 +586,9 @@ mod tests {
             vec![],
             vec![],
         ];
-        ingest_meta(&sstable_store, 1, key(b"eee"), key(b"fff")).await;
-        ingest_meta(&sstable_store, 2, key(b"ccc"), key(b"ddd")).await;
-        ingest_meta(&sstable_store, 3, key(b"aaa"), key(b"bbb")).await;
+        ingest_meta(&sstable_store, 1, fkey(b"eee"), fkey(b"fff")).await;
+        ingest_meta(&sstable_store, 2, fkey(b"ccc"), fkey(b"ddd")).await;
+        ingest_meta(&sstable_store, 3, fkey(b"aaa"), fkey(b"bbb")).await;
         assert!(!version_manager.verify_non_overlap().await.unwrap());
 
         let sstable_store = build_sstable_store_for_test();
@@ -516,9 +602,9 @@ mod tests {
             vec![],
             vec![],
         ];
-        ingest_meta(&sstable_store, 3, key(b"ccc"), key(b"hhh")).await;
-        ingest_meta(&sstable_store, 2, key(b"bbb"), key(b"ggg")).await;
-        ingest_meta(&sstable_store, 1, key(b"aaa"), key(b"fff")).await;
+        ingest_meta(&sstable_store, 3, fkey(b"ccc"), fkey(b"hhh")).await;
+        ingest_meta(&sstable_store, 2, fkey(b"bbb"), fkey(b"ggg")).await;
+        ingest_meta(&sstable_store, 1, fkey(b"aaa"), fkey(b"fff")).await;
         assert!(!version_manager.verify_non_overlap().await.unwrap());
     }
 
@@ -539,7 +625,7 @@ mod tests {
                             first_key,
                             last_key,
                         }],
-                        bloom_filter: vec![],
+                        bloom_filter_bytes: vec![],
                     },
                 },
                 Bytes::default(),
@@ -547,6 +633,25 @@ mod tests {
                 // empty for test.
                 CachePolicy::Disable,
             )
+            .await
+            .unwrap();
+    }
+
+    async fn build_and_ingest_sst(
+        sstable_store: SstableStoreRef,
+        sst_id: u64,
+        kvs: &[(&'static [u8], &'static [u8])],
+        timestamp: u64,
+    ) {
+        let options = SstableBuilderOptions::default();
+        let mut builder = SstableBuilder::new(options);
+        for (k, v) in kvs {
+            builder.add(k, timestamp, Some(v)).unwrap();
+        }
+        let (meta, data) = builder.build().unwrap();
+        let sst = Sstable { id: sst_id, meta };
+        sstable_store
+            .put(&sst, data, CachePolicy::Disable)
             .await
             .unwrap();
     }
@@ -602,7 +707,11 @@ mod tests {
         VersionManager::new(version_manager_options).unwrap()
     }
 
-    fn key(s: &'static [u8]) -> Bytes {
+    fn fkey(s: &'static [u8]) -> Bytes {
         full_key(s, 1)
+    }
+
+    fn key(s: &'static [u8]) -> Bytes {
+        Bytes::from_static(s)
     }
 }
