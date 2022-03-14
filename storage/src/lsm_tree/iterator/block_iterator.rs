@@ -11,6 +11,8 @@ use crate::{Block, KeyPrefix, Result};
 pub struct BlockIterator {
     /// Block that iterates on.
     block: Arc<Block>,
+    /// Current restart point index.
+    restart_point_index: usize,
     /// Current offset.
     offset: usize,
     /// Current key.
@@ -26,6 +28,7 @@ impl BlockIterator {
         Self {
             block,
             offset: usize::MAX,
+            restart_point_index: usize::MAX,
             key: BytesMut::default(),
             value: Bytes::default(),
             entry_len: 0,
@@ -35,6 +38,7 @@ impl BlockIterator {
     /// Invalidate current state after reaching a invalid state.
     fn invalid(&mut self) {
         self.offset = self.block.len();
+        self.restart_point_index = self.block.restart_point_len();
         self.key.clear();
         self.value.clear();
         self.entry_len = 0;
@@ -56,6 +60,11 @@ impl BlockIterator {
         self.value = self.block.slice(prefix.value_range());
         self.offset = offset;
         self.entry_len = prefix.entry_len();
+        if self.restart_point_index + 1 < self.block.restart_point_len()
+            && self.offset >= self.block.restart_point(self.restart_point_index + 1) as usize
+        {
+            self.restart_point_index += 1;
+        }
     }
 
     /// Move forward until reach the first that equals or larger than the given `key`.
@@ -74,8 +83,8 @@ impl BlockIterator {
 
     /// Move forward until the position reaches the previous position of the given `next_offset` or
     /// the last valid position if exists.
-    fn next_until_next_offset(&mut self, next_offset: usize) {
-        while self.offset + self.entry_len < std::cmp::min(self.block.len(), next_offset) {
+    fn next_until_prev(&mut self, offset: usize) {
+        while self.offset + self.entry_len < std::cmp::min(self.block.len(), offset) {
             self.next_inner();
         }
     }
@@ -88,13 +97,12 @@ impl BlockIterator {
             self.invalid();
             return;
         }
-        let origin_offset = self.offset;
-        let mut restart_point_index = self.search_restart_point_index_by_key(self.key());
-        if self.offset == self.block.restart_point(restart_point_index) as usize {
-            restart_point_index -= 1;
+        if self.block.restart_point(self.restart_point_index) as usize == self.offset {
+            self.restart_point_index -= 1;
         }
-        self.seek_restart_point_by_index(restart_point_index);
-        self.next_until_next_offset(origin_offset);
+        let origin_offset = self.offset;
+        self.seek_restart_point_by_index(self.restart_point_index);
+        self.next_until_prev(origin_offset);
     }
 
     /// Decode [`KeyPrefix`] at given offset.
@@ -125,6 +133,7 @@ impl BlockIterator {
         self.value = self.block.slice(prefix.value_range());
         self.offset = offset;
         self.entry_len = prefix.entry_len();
+        self.restart_point_index = index;
     }
 }
 
@@ -161,7 +170,7 @@ impl Iterator for BlockIterator {
             Seek::First => self.seek_restart_point_by_index(0),
             Seek::Last => {
                 self.seek_restart_point_by_index(self.block.restart_point_len() - 1);
-                self.next_until_next_offset(self.block.len())
+                self.next_until_prev(self.block.len())
             }
             Seek::RandomForward(key) => {
                 self.seek_restart_point_by_key(key);
