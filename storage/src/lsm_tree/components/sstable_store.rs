@@ -26,7 +26,7 @@ pub struct SstableStore {
     path: String,
     object_store: ObjectStoreRef,
     block_cache: BlockCache,
-    meta_cache: Cache<u64, SstableMeta>,
+    meta_cache: Cache<u64, Arc<SstableMeta>>,
 }
 
 impl SstableStore {
@@ -100,13 +100,13 @@ impl SstableStore {
         }
     }
 
-    pub async fn meta(&self, sst_id: u64) -> Result<SstableMeta> {
+    pub async fn meta(&self, sst_id: u64) -> Result<Arc<SstableMeta>> {
         if let Some(meta) = self.meta_cache.get(&sst_id) {
             return Ok(meta);
         }
         let path = self.meta_path(sst_id);
         let buf = self.object_store.get(&path).await?;
-        let meta = SstableMeta::decode(buf);
+        let meta = Arc::new(SstableMeta::decode(buf));
         self.meta_cache.insert(sst_id, meta.clone()).await;
         Ok(meta)
     }

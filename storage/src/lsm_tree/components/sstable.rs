@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::ops::{Range, RangeInclusive};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
@@ -56,14 +56,14 @@ impl BlockMeta {
 }
 
 /// [`Sstable`] serves as a handle to retrieve actuall sstable data from the object store.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Sstable {
     pub id: u64,
     pub meta: SstableMeta,
 }
 
 /// [`SstableMeta`] contains sstable metadata.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct SstableMeta {
     pub block_metas: Vec<BlockMeta>,
     pub bloom_filter: Vec<u8>,
@@ -104,6 +104,18 @@ impl SstableMeta {
             block_metas,
             bloom_filter,
         }
+    }
+
+    pub fn is_overlap_with(&self, rhs: &Self) -> bool {
+        self.is_overlap_with_range(
+            &rhs.block_metas.first().as_ref().unwrap().first_key
+                ..=&rhs.block_metas.last().as_ref().unwrap().last_key,
+        )
+    }
+
+    pub fn is_overlap_with_range(&self, range: RangeInclusive<&Bytes>) -> bool {
+        self.block_metas.first().as_ref().unwrap().first_key <= range.end()
+            && self.block_metas.last().as_ref().unwrap().last_key >= range.start()
     }
 }
 
