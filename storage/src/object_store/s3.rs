@@ -1,6 +1,8 @@
 use std::ops::Range;
 
 use async_trait::async_trait;
+use aws_sdk_s3::error::{GetObjectError, GetObjectErrorKind};
+use aws_sdk_s3::types::SdkError;
 use aws_sdk_s3::{Client, Endpoint, Region};
 use aws_smithy_http::body::SdkBody;
 use bytes::Bytes;
@@ -65,23 +67,45 @@ impl ObjectStore for S3ObjectStore {
         Ok(())
     }
 
-    async fn get(&self, path: &str) -> Result<Bytes> {
+    async fn get(&self, path: &str) -> Result<Option<Bytes>> {
         let req = self.client.get_object().bucket(&self.bucket).key(path);
-        let rsp = req.send().await.map_err(err)?;
+        let rsp = match req.send().await {
+            Ok(rsp) => rsp,
+            Err(SdkError::ServiceError {
+                err:
+                    GetObjectError {
+                        kind: GetObjectErrorKind::NoSuchKey(..),
+                        ..
+                    },
+                ..
+            }) => return Ok(None),
+            Err(e) => return Err(err(e).into()),
+        };
         let data = rsp.body.collect().await.map_err(err)?.into_bytes();
-        Ok(data)
+        Ok(Some(data))
     }
 
-    async fn get_range(&self, path: &str, range: Range<usize>) -> Result<Bytes> {
+    async fn get_range(&self, path: &str, range: Range<usize>) -> Result<Option<Bytes>> {
         let req = self
             .client
             .get_object()
             .bucket(&self.bucket)
             .key(path)
             .range(format!("bytes={}-{}", range.start, range.end - 1));
-        let rsp = req.send().await.map_err(err)?;
+        let rsp = match req.send().await {
+            Ok(rsp) => rsp,
+            Err(SdkError::ServiceError {
+                err:
+                    GetObjectError {
+                        kind: GetObjectErrorKind::NoSuchKey(..),
+                        ..
+                    },
+                ..
+            }) => return Ok(None),
+            Err(e) => return Err(err(e).into()),
+        };
         let data = rsp.body.collect().await.map_err(err)?.into_bytes();
-        Ok(data)
+        Ok(Some(data))
     }
 
     async fn remove(&self, path: &str) -> Result<()> {

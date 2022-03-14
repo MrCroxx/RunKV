@@ -5,7 +5,7 @@ use moka::future::Cache;
 
 use super::{Block, BlockCache, Sstable};
 use crate::object_store::ObjectStoreRef;
-use crate::{Error, Result, SstableMeta};
+use crate::{Error, ObjectStoreError, Result, SstableMeta};
 
 // TODO: Define policy based on use cases (read / comapction / ...).
 #[derive(Clone, Copy)]
@@ -81,7 +81,10 @@ impl SstableStore {
             let block_data = self
                 .object_store
                 .get_range(&data_path, block_meta.data_range())
-                .await?;
+                .await?
+                .ok_or(Error::ObjectStoreError(ObjectStoreError::ObjectNotFound(
+                    data_path,
+                )))?;
             let block = Block::decode(block_data)?;
             Ok(Arc::new(block))
         };
@@ -105,7 +108,13 @@ impl SstableStore {
             return Ok(meta);
         }
         let path = self.meta_path(sst_id);
-        let buf = self.object_store.get(&path).await?;
+        let buf = self
+            .object_store
+            .get(&path)
+            .await?
+            .ok_or(Error::ObjectStoreError(ObjectStoreError::ObjectNotFound(
+                path,
+            )))?;
         let meta = Arc::new(SstableMeta::decode(buf));
         self.meta_cache.insert(sst_id, meta.clone()).await;
         Ok(meta)
