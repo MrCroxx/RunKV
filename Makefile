@@ -1,6 +1,6 @@
 SHELL := /bin/bash
-.PHONY: all
-all: rust
+.PHONY: proto
+all: proto rust
 
 rust: rust_check_all rust_test_with_coverage rust_cargo_sort_check
 
@@ -24,3 +24,12 @@ rust_test_with_coverage:
 	RUSTFLAGS=-Dwarnings CARGO_TARGET_DIR=target/tarpaulin cargo tarpaulin --workspace \
 	--exclude proto --exclude-files tests/* --out Xml --force-clean --run-types Doctests Tests \
 	-- --report-time -Z unstable-options
+
+proto:
+	cd proto/src/proto && prototool format -w && buf lint
+
+proto_check:
+	cd proto/src/proto && prototool format -d && buf lint 
+
+update_ci:
+	cd .github/template && ./generate.sh

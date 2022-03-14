@@ -33,14 +33,9 @@ jobs:
           ./.github/template/generate.sh --check
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@master
-      - name: Check protobuf code format
+      - name: Check protobuf style
         run: |
-          prototool format -d
-        working-directory: proto/src/proto
-      - name: Lint protobuf
-        run: |
-          buf lint
-        working-directory: proto/src/proto
+          make proto_check
   rust-test:
     name: rust test with codecov
     runs-on: ubuntu-latest
