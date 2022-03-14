@@ -17,10 +17,10 @@ rm -rf "${PREFIX}"
 
 [tasks.clean-data]
 category = "Misc"
-description = "Clean data by deleting .run/data folder."
+description = "Clean data by deleting files in .run/data folder."
 script = '''
 #!@duckscript
-rm -rf "${PREFIX_DATA}"
+rm -rf "${PREFIX_DATA}/*"
 '''
 
 [tasks.d]
@@ -40,11 +40,17 @@ category = "Develop"
 description = "Downloads necessary tools and build required components."
 dependencies = [
     "download-minio",
-    # "download-mcli",
+    "download-mcli",
+    "clean-data",
 ]
 script = '''
 #!/bin/bash
-tmux new -d -s runkv-minio ${PREFIX_BIN}/minio server ${PREFIX_DATA}
+# run minio
+tmux new -d -s runkv-minio ${PREFIX_BIN}/minio server --address 127.0.0.1:9000 --console-address 127.0.0.1:9090 ${PREFIX_DATA}
+# create test bucket
+tmux new -d -s runkv-mcli \ ' \
+${PREFIX_BIN}/mcli alias set local http://127.0.0.1:9000 minioadmin minioadmin ; \
+${PREFIX_BIN}/mcli mb local/test ; \
 '''
 
 [tasks.k]

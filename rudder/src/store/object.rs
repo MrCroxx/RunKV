@@ -24,9 +24,16 @@ impl ObjectMetaStore {
             .map_err(Error::StorageError)
     }
 
-    async fn get(&self, key: &Bytes) -> Result<Bytes> {
+    async fn get(&self, key: &Bytes) -> Result<Option<Bytes>> {
         self.object_store
             .get(&self.key(key))
+            .await
+            .map_err(Error::StorageError)
+    }
+
+    async fn remove(&self, key: &Bytes) -> Result<()> {
+        self.object_store
+            .remove(&self.key(key))
             .await
             .map_err(Error::StorageError)
     }
@@ -47,13 +54,15 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_put_get() {
+    async fn test_crud() {
         let object_store = Arc::new(MemObjectStore::default());
         let store = ObjectMetaStore::new(object_store, "meta-test".to_string());
         let key = Bytes::from_static(b"test-key");
         let value = Bytes::from_static(b"test-value");
         store.put(&key, value.clone()).await.unwrap();
-        let fetched_value = store.get(&key).await.unwrap();
+        let fetched_value = store.get(&key).await.unwrap().unwrap();
         assert_eq!(fetched_value, value);
+        store.remove(&key).await.unwrap();
+        assert!(store.get(&key).await.unwrap().is_none());
     }
 }

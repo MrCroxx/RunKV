@@ -26,9 +26,9 @@ pub enum ObjectStoreError {
 pub trait ObjectStore: Send + Sync {
     async fn put(&self, path: &str, obj: Bytes) -> Result<()>;
 
-    async fn get(&self, path: &str) -> Result<Bytes>;
+    async fn get(&self, path: &str) -> Result<Option<Bytes>>;
 
-    async fn get_range(&self, path: &str, range: Range<usize>) -> Result<Bytes>;
+    async fn get_range(&self, path: &str, range: Range<usize>) -> Result<Option<Bytes>>;
 
     async fn remove(&self, path: &str) -> Result<()>;
 }

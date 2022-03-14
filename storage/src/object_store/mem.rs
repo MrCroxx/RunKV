@@ -21,20 +21,16 @@ impl ObjectStore for MemObjectStore {
         Ok(())
     }
 
-    async fn get(&self, path: &str) -> Result<Bytes> {
+    async fn get(&self, path: &str) -> Result<Option<Bytes>> {
         let objects = self.objects.read();
-        let obj = objects
-            .get(path)
-            .ok_or_else(|| ObjectStoreError::ObjectNotFound(path.to_string()))?;
-        Ok(obj.clone())
+        let obj = objects.get(path).cloned();
+        Ok(obj)
     }
 
-    async fn get_range(&self, path: &str, range: Range<usize>) -> Result<Bytes> {
+    async fn get_range(&self, path: &str, range: Range<usize>) -> Result<Option<Bytes>> {
         let objects = self.objects.read();
-        let obj = objects
-            .get(path)
-            .ok_or_else(|| ObjectStoreError::ObjectNotFound(path.to_string()))?;
-        Ok(obj.slice(range))
+        let obj = objects.get(path).map(|obj| obj.slice(range));
+        Ok(obj)
     }
 
     async fn remove(&self, path: &str) -> Result<()> {
