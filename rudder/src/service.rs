@@ -3,10 +3,10 @@ use runkv_proto::runkv::rudder_service_server::RudderService;
 use runkv_proto::runkv::{HeartbeatRequest, HeartbeatResponse};
 use tonic::{Request, Response, Status};
 
-use crate::VersionManagerRef;
+use crate::MetaManagerRef;
 
 pub struct Rudder {
-    _version_manager: VersionManagerRef,
+    _version_manager: MetaManagerRef,
 }
 
 #[async_trait]
