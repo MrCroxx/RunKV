@@ -150,7 +150,7 @@ impl CompressionAlgorighm {
 pub fn full_key(user_key: &[u8], timestamp: u64) -> Bytes {
     let mut buf = BytesMut::with_capacity(user_key.len() + 8);
     buf.put_slice(user_key);
-    buf.put_u64_le(!timestamp);
+    buf.put_u64(u64::MAX - timestamp);
     buf.freeze()
 }
 
@@ -161,7 +161,7 @@ pub fn user_key(full_key: &[u8]) -> &[u8] {
 
 /// Get timestamp in full key.
 pub fn timestamp(full_key: &[u8]) -> u64 {
-    !(&full_key[full_key.len() - 8..]).get_u64_le()
+    u64::MAX - (&full_key[full_key.len() - 8..]).get_u64()
 }
 
 /// Calculate the difference between two keys.
