@@ -1,5 +1,6 @@
 mod block_iterator;
 mod concat_iterator;
+mod memtable_iterator;
 mod merge_iterator;
 mod sstable_iterator;
 mod user_key_iterator;
@@ -7,6 +8,7 @@ mod user_key_iterator;
 use async_trait::async_trait;
 pub use block_iterator::*;
 pub use concat_iterator::*;
+pub use memtable_iterator::*;
 pub use merge_iterator::*;
 pub use sstable_iterator::*;
 pub use user_key_iterator::*;

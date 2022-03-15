@@ -311,12 +311,12 @@ mod tests {
         it.seek(Seek::RandomForward(&full_key(b"k03", 3)[..]))
             .await
             .unwrap();
-        assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], it.key());
+        assert_eq!(&full_key(b"k04", 4)[..], it.key());
 
         it.seek(Seek::RandomBackward(&full_key(b"k03", 3)[..]))
             .await
             .unwrap();
-        assert_eq!(&full_key(format!("k{:02}", 2).as_bytes(), 2)[..], it.key());
+        assert_eq!(&full_key(b"k02", 2)[..], it.key());
     }
 
     #[tokio::test]
@@ -356,12 +356,12 @@ mod tests {
         it.seek(Seek::RandomForward(&full_key(b"k03", 3)[..]))
             .await
             .unwrap();
-        assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], it.key());
+        assert_eq!(&full_key(b"k04", 4)[..], it.key());
 
         it.prev().await.unwrap();
-        assert_eq!(&full_key(format!("k{:02}", 2).as_bytes(), 2)[..], it.key());
+        assert_eq!(&full_key(b"k02", 2)[..], it.key());
 
         it.next().await.unwrap();
-        assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], it.key());
+        assert_eq!(&full_key(b"k04", 4)[..], it.key());
     }
 }

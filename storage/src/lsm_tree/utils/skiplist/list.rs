@@ -46,6 +46,9 @@ impl Node {
     }
 }
 
+unsafe impl Send for Node {}
+unsafe impl Sync for Node {}
+
 struct SkiplistCore {
     height: AtomicUsize,
     head: NonNull<Node>,
@@ -413,6 +416,9 @@ impl<T: AsRef<Skiplist<C>>, C: KeyComparator> IterRef<T, C> {
         self.cursor = self.list.as_ref().find_last();
     }
 }
+
+unsafe impl<T: AsRef<Skiplist<C>> + Send, C> Send for IterRef<T, C> {}
+unsafe impl<T: AsRef<Skiplist<C>> + Send, C> Sync for IterRef<T, C> {}
 
 #[cfg(test)]
 mod tests {
