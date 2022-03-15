@@ -16,3 +16,5 @@ const TEST_DEFAULT_RESTART_INTERVAL: usize = 2;
 const DEFAULT_ENTRY_SIZE: usize = 1024; // 1 KiB
 const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.1;
 const DEFAULT_SSTABLE_META_SIZE: usize = 4 * 1024; // 4 KiB
+#[cfg(test)]
+const DEFAULT_MEMTABLE_SIZE: usize = 4 * 1024 * 1024; // 4 MiB

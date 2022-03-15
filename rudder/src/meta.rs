@@ -52,11 +52,9 @@ mod tests {
 
     use super::*;
 
-    fn is_send_sync(_: impl Send + Sync) -> bool {
-        true
-    }
+    fn is_send_sync<T: Send + Sync>() {}
 
-    fn build_meta_manager_for_test() -> MetaManagerRef {
+    fn _build_meta_manager_for_test() -> MetaManagerRef {
         let level_options = vec![
             LevelOptions {
                 compaction_strategy: LevelCompactionStrategy::Overlap,
@@ -111,8 +109,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_sync() {
-        let meta_manager = build_meta_manager_for_test();
-        assert!(is_send_sync(meta_manager));
+    fn ensure_send_sync() {
+        is_send_sync::<VersionManager>();
     }
 }
