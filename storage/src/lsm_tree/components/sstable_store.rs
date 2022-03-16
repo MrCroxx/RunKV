@@ -103,7 +103,12 @@ impl SstableStore {
         }
     }
 
-    pub async fn meta(&self, sst_id: u64) -> Result<Arc<SstableMeta>> {
+    pub async fn sstable(&self, sst_id: u64) -> Result<Sstable> {
+        let meta = self.meta(sst_id).await?;
+        Ok(Sstable { id: sst_id, meta })
+    }
+
+    async fn meta(&self, sst_id: u64) -> Result<Arc<SstableMeta>> {
         if let Some(meta) = self.meta_cache.get(&sst_id) {
             return Ok(meta);
         }
@@ -171,7 +176,10 @@ mod tests {
         };
         let sstable_store = SstableStore::new(options);
         let (meta, data) = build_sstable_for_test();
-        let sst = Sstable { id: 1, meta };
+        let sst = Sstable {
+            id: 1,
+            meta: Arc::new(meta),
+        };
         sstable_store
             .put(&sst, data.clone(), CachePolicy::Fill)
             .await

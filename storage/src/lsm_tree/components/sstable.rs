@@ -1,4 +1,5 @@
 use std::ops::{Range, RangeInclusive};
+use std::sync::Arc;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
@@ -61,7 +62,7 @@ impl BlockMeta {
 #[derive(Debug)]
 pub struct Sstable {
     pub id: u64,
-    pub meta: SstableMeta,
+    pub meta: SstableMetaRef,
 }
 
 /// [`SstableMeta`] contains sstable metadata.
@@ -126,6 +127,8 @@ impl SstableMeta {
         bloom_filter.may_contain(farmhash::fingerprint32(key))
     }
 }
+
+pub type SstableMetaRef = Arc<SstableMeta>;
 
 #[derive(Clone, Debug)]
 pub struct SstableBuilderOptions {
