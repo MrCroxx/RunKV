@@ -100,7 +100,7 @@ mod tests {
             levels: vec![vec![]; 7],
             sstable_store: sstable_store.clone(),
         };
-        let version_manager = VersionManager::new(version_manager_options).unwrap();
+        let version_manager = VersionManager::new(version_manager_options);
         let meta_manager_options = MetaManagerOptions {
             version: version_manager,
             watermark: 0,

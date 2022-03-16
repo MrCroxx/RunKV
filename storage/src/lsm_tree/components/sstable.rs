@@ -94,7 +94,7 @@ impl Sstable {
     }
 
     /// Judge whether the given `key` may be in the sstable with bloom filter.
-    pub fn may_contain_key(&self, key: &Bytes) -> bool {
+    pub fn may_contain_key(&self, key: &[u8]) -> bool {
         self.meta.may_contain_key(key)
     }
 
@@ -172,7 +172,7 @@ impl SstableMeta {
     }
 
     /// Judge whether the given `key` may be in the sstable with bloom filter.
-    fn may_contain_key(&self, key: &Bytes) -> bool {
+    fn may_contain_key(&self, key: &[u8]) -> bool {
         let bloom_filter = Bloom::new(&self.bloom_filter_bytes);
         bloom_filter.may_contain(farmhash::fingerprint32(key))
     }

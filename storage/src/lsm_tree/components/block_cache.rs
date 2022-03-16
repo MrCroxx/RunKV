@@ -5,6 +5,7 @@ use futures::Future;
 use moka::future::Cache;
 
 use super::Block;
+use crate::lsm_tree::DEFAULT_BLOCK_SIZE;
 use crate::{Error, Result};
 
 pub struct BlockCache {
@@ -13,9 +14,12 @@ pub struct BlockCache {
 
 impl BlockCache {
     pub fn new(capacity: usize) -> Self {
-        Self {
-            inner: Cache::new(capacity as u64),
-        }
+        let cache: Cache<Bytes, Arc<Block>> = Cache::builder()
+            .weigher(|_k, v: &Arc<Block>| v.len() as u32)
+            .initial_capacity(capacity / DEFAULT_BLOCK_SIZE)
+            .max_capacity(capacity as u64)
+            .build();
+        Self { inner: cache }
     }
 
     pub fn get(&self, sst_id: u64, block_idx: usize) -> Option<Arc<Block>> {
