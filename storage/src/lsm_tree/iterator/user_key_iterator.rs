@@ -152,10 +152,12 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::{
-        BlockCache, MemObjectStore, Sstable, SstableBuilder, SstableBuilderOptions,
-        SstableIterator, SstableMeta, SstableStore, SstableStoreOptions,
+    use crate::components::{
+        BlockCache, CachePolicy, Sstable, SstableBuilder, SstableBuilderOptions, SstableMeta,
+        SstableStore, SstableStoreOptions,
     };
+    use crate::iterator::SstableIterator;
+    use crate::MemObjectStore;
 
     async fn build_iterator_for_test(timestamp: u64) -> UserKeyIterator {
         let object_store = Arc::new(MemObjectStore::default());
@@ -171,11 +173,11 @@ mod tests {
         let (meta, data) = build_sstable_for_test();
         let sstable = Sstable::new(1, Arc::new(meta));
         sstable_store
-            .put(&sstable, data, crate::CachePolicy::Fill)
+            .put(&sstable, data, CachePolicy::Fill)
             .await
             .unwrap();
 
-        let si = SstableIterator::new(sstable_store, sstable, crate::CachePolicy::Fill);
+        let si = SstableIterator::new(sstable_store, sstable, CachePolicy::Fill);
         UserKeyIterator::new(Box::new(si), timestamp)
     }
 

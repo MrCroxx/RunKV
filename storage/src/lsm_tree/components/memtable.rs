@@ -50,8 +50,8 @@ mod tests {
     use rand::{thread_rng, Rng};
 
     use super::*;
-    use crate::lsm_tree::{Iterator, DEFAULT_MEMTABLE_SIZE};
-    use crate::{MemtableIterator, Seek};
+    use crate::lsm_tree::iterator::{Iterator, MemtableIterator, Seek};
+    use crate::lsm_tree::DEFAULT_MEMTABLE_SIZE;
 
     fn is_send_sync<T: Send + Sync>() {}
 

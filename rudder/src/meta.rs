@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use runkv_storage::{SstableStoreRef, VersionManager};
+use runkv_storage::components::SstableStoreRef;
+use runkv_storage::manifest::VersionManager;
 
 use crate::{Error, Result};
 
@@ -45,10 +46,10 @@ pub type MetaManagerRef = Arc<MetaManager>;
 
 #[cfg(test)]
 mod tests {
-    use runkv_storage::{
-        BlockCache, CompressionAlgorighm, LevelCompactionStrategy, LevelOptions, MemObjectStore,
-        SstableStore, SstableStoreOptions, VersionManagerOptions,
-    };
+    use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions};
+    use runkv_storage::manifest::{LevelCompactionStrategy, LevelOptions, VersionManagerOptions};
+    use runkv_storage::utils::CompressionAlgorighm;
+    use runkv_storage::MemObjectStore;
 
     use super::*;
 

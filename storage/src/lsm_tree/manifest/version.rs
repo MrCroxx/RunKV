@@ -4,8 +4,10 @@ use std::ops::{Range, RangeInclusive};
 use bytes::Bytes;
 use runkv_proto::manifest::{SsTableOp, VersionDiff};
 
+use super::ManifestError;
+use crate::components::SstableStoreRef;
 use crate::lsm_tree::utils::{full_key, CompressionAlgorighm};
-use crate::{ManifestError, Result, SstableStoreRef};
+use crate::Result;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LevelCompactionStrategy {
@@ -296,10 +298,11 @@ mod tests {
     use runkv_proto::manifest::SsTableDiff;
 
     use super::*;
-    use crate::{
-        BlockCache, BlockMeta, CachePolicy, MemObjectStore, Sstable, SstableBuilder,
-        SstableBuilderOptions, SstableMeta, SstableStore, SstableStoreOptions,
+    use crate::lsm_tree::components::{
+        BlockCache, BlockMeta, CachePolicy, Sstable, SstableBuilder, SstableBuilderOptions,
+        SstableMeta, SstableStore, SstableStoreOptions,
     };
+    use crate::MemObjectStore;
 
     #[tokio::test]
     async fn test_update_squash_version_diffs() {

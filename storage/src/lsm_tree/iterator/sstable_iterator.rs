@@ -2,8 +2,9 @@ use std::cmp::Ordering;
 
 use async_trait::async_trait;
 
-use super::{Iterator, Seek};
-use crate::{BlockIterator, CachePolicy, Result, Sstable, SstableStoreRef};
+use super::{BlockIterator, Iterator, Seek};
+use crate::components::{CachePolicy, Sstable, SstableStoreRef};
+use crate::Result;
 
 pub struct SstableIterator {
     /// Used to fetch block data.
@@ -215,12 +216,13 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
+    use crate::components::{
+        BlockCache, SstableBuilder, SstableBuilderOptions, SstableMeta, SstableStore,
+        SstableStoreOptions,
+    };
     use crate::lsm_tree::utils::{full_key, CompressionAlgorighm};
     use crate::lsm_tree::TEST_DEFAULT_RESTART_INTERVAL;
-    use crate::{
-        BlockCache, MemObjectStore, SstableBuilder, SstableBuilderOptions, SstableMeta,
-        SstableStore, SstableStoreOptions,
-    };
+    use crate::MemObjectStore;
 
     fn build_sstable_for_test() -> (SstableMeta, Bytes) {
         let options = SstableBuilderOptions {
