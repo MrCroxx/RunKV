@@ -91,9 +91,7 @@ impl VersionManager {
                     let mut idx = 0;
                     while idx < self.levels[level].len() {
                         let sst = self.sstable_store.sstable(self.levels[level][idx]).await?;
-                        if sst_to_insert.meta.block_metas[0].first_key
-                            <= sst.meta.block_metas[0].first_key
-                        {
+                        if sst_to_insert.first_key() <= sst.first_key() {
                             break;
                         }
                         idx += 1;
@@ -106,17 +104,15 @@ impl VersionManager {
                                 .sstable_store
                                 .sstable(self.levels[level][idx - 1])
                                 .await?;
-                            if sst_to_insert.meta.block_metas[0].first_key
-                                <= prev_sst.meta.block_metas.last().as_ref().unwrap().last_key
-                            {
+                            if sst_to_insert.first_key() <= prev_sst.last_key() {
                                 return Err(ManifestError::InvalidVersionDiff(format!(
                                         "sst overlaps in non-overlap level: [sst: {}, first_key:{:?}, last_key: {:?}] [sst: {}, first_key:{:?}, last_key: {:?}]",
                                         self.levels[level][idx - 1],
-                                        prev_sst.meta.block_metas.first().as_ref().unwrap().first_key,
-                                        prev_sst.meta.block_metas.last().as_ref().unwrap().last_key,
+                                        prev_sst.first_key(),
+                                        prev_sst.last_key(),
                                         self.levels[level][idx],
-                                        sst_to_insert.meta.block_metas.first().as_ref().unwrap().first_key,
-                                        sst_to_insert.meta.block_metas.last().as_ref().unwrap().last_key,
+                                        sst_to_insert.first_key(),
+                                        sst_to_insert.last_key(),
                                     ))
                                     .into());
                             }
@@ -220,11 +216,11 @@ impl VersionManager {
                 .compaction_strategy;
             for sst_id in &self.levels[level] {
                 let sst = self.sstable_store.sstable(*sst_id).await?;
-                if sst.meta.is_overlap_with_range(range.clone()) {
+                if sst.is_overlap_with_range(range.clone()) {
                     result[level].push(*sst_id);
                 }
                 if compaction_strategy == LevelCompactionStrategy::NonOverlap
-                    && sst.meta.block_metas.first().as_ref().unwrap().first_key > range.end()
+                    && sst.first_key() > range.end()
                 {
                     break;
                 }
@@ -256,13 +252,11 @@ impl VersionManager {
                 .compaction_strategy;
             for sst_id in &self.levels[level] {
                 let sst = self.sstable_store.sstable(*sst_id).await?;
-                if sst.meta.may_contain_key(key)
-                    && sst.meta.is_overlap_with_range(&full_key..=&full_key)
-                {
+                if sst.may_contain_key(key) && sst.is_overlap_with_range(&full_key..=&full_key) {
                     result[level].push(*sst_id);
                 }
                 if compaction_strategy == LevelCompactionStrategy::NonOverlap
-                    && sst.meta.block_metas.first().as_ref().unwrap().first_key > key
+                    && sst.first_key() > key
                 {
                     break;
                 }
@@ -283,9 +277,7 @@ impl VersionManager {
                 let prev_sst = self.sstable_store.sstable(self.levels[level][0]).await?;
                 for sst_id in self.levels[level][1..].iter() {
                     let sst = self.sstable_store.sstable(*sst_id).await?;
-                    if sst.meta.block_metas.first().as_ref().unwrap().first_key
-                        <= prev_sst.meta.block_metas.last().as_ref().unwrap().last_key
-                    {
+                    if sst.first_key() <= prev_sst.last_key() {
                         return Ok(false);
                     }
                 }
@@ -622,9 +614,9 @@ mod tests {
     ) {
         sstable_store
             .put(
-                &Sstable {
-                    id: sst_id,
-                    meta: Arc::new(SstableMeta {
+                &Sstable::new(
+                    sst_id,
+                    Arc::new(SstableMeta {
                         block_metas: vec![BlockMeta {
                             offset: 0,
                             len: 0,
@@ -633,7 +625,7 @@ mod tests {
                         }],
                         bloom_filter_bytes: vec![],
                     }),
-                },
+                ),
                 Bytes::default(),
                 // Disable block cache, inserting block cache need to decode block data, which is
                 // empty for test.
@@ -655,10 +647,7 @@ mod tests {
             builder.add(k, timestamp, Some(v)).unwrap();
         }
         let (meta, data) = builder.build().unwrap();
-        let sst = Sstable {
-            id: sst_id,
-            meta: Arc::new(meta),
-        };
+        let sst = Sstable::new(sst_id, Arc::new(meta));
         sstable_store
             .put(&sst, data, CachePolicy::Disable)
             .await

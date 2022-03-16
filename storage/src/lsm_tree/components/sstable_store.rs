@@ -40,20 +40,20 @@ impl SstableStore {
     }
 
     pub async fn put(&self, sst: &Sstable, data: Bytes, policy: CachePolicy) -> Result<()> {
-        let data_path = self.data_path(sst.id);
+        let data_path = self.data_path(sst.id());
         self.object_store.put(&data_path, data.clone()).await?;
 
-        let meta = sst.meta.encode();
-        let meta_path = self.meta_path(sst.id);
+        let meta = sst.encode_meta();
+        let meta_path = self.meta_path(sst.id());
         if let Err(e) = self.object_store.put(&meta_path, meta).await {
             self.object_store.remove(&data_path).await?;
             return Err(e);
         }
 
         if let CachePolicy::Fill = policy {
-            for (block_idx, meta) in sst.meta.block_metas.iter().enumerate() {
+            for (block_idx, meta) in sst.block_metas_iter().enumerate() {
                 let block = Arc::new(Block::decode(data.slice(meta.data_range()))?);
-                self.block_cache.insert(sst.id, block_idx, block).await
+                self.block_cache.insert(sst.id(), block_idx, block).await
             }
         }
 
@@ -67,17 +67,14 @@ impl SstableStore {
         policy: CachePolicy,
     ) -> Result<Arc<Block>> {
         let fetch_block = async move {
-            let block_meta = sst
-                .meta
-                .block_metas
-                .get(block_index as usize)
-                .ok_or_else(|| {
-                    Error::Other(format!(
-                        "invalid block idx: [sst: {}], [block: {}]",
-                        sst.id, block_index
-                    ))
-                })?;
-            let data_path = self.data_path(sst.id);
+            let block_meta = sst.block_meta(block_index as usize).ok_or_else(|| {
+                Error::Other(format!(
+                    "invalid block idx: [sst: {}], [block: {}]",
+                    sst.id(),
+                    block_index
+                ))
+            })?;
+            let data_path = self.data_path(sst.id());
             let block_data = self
                 .object_store
                 .get_range(&data_path, block_meta.data_range())
@@ -92,10 +89,10 @@ impl SstableStore {
         match policy {
             CachePolicy::Fill => {
                 self.block_cache
-                    .get_or_insert_with(sst.id, block_index, fetch_block)
+                    .get_or_insert_with(sst.id(), block_index, fetch_block)
                     .await
             }
-            CachePolicy::NotFill => match self.block_cache.get(sst.id, block_index) {
+            CachePolicy::NotFill => match self.block_cache.get(sst.id(), block_index) {
                 Some(block) => Ok(block),
                 None => fetch_block.await,
             },
@@ -105,7 +102,7 @@ impl SstableStore {
 
     pub async fn sstable(&self, sst_id: u64) -> Result<Sstable> {
         let meta = self.meta(sst_id).await?;
-        Ok(Sstable { id: sst_id, meta })
+        Ok(Sstable::new(sst_id, meta))
     }
 
     async fn meta(&self, sst_id: u64) -> Result<Arc<SstableMeta>> {
@@ -176,31 +173,17 @@ mod tests {
         };
         let sstable_store = SstableStore::new(options);
         let (meta, data) = build_sstable_for_test();
-        let sst = Sstable {
-            id: 1,
-            meta: Arc::new(meta),
-        };
+        let meta = Arc::new(meta);
+        let sst = Sstable::new(1, meta.clone());
         sstable_store
             .put(&sst, data.clone(), CachePolicy::Fill)
             .await
             .unwrap();
         // Check meta.
         let fetched_meta = sstable_store.meta(1).await.unwrap();
-        assert_eq!(sst.meta.block_metas.len(), fetched_meta.block_metas.len());
-        for (block_meta, decoded_block_meta) in sst
-            .meta
-            .block_metas
-            .iter()
-            .zip(fetched_meta.block_metas.iter())
-        {
-            assert_eq!(block_meta.offset, decoded_block_meta.offset);
-            assert_eq!(block_meta.len, decoded_block_meta.len);
-            assert_eq!(block_meta.first_key, decoded_block_meta.first_key);
-            assert_eq!(block_meta.last_key, decoded_block_meta.last_key);
-        }
-        assert_eq!(sst.meta.bloom_filter_bytes, fetched_meta.bloom_filter_bytes);
+        assert_eq!(fetched_meta, meta);
         // Test fetch from block cache.
-        for (block_idx, block_meta) in sst.meta.block_metas.iter().enumerate() {
+        for (block_idx, block_meta) in sst.block_metas_iter().enumerate() {
             let block = sstable_store
                 .block(&sst, block_idx, CachePolicy::Fill)
                 .await
@@ -209,7 +192,7 @@ mod tests {
             assert_eq!(origin_block.raw(), block.raw());
         }
         // Test fetch from object store.
-        for (block_idx, block_meta) in sst.meta.block_metas.iter().enumerate() {
+        for (block_idx, block_meta) in sst.block_metas_iter().enumerate() {
             let block = sstable_store
                 .block(&sst, block_idx, CachePolicy::Disable)
                 .await

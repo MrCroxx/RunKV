@@ -13,7 +13,7 @@ use crate::lsm_tree::{
 use crate::{BlockBuilder, BlockBuilderOptions, Result};
 
 /// [`BlockMeta`] contains block metadata, served as a part of [`Sstable`] meta.
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct BlockMeta {
     pub offset: usize,
     pub len: usize,
@@ -59,14 +59,63 @@ impl BlockMeta {
 }
 
 /// [`Sstable`] serves as a handle to retrieve actuall sstable data from the object store.
-#[derive(Debug)]
+///
+/// Note: Ensure [`Sstable`] is never empty.
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Sstable {
-    pub id: u64,
-    pub meta: SstableMetaRef,
+    id: u64,
+    meta: SstableMetaRef,
+}
+
+impl Sstable {
+    pub fn new(id: u64, meta: SstableMetaRef) -> Self {
+        Self { id, meta }
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub fn first_key(&self) -> &Bytes {
+        &self.meta.block_metas.first().as_ref().unwrap().first_key
+    }
+
+    pub fn last_key(&self) -> &Bytes {
+        &self.meta.block_metas.last().as_ref().unwrap().last_key
+    }
+
+    pub fn is_overlap_with(&self, rhs: &Self) -> bool {
+        self.meta.is_overlap_with(&rhs.meta)
+    }
+
+    pub fn is_overlap_with_range(&self, range: RangeInclusive<&Bytes>) -> bool {
+        self.meta.is_overlap_with_range(range)
+    }
+
+    /// Judge whether the given `key` may be in the sstable with bloom filter.
+    pub fn may_contain_key(&self, key: &Bytes) -> bool {
+        self.meta.may_contain_key(key)
+    }
+
+    pub fn blocks_len(&self) -> usize {
+        self.meta.block_metas.len()
+    }
+
+    pub fn block_meta(&self, block_idx: usize) -> Option<&BlockMeta> {
+        self.meta.block_metas.get(block_idx)
+    }
+
+    pub fn block_metas_iter(&self) -> std::slice::Iter<BlockMeta> {
+        self.meta.block_metas.iter()
+    }
+
+    pub fn encode_meta(&self) -> Bytes {
+        self.meta.encode()
+    }
 }
 
 /// [`SstableMeta`] contains sstable metadata.
-#[derive(Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub struct SstableMeta {
     pub block_metas: Vec<BlockMeta>,
     pub bloom_filter_bytes: Vec<u8>,
@@ -109,20 +158,20 @@ impl SstableMeta {
         }
     }
 
-    pub fn is_overlap_with(&self, rhs: &Self) -> bool {
+    fn is_overlap_with(&self, rhs: &Self) -> bool {
         self.is_overlap_with_range(
             &rhs.block_metas.first().as_ref().unwrap().first_key
                 ..=&rhs.block_metas.last().as_ref().unwrap().last_key,
         )
     }
 
-    pub fn is_overlap_with_range(&self, range: RangeInclusive<&Bytes>) -> bool {
+    fn is_overlap_with_range(&self, range: RangeInclusive<&Bytes>) -> bool {
         self.block_metas.first().as_ref().unwrap().first_key <= range.end()
             && self.block_metas.last().as_ref().unwrap().last_key >= range.start()
     }
 
     /// Judge whether the given `key` may be in the sstable with bloom filter.
-    pub fn may_contain_key(&self, key: &Bytes) -> bool {
+    fn may_contain_key(&self, key: &Bytes) -> bool {
         let bloom_filter = Bloom::new(&self.bloom_filter_bytes);
         bloom_filter.may_contain(farmhash::fingerprint32(key))
     }
