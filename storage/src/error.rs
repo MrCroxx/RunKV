@@ -1,5 +1,5 @@
+use crate::manifest::ManifestError;
 use crate::object_store::ObjectStoreError;
-use crate::ManifestError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

@@ -4,7 +4,8 @@ use bytes::{BufMut, Bytes, BytesMut};
 use futures::Future;
 use moka::future::Cache;
 
-use crate::{Block, Error, Result};
+use super::Block;
+use crate::{Error, Result};
 
 pub struct BlockCache {
     inner: Cache<Bytes, Arc<Block>>,

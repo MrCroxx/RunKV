@@ -306,8 +306,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::lsm_tree::iterator::{BlockIterator, Iterator, Seek};
     use crate::lsm_tree::utils::full_key;
-    use crate::{BlockIterator, Iterator, Seek};
 
     #[tokio::test]
     async fn test_block_enc_dec() {

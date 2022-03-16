@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
+use super::{BlockBuilder, BlockBuilderOptions};
 use crate::lsm_tree::utils::{
     crc32check, crc32sum, full_key, raw_value, Bloom, CompressionAlgorighm,
 };
@@ -10,7 +11,7 @@ use crate::lsm_tree::{
     DEFAULT_BLOCK_SIZE, DEFAULT_BLOOM_FALSE_POSITIVE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL,
     DEFAULT_SSTABLE_META_SIZE, DEFAULT_SSTABLE_SIZE, TEST_DEFAULT_RESTART_INTERVAL,
 };
-use crate::{BlockBuilder, BlockBuilderOptions, Result};
+use crate::Result;
 
 /// [`BlockMeta`] contains block metadata, served as a part of [`Sstable`] meta.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -327,7 +328,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::{Block, BlockIterator, Iterator, Seek};
+    use crate::components::Block;
+    use crate::iterator::{BlockIterator, Iterator, Seek};
 
     #[tokio::test]
     async fn test_sstable_enc_dec() {

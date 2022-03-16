@@ -2,8 +2,8 @@ use std::cmp::Ordering;
 
 use async_trait::async_trait;
 
-use super::{Iterator, Seek};
-use crate::{BoxedIterator, Result};
+use super::{BoxedIterator, Iterator, Seek};
+use crate::Result;
 
 pub struct ConcatIterator {
     /// Iterators to concat.
@@ -177,8 +177,9 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
+    use crate::components::{Block, BlockBuilder, BlockBuilderOptions};
+    use crate::iterator::BlockIterator;
     use crate::lsm_tree::utils::full_key;
-    use crate::{Block, BlockBuilder, BlockBuilderOptions, BlockIterator};
 
     fn build_iterator_for_test() -> ConcatIterator {
         ConcatIterator::new(vec![

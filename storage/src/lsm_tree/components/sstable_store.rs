@@ -3,9 +3,9 @@ use std::sync::Arc;
 use bytes::Bytes;
 use moka::future::Cache;
 
-use super::{Block, BlockCache, Sstable};
+use super::{Block, BlockCache, Sstable, SstableMeta};
 use crate::object_store::ObjectStoreRef;
-use crate::{Error, ObjectStoreError, Result, SstableMeta};
+use crate::{Error, ObjectStoreError, Result};
 
 // TODO: Define policy based on use cases (read / comapction / ...).
 #[derive(Clone, Copy)]
@@ -141,9 +141,10 @@ pub type SstableStoreRef = Arc<SstableStore>;
 mod tests {
 
     use super::*;
+    use crate::components::{SstableBuilder, SstableBuilderOptions};
     use crate::lsm_tree::utils::CompressionAlgorighm;
     use crate::lsm_tree::TEST_DEFAULT_RESTART_INTERVAL;
-    use crate::{MemObjectStore, SstableBuilder, SstableBuilderOptions};
+    use crate::MemObjectStore;
 
     fn build_sstable_for_test() -> (SstableMeta, Bytes) {
         let options = SstableBuilderOptions {

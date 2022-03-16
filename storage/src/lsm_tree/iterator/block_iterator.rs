@@ -5,7 +5,8 @@ use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 
 use super::{Iterator, Seek};
-use crate::{Block, KeyPrefix, Result};
+use crate::components::{Block, KeyPrefix};
+use crate::Result;
 
 /// [`BlockIterator`] is used to read kv pairs in a block.
 pub struct BlockIterator {
@@ -192,8 +193,8 @@ impl Iterator for BlockIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::components::{BlockBuilder, BlockBuilderOptions};
     use crate::lsm_tree::utils::full_key;
-    use crate::{BlockBuilder, BlockBuilderOptions};
 
     fn build_iterator_for_test() -> BlockIterator {
         let options = BlockBuilderOptions::default();

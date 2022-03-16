@@ -4,8 +4,8 @@ use std::collections::LinkedList;
 
 use async_trait::async_trait;
 
-use super::{Iterator, Seek};
-use crate::{BoxedIterator, Result};
+use super::{BoxedIterator, Iterator, Seek};
+use crate::Result;
 
 #[derive(PartialEq, Debug)]
 enum Direction {
@@ -181,8 +181,9 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
+    use crate::components::{Block, BlockBuilder, BlockBuilderOptions};
+    use crate::iterator::BlockIterator;
     use crate::lsm_tree::utils::full_key;
-    use crate::{Block, BlockBuilder, BlockBuilderOptions, BlockIterator};
 
     fn build_iterator_for_test() -> MergeIterator {
         MergeIterator::new(vec![
