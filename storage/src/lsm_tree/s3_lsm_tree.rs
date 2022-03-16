@@ -94,8 +94,6 @@ impl S3LsmTree {
         // Rotate active memtable within lock guard.
         if self.memtable.borrow().mem_remain() < approximate_size {
             let guard = self.rwlock.write();
-            // TODO: Romove me.
-            println!("rotate!");
             let imm = self.memtable.borrow().clone();
             *self.memtable.borrow_mut() =
                 Memtable::new(self.options.meta_cache_capacity.0 as usize);
@@ -139,9 +137,8 @@ impl S3LsmTree {
         // Pick overlap ssts.
         let levels = {
             let version_manager_guard = self.version_manager.read();
-            let key = Bytes::copy_from_slice(key);
             let levels = version_manager_guard
-                .pick_overlap_ssts_by_key(0..version_manager_guard.levels(), &key, ts)
+                .pick_overlap_ssts_by_key(0..version_manager_guard.levels(), key, ts)
                 .await
                 .unwrap();
             drop(version_manager_guard);
@@ -198,11 +195,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_concurrent_put() {
-        // Insert multiple kvs out of order concurrently.
-        // Then iterate from start to end to check if memtable is complete and ordered.
-        // Then check if get returns correct results on a timestamp while inserting kvs
-        // concurrently.
-
         let lsmtree = default_s3_lsm_tree_options_for_test();
         let lsmtree = Arc::new(lsmtree);
         let futures = (1..=10000)
@@ -247,43 +239,6 @@ mod tests {
             })
             .collect_vec();
         future::join_all(futures).await;
-
-        // let mut iter = MemtableIterator::new(&memtable, u64::MAX);
-        // iter.seek(Seek::First).await.unwrap();
-        // for i in 1..=10000 {
-        //     assert_eq!(iter.key(), format!("k{:08}", i).as_bytes());
-        //     iter.next().await.unwrap();
-        // }
-        // assert!(!iter.is_valid());
-
-        // let put_futures = (1..=10000)
-        //     .map(|i| {
-        //         let memtable_clone = memtable.clone();
-        //         async move {
-        //             let mut rng = thread_rng();
-        //             tokio::time::sleep(Duration::from_millis(rng.gen_range(0..500))).await;
-        //             memtable_clone.put(
-        //                 format!("k{:08}", i).as_bytes(),
-        //                 Some(format!("v{:08}", i).as_bytes()),
-        //                 i * 4 + 3,
-        //             );
-        //         }
-        //     })
-        //     .collect_vec();
-        // let get_futures = (1..=10000)
-        //     .map(|i| {
-        //         let memtable_clone = memtable.clone();
-        //         async move {
-        //             let mut rng = thread_rng();
-        //             tokio::time::sleep(Duration::from_millis(rng.gen_range(0..500))).await;
-        //             let v = memtable_clone.get(format!("k{:08}", i).as_bytes(), i * 4 + 2);
-        //             assert_eq!(v, Some(format!("v{:08}", i).as_bytes()));
-        //         }
-        //     })
-        //     .collect_vec();
-        // let put_future = future::join_all(put_futures);
-        // let get_future = future::join_all(get_futures);
-        // future::join(put_future, get_future).await;
     }
 
     fn default_s3_lsm_tree_options_for_test() -> S3LsmTree {

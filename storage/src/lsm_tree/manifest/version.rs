@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::ops::{Range, RangeInclusive};
 
-use bytes::Bytes;
 use runkv_proto::manifest::{SsTableOp, VersionDiff};
 
 use super::ManifestError;
@@ -201,7 +200,7 @@ impl VersionManager {
     pub async fn pick_overlap_ssts(
         &self,
         levels: Range<usize>,
-        range: RangeInclusive<&Bytes>,
+        range: RangeInclusive<&[u8]>,
         timestamp: u64,
     ) -> Result<Vec<Vec<u64>>> {
         let full_start_key = full_key(range.start(), timestamp);
@@ -239,7 +238,7 @@ impl VersionManager {
     pub async fn pick_overlap_ssts_by_key(
         &self,
         levels: Range<usize>,
-        key: &Bytes,
+        key: &[u8],
         timestamp: u64,
     ) -> Result<Vec<Vec<u64>>> {
         let full_key = full_key(key, timestamp);
@@ -294,6 +293,7 @@ mod tests {
     use std::assert_matches::assert_matches;
     use std::sync::Arc;
 
+    use bytes::Bytes;
     use itertools::Itertools;
     use runkv_proto::manifest::SsTableDiff;
 
