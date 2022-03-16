@@ -1,3 +1,4 @@
+use std::mem::size_of;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -35,7 +36,9 @@ impl SstableStore {
             path: options.path,
             object_store: options.object_store,
             block_cache: options.block_cache,
-            meta_cache: Cache::new(options.meta_cache_capacity as u64),
+            meta_cache: Cache::new(
+                (options.meta_cache_capacity / size_of::<SstableMeta>() + 1) as u64,
+            ),
         }
     }
 

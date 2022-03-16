@@ -1,7 +1,7 @@
 pub mod components;
 pub mod iterator;
-pub mod kv;
 pub mod manifest;
+pub mod s3_lsm_tree;
 pub mod utils;
 
 const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024; // 4 MiB

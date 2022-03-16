@@ -156,7 +156,7 @@ mod tests {
     use crate::lsm_tree::DEFAULT_MEMTABLE_SIZE;
 
     fn build_memtable_for_test() -> Memtable {
-        let mut memtable = Memtable::new(DEFAULT_MEMTABLE_SIZE);
+        let memtable = Memtable::new(DEFAULT_MEMTABLE_SIZE);
         for (k, ts) in [
             (2, vec![-3, 2]),
             (3, vec![4, 3, 2]),

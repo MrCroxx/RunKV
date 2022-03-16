@@ -1,4 +1,4 @@
-use std::collections::LinkedList;
+use std::collections::VecDeque;
 use std::ops::{Range, RangeInclusive};
 
 use bytes::Bytes;
@@ -48,24 +48,24 @@ pub struct VersionManager {
     /// List of history version diffs. Used for syncing with other nodes.
     ///
     /// TODO: Restore diff from `MetaStore`.
-    diffs: LinkedList<VersionDiff>,
+    diffs: VecDeque<VersionDiff>,
     /// `sstable_store` is used to fetch sstable meta.
     sstable_store: SstableStoreRef,
 }
 
 impl VersionManager {
-    pub fn new(options: VersionManagerOptions) -> Result<Self> {
-        if options.levels.len() != options.level_options.len() {
-            return Err(
-                ManifestError::Other("level.len() != level_options.len()".to_string()).into(),
-            );
-        }
-        Ok(Self {
+    pub fn new(options: VersionManagerOptions) -> Self {
+        assert_eq!(options.levels.len(), options.level_options.len());
+        Self {
             level_options: options.level_options,
             levels: options.levels,
-            diffs: LinkedList::default(),
+            diffs: VecDeque::default(),
             sstable_store: options.sstable_store,
-        })
+        }
+    }
+
+    pub fn levels(&self) -> usize {
+        self.levels.len()
     }
 
     pub async fn update(&mut self, diff: VersionDiff) -> Result<()> {
@@ -705,7 +705,7 @@ mod tests {
             levels: vec![vec![]; 7],
             sstable_store,
         };
-        VersionManager::new(version_manager_options).unwrap()
+        VersionManager::new(version_manager_options)
     }
 
     fn fkey(s: &'static [u8]) -> Bytes {

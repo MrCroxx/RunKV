@@ -4,7 +4,7 @@ mod arena;
 mod key;
 mod list;
 
-const MAX_HEIGHT: usize = 20;
+pub const SKIPLIST_NODE_TOWER_MAX_HEIGHT: usize = 20;
 
 pub use key::{FixedLengthSuffixComparator, KeyComparator};
 pub use list::{IterRef, Skiplist};

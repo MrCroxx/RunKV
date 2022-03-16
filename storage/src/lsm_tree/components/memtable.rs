@@ -16,16 +16,18 @@ impl KeyComparator for Comparator {
 #[derive(Clone)]
 pub struct Memtable {
     inner: Skiplist<Comparator>,
+    capacity: usize,
 }
 
 impl Memtable {
     pub fn new(capacity: usize) -> Self {
         Self {
             inner: Skiplist::with_capacity(Comparator, capacity as u32),
+            capacity,
         }
     }
 
-    pub fn put(&mut self, key: &[u8], value: Option<&[u8]>, timestamp: u64) {
+    pub fn put(&self, key: &[u8], value: Option<&[u8]>, timestamp: u64) {
         let key = full_key(key, timestamp);
         self.inner.put(key, raw_value(value));
     }
@@ -34,6 +36,10 @@ impl Memtable {
         let key = full_key(key, timestamp);
         let raw = self.inner.get(&key).map(|k| &k[..])?;
         value(raw)
+    }
+
+    pub fn mem_remain(&self) -> usize {
+        self.capacity - self.inner.mem_size() as usize
     }
 
     pub(in crate::lsm_tree) fn iter(&self) -> IterRef<Skiplist<Comparator>, Comparator> {
@@ -69,7 +75,7 @@ mod tests {
         let memtable = Memtable::new(DEFAULT_MEMTABLE_SIZE);
         let futures = (1..=10000)
             .map(|i| {
-                let mut memtable_clone = memtable.clone();
+                let memtable_clone = memtable.clone();
                 async move {
                     let mut rng = thread_rng();
                     tokio::time::sleep(Duration::from_millis(rng.gen_range(0..500))).await;
@@ -98,7 +104,7 @@ mod tests {
 
         let put_futures = (1..=10000)
             .map(|i| {
-                let mut memtable_clone = memtable.clone();
+                let memtable_clone = memtable.clone();
                 async move {
                     let mut rng = thread_rng();
                     tokio::time::sleep(Duration::from_millis(rng.gen_range(0..500))).await;
@@ -130,7 +136,7 @@ mod tests {
     async fn test_concurrent_iter() {
         // Insert multiple kvs and create an iterator on the newest timestamp.
         // Then iterate from start to end and check results while inserting kvs concurrently.
-        let mut memtable = Memtable::new(DEFAULT_MEMTABLE_SIZE * 4);
+        let memtable = Memtable::new(DEFAULT_MEMTABLE_SIZE * 4);
         for i in 1..=10000 {
             memtable.put(
                 format!("k{:08}", i).as_bytes(),
@@ -167,7 +173,7 @@ mod tests {
         };
         let put_futures = (1..=10000)
             .map(|i| {
-                let mut memtable_clone = memtable.clone();
+                let memtable_clone = memtable.clone();
                 async move {
                     let mut rng = thread_rng();
                     tokio::time::sleep(Duration::from_millis(rng.gen_range(0..500))).await;

@@ -9,7 +9,7 @@ use bytes::Bytes;
 use rand::Rng;
 
 use super::arena::Arena;
-use super::{KeyComparator, MAX_HEIGHT};
+use super::{KeyComparator, SKIPLIST_NODE_TOWER_MAX_HEIGHT};
 
 const HEIGHT_INCREASE: u32 = u32::MAX / 3;
 
@@ -20,7 +20,7 @@ pub struct Node {
     key: Bytes,
     value: Bytes,
     height: usize,
-    tower: [AtomicU32; MAX_HEIGHT as usize],
+    tower: [AtomicU32; SKIPLIST_NODE_TOWER_MAX_HEIGHT as usize],
 }
 
 impl Node {
@@ -28,7 +28,8 @@ impl Node {
         let align = mem::align_of::<Node>();
         let size = mem::size_of::<Node>();
         // Not all values in Node::tower will be utilized.
-        let not_used = (MAX_HEIGHT as usize - height as usize - 1) * mem::size_of::<AtomicU32>();
+        let not_used = (SKIPLIST_NODE_TOWER_MAX_HEIGHT as usize - height as usize - 1)
+            * mem::size_of::<AtomicU32>();
         let node_offset = arena.alloc(align, size - not_used);
         unsafe {
             let node_ptr: *mut Node = arena.get_mut(node_offset);
@@ -64,7 +65,12 @@ pub struct Skiplist<C> {
 impl<C> Skiplist<C> {
     pub fn with_capacity(c: C, arena_size: u32) -> Skiplist<C> {
         let arena = Arena::with_capacity(arena_size);
-        let head_offset = Node::alloc(&arena, Bytes::new(), Bytes::new(), MAX_HEIGHT - 1);
+        let head_offset = Node::alloc(
+            &arena,
+            Bytes::new(),
+            Bytes::new(),
+            SKIPLIST_NODE_TOWER_MAX_HEIGHT - 1,
+        );
         let head = unsafe { NonNull::new_unchecked(arena.get_mut(head_offset)) };
         Skiplist {
             core: Arc::new(SkiplistCore {
@@ -78,12 +84,12 @@ impl<C> Skiplist<C> {
 
     fn random_height(&self) -> usize {
         let mut rng = rand::thread_rng();
-        for h in 0..(MAX_HEIGHT - 1) {
+        for h in 0..(SKIPLIST_NODE_TOWER_MAX_HEIGHT - 1) {
             if !rng.gen_ratio(HEIGHT_INCREASE, u32::MAX) {
                 return h;
             }
         }
-        MAX_HEIGHT - 1
+        SKIPLIST_NODE_TOWER_MAX_HEIGHT - 1
     }
 
     fn height(&self) -> usize {
@@ -173,8 +179,8 @@ impl<C: KeyComparator> Skiplist<C> {
     pub fn put(&self, key: impl Into<Bytes>, value: impl Into<Bytes>) -> Option<(Bytes, Bytes)> {
         let (key, value) = (key.into(), value.into());
         let mut list_height = self.height();
-        let mut prev = [ptr::null_mut(); MAX_HEIGHT + 1];
-        let mut next = [ptr::null_mut(); MAX_HEIGHT + 1];
+        let mut prev = [ptr::null_mut(); SKIPLIST_NODE_TOWER_MAX_HEIGHT + 1];
+        let mut next = [ptr::null_mut(); SKIPLIST_NODE_TOWER_MAX_HEIGHT + 1];
         prev[list_height + 1] = self.core.head.as_ptr();
         next[list_height + 1] = ptr::null_mut();
         for i in (0..=list_height).rev() {
