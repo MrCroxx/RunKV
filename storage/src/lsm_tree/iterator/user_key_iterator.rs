@@ -169,7 +169,7 @@ mod tests {
         let sstable_store = Arc::new(SstableStore::new(options));
 
         let (meta, data) = build_sstable_for_test();
-        let sstable = Sstable { id: 1, meta };
+        let sstable = Sstable::new(1, Arc::new(meta));
         sstable_store
             .put(&sstable, data, crate::CachePolicy::Fill)
             .await

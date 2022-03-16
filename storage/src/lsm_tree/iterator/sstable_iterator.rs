@@ -35,7 +35,7 @@ impl SstableIterator {
 
     /// Invalidate current state after reaching a invalid state.
     fn invalid(&mut self) {
-        self.offset = self.sstable.meta.block_metas.len();
+        self.offset = self.sstable.blocks_len();
         self.iter = None;
     }
 
@@ -44,7 +44,7 @@ impl SstableIterator {
         let iter = self.iter.as_mut().unwrap();
         iter.next().await?;
         if !iter.is_valid() {
-            if self.offset + 1 < self.sstable.meta.block_metas.len() {
+            if self.offset + 1 < self.sstable.blocks_len() {
                 self.offset += 1;
                 let block = self
                     .sstable_store
@@ -88,7 +88,7 @@ impl SstableIterator {
     }
 
     async fn binary_seek_inner(&mut self, key: &[u8]) -> Result<usize> {
-        let mut size = self.sstable.meta.block_metas.len();
+        let mut size = self.sstable.blocks_len();
         let mut left = 0;
         let mut right = size;
         while left < right {
@@ -117,7 +117,7 @@ impl SstableIterator {
 
     async fn binary_seek(&mut self, key: &[u8]) -> Result<()> {
         let offset = self.binary_seek_inner(key).await?;
-        if offset >= self.sstable.meta.block_metas.len() {
+        if offset >= self.sstable.blocks_len() {
             self.invalid();
             return Ok(());
         }
@@ -133,7 +133,7 @@ impl SstableIterator {
         } else {
             // Move to the first entry of the next inner iter.
             self.offset = offset + 1;
-            if self.offset < self.sstable.meta.block_metas.len() {
+            if self.offset < self.sstable.blocks_len() {
                 let block = self
                     .sstable_store
                     .block(&self.sstable, self.offset, self.cache_policy)
@@ -173,7 +173,7 @@ impl Iterator for SstableIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.offset < self.sstable.meta.block_metas.len()
+        self.offset < self.sstable.blocks_len()
     }
 
     async fn seek<'s>(&mut self, seek: Seek<'s>) -> Result<()> {
@@ -188,7 +188,7 @@ impl Iterator for SstableIterator {
                 self.iter.as_mut().unwrap().seek(Seek::First).await
             }
             Seek::Last => {
-                self.offset = self.sstable.meta.block_metas.len() - 1;
+                self.offset = self.sstable.blocks_len() - 1;
                 let block = self
                     .sstable_store
                     .block(&self.sstable, self.offset, self.cache_policy)
@@ -253,7 +253,7 @@ mod tests {
         };
         let sstable_store = Arc::new(SstableStore::new(options));
         let (meta, data) = build_sstable_for_test();
-        let sstable = Sstable { id: 1, meta };
+        let sstable = Sstable::new(1, Arc::new(meta));
         sstable_store
             .put(&sstable, data, CachePolicy::Fill)
             .await
