@@ -214,10 +214,17 @@ mod tests {
                     lsmtree_clone
                         .put(
                             format!("k{:08}", i).as_bytes(),
-                            Some(format!("v{:08}", i).as_bytes()),
+                            Some(format!("v{:08}-1", i).as_bytes()),
                         )
                         .await
                         .unwrap();
+                    assert_eq!(
+                        lsmtree_clone
+                            .get(format!("k{:08}", i).as_bytes())
+                            .await
+                            .unwrap(),
+                        Some(Bytes::from(format!("v{:08}-1", i))),
+                    );
                     lsmtree_clone
                         .delete(format!("k{:08}", i).as_bytes())
                         .await
@@ -225,14 +232,22 @@ mod tests {
                     lsmtree_clone
                         .put(
                             format!("k{:08}", i).as_bytes(),
-                            Some(format!("v{:08}", i).as_bytes()),
+                            Some(format!("v{:08}-2", i).as_bytes()),
                         )
                         .await
                         .unwrap();
+                    assert_eq!(
+                        lsmtree_clone
+                            .get(format!("k{:08}", i).as_bytes())
+                            .await
+                            .unwrap(),
+                        Some(Bytes::from(format!("v{:08}-2", i))),
+                    );
                 }
             })
             .collect_vec();
         future::join_all(futures).await;
+
         // let mut iter = MemtableIterator::new(&memtable, u64::MAX);
         // iter.seek(Seek::First).await.unwrap();
         // for i in 1..=10000 {
