@@ -205,46 +205,46 @@ mod tests {
     #[tokio::test]
     async fn test_seek_first() {
         let mut it = build_iterator_for_test(u64::MAX);
-        it.seek(Seek::First).await.unwrap();
+        assert!(it.seek(Seek::First).await.unwrap());
         assert_eq!(b"v03-04", it.value());
 
         let mut it = build_iterator_for_test(3);
-        it.seek(Seek::First).await.unwrap();
+        assert!(it.seek(Seek::First).await.unwrap());
         assert_eq!(b"v03-03", it.value());
 
         let mut it = build_iterator_for_test(2);
-        it.seek(Seek::First).await.unwrap();
+        assert!(it.seek(Seek::First).await.unwrap());
         assert_eq!(b"v02-02", it.value());
 
         let mut it = build_iterator_for_test(1);
-        it.seek(Seek::First).await.unwrap();
+        assert!(it.seek(Seek::First).await.unwrap());
         assert_eq!(b"v05-01", it.value());
 
         let mut it = build_iterator_for_test(0);
-        it.seek(Seek::First).await.unwrap();
+        assert!(!it.seek(Seek::First).await.unwrap());
         assert!(!it.is_valid());
     }
 
     #[tokio::test]
     async fn test_seek_last() {
         let mut it = build_iterator_for_test(u64::MAX);
-        it.seek(Seek::Last).await.unwrap();
+        assert!(it.seek(Seek::Last).await.unwrap());
         assert_eq!(b"v11-04", it.value());
 
         let mut it = build_iterator_for_test(3);
-        it.seek(Seek::Last).await.unwrap();
+        assert!(it.seek(Seek::Last).await.unwrap());
         assert_eq!(b"v11-03", it.value());
 
         let mut it = build_iterator_for_test(2);
-        it.seek(Seek::Last).await.unwrap();
+        assert!(it.seek(Seek::Last).await.unwrap());
         assert_eq!(b"v12-02", it.value());
 
         let mut it = build_iterator_for_test(1);
-        it.seek(Seek::Last).await.unwrap();
+        assert!(it.seek(Seek::Last).await.unwrap());
         assert_eq!(b"v09-01", it.value());
 
         let mut it = build_iterator_for_test(0);
-        it.seek(Seek::Last).await.unwrap();
+        assert!(!it.seek(Seek::Last).await.unwrap());
         assert!(!it.is_valid());
     }
 
@@ -253,86 +253,86 @@ mod tests {
         // Forward.
 
         let mut it = build_iterator_for_test(u64::MAX);
-        assert_eq!(it.seek(Seek::RandomForward(b"k06")).await.unwrap(), true);
+        assert!(it.seek(Seek::RandomForward(b"k06")).await.unwrap());
         assert_eq!(b"v07-04", it.value());
 
         let mut it = build_iterator_for_test(3);
-        assert_eq!(it.seek(Seek::RandomForward(b"k06")).await.unwrap(), true);
+        assert!(it.seek(Seek::RandomForward(b"k06")).await.unwrap());
         assert_eq!(b"v07-03", it.value());
 
         let mut it = build_iterator_for_test(2);
-        assert_eq!(it.seek(Seek::RandomForward(b"k06")).await.unwrap(), true);
+        assert!(it.seek(Seek::RandomForward(b"k06")).await.unwrap());
         assert_eq!(b"v06-02", it.value());
 
         let mut it = build_iterator_for_test(1);
-        assert_eq!(it.seek(Seek::RandomForward(b"k06")).await.unwrap(), false);
+        assert!(!it.seek(Seek::RandomForward(b"k06")).await.unwrap());
         assert_eq!(b"v09-01", it.value());
 
         let mut it = build_iterator_for_test(0);
-        assert_eq!(it.seek(Seek::RandomForward(b"k06")).await.unwrap(), false);
+        assert!(!it.seek(Seek::RandomForward(b"k06")).await.unwrap());
 
         // Backward.
 
         let mut it = build_iterator_for_test(u64::MAX);
-        assert_eq!(it.seek(Seek::RandomBackward(b"k08")).await.unwrap(), true);
+        assert!(it.seek(Seek::RandomBackward(b"k08")).await.unwrap());
         assert_eq!(b"v07-04", it.value());
 
         let mut it = build_iterator_for_test(3);
-        assert_eq!(it.seek(Seek::RandomBackward(b"k08")).await.unwrap(), true);
+        assert!(it.seek(Seek::RandomBackward(b"k08")).await.unwrap());
         assert_eq!(b"v07-03", it.value());
 
         let mut it = build_iterator_for_test(2);
-        assert_eq!(it.seek(Seek::RandomBackward(b"k08")).await.unwrap(), true);
+        assert!(it.seek(Seek::RandomBackward(b"k08")).await.unwrap());
         assert_eq!(b"v08-02", it.value());
 
         let mut it = build_iterator_for_test(1);
-        assert_eq!(it.seek(Seek::RandomBackward(b"k08")).await.unwrap(), false);
+        assert!(!it.seek(Seek::RandomBackward(b"k08")).await.unwrap());
         assert_eq!(b"v05-01", it.value());
 
         let mut it = build_iterator_for_test(0);
-        assert_eq!(it.seek(Seek::RandomBackward(b"k08")).await.unwrap(), false);
+        assert!(!it.seek(Seek::RandomBackward(b"k08")).await.unwrap());
         assert!(!it.is_valid());
 
         // Exsited forward & backward
 
         let mut it = build_iterator_for_test(u64::MAX);
-        assert_eq!(it.seek(Seek::RandomForward(b"k07")).await.unwrap(), true);
+        assert!(it.seek(Seek::RandomForward(b"k07")).await.unwrap());
         assert_eq!(b"v07-04", it.value());
 
         let mut it = build_iterator_for_test(4);
-        assert_eq!(it.seek(Seek::RandomForward(b"k07")).await.unwrap(), true);
+        assert!(it.seek(Seek::RandomForward(b"k07")).await.unwrap());
         assert_eq!(b"v07-04", it.value());
 
         let mut it = build_iterator_for_test(3);
-        assert_eq!(it.seek(Seek::RandomForward(b"k07")).await.unwrap(), true);
+        assert!(it.seek(Seek::RandomForward(b"k07")).await.unwrap());
         assert_eq!(b"v07-03", it.value());
 
         let mut it = build_iterator_for_test(2);
-        assert_eq!(it.seek(Seek::RandomForward(b"k07")).await.unwrap(), true);
+        assert!(it.seek(Seek::RandomForward(b"k07")).await.unwrap());
         assert_eq!(b"v07-02", it.value());
 
         let mut it = build_iterator_for_test(1);
-        assert_eq!(it.seek(Seek::RandomForward(b"k07")).await.unwrap(), false);
+        assert!(!it.seek(Seek::RandomForward(b"k07")).await.unwrap());
         assert_eq!(b"v09-01", it.value());
 
         let mut it = build_iterator_for_test(u64::MAX);
-        assert_eq!(it.seek(Seek::RandomBackward(b"k07")).await.unwrap(), true);
+        assert!(it.seek(Seek::RandomBackward(b"k07")).await.unwrap());
         assert_eq!(b"v07-04", it.value());
 
         let mut it = build_iterator_for_test(4);
-        assert_eq!(it.seek(Seek::RandomBackward(b"k07")).await.unwrap(), true);
+        assert!(it.seek(Seek::RandomBackward(b"k07")).await.unwrap());
         assert_eq!(b"v07-04", it.value());
 
         let mut it = build_iterator_for_test(3);
-        assert_eq!(it.seek(Seek::RandomBackward(b"k07")).await.unwrap(), true);
+        assert!(it.seek(Seek::RandomBackward(b"k07")).await.unwrap());
         assert_eq!(b"v07-03", it.value());
 
         let mut it = build_iterator_for_test(2);
-        assert_eq!(it.seek(Seek::RandomBackward(b"k07")).await.unwrap(), true);
+        assert!(it.seek(Seek::RandomBackward(b"k07")).await.unwrap());
         assert_eq!(b"v07-02", it.value());
 
         let mut it = build_iterator_for_test(1);
-        assert_eq!(it.seek(Seek::RandomBackward(b"k07")).await.unwrap(), false);
+        assert!(!it.seek(Seek::RandomBackward(b"k07")).await.unwrap());
         assert_eq!(b"v05-01", it.value());
     }
 
