@@ -112,7 +112,7 @@ pub fn crc32check(data: &[u8], crc32sum: u32) -> bool {
     hasher.finalize() == crc32sum
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum CompressionAlgorighm {
     None,
     Lz4,

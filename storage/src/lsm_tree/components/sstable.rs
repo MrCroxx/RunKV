@@ -11,6 +11,7 @@ use crate::lsm_tree::{
     DEFAULT_BLOCK_SIZE, DEFAULT_BLOOM_FALSE_POSITIVE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL,
     DEFAULT_SSTABLE_META_SIZE, DEFAULT_SSTABLE_SIZE, TEST_DEFAULT_RESTART_INTERVAL,
 };
+use crate::utils::user_key;
 use crate::Result;
 
 /// [`BlockMeta`] contains block metadata, served as a part of [`Sstable`] meta.
@@ -93,6 +94,10 @@ impl Sstable {
         self.meta.is_overlap_with_range(range)
     }
 
+    pub fn is_overlap_with_user_key_range(&self, user_key_range: RangeInclusive<&[u8]>) -> bool {
+        self.meta.is_overlap_with_user_key_range(user_key_range)
+    }
+
     /// Judge whether the given `key` may be in the sstable with bloom filter.
     pub fn may_contain_key(&self, key: &[u8]) -> bool {
         self.meta.may_contain_key(key)
@@ -167,8 +172,31 @@ impl SstableMeta {
     }
 
     fn is_overlap_with_range(&self, range: RangeInclusive<&Bytes>) -> bool {
-        self.block_metas.first().as_ref().unwrap().first_key <= range.end()
-            && self.block_metas.last().as_ref().unwrap().last_key >= range.start()
+        // println!("range: {:?}", range);
+        // println!(
+        //     "first: {:?}",
+        //     self.block_metas.first().as_ref().unwrap().first_key
+        // );
+        // println!(
+        //     "last: {:?}",
+        //     self.block_metas.last().as_ref().unwrap().last_key
+        // );
+
+        !(self.block_metas.first().as_ref().unwrap().first_key > range.end()
+            || self.block_metas.last().as_ref().unwrap().last_key < range.start())
+    }
+
+    fn is_overlap_with_user_key_range(&self, user_key_range: RangeInclusive<&[u8]>) -> bool {
+        let first_user_key = user_key(&self.block_metas.first().as_ref().unwrap().first_key);
+        let last_user_key = user_key(&self.block_metas.last().as_ref().unwrap().last_key);
+        // println!("range: {:?}", user_key_range);
+        // println!("first: {:?}", Bytes::copy_from_slice(first_user_key));
+        // println!("last: {:?}", Bytes::copy_from_slice(last_user_key));
+        // println!(
+        //     "result: {}",
+        //     !(&first_user_key > user_key_range.end() || &last_user_key < user_key_range.start())
+        // );
+        !(&first_user_key > user_key_range.end() || &last_user_key < user_key_range.start())
     }
 
     /// Judge whether the given `key` may be in the sstable with bloom filter.
@@ -244,7 +272,7 @@ impl SstableBuilder {
             self.block_builder = Some(BlockBuilder::new(BlockBuilderOptions {
                 capacity: self.options.capacity,
                 restart_interval: self.options.restart_interval,
-                compression_algorithm: self.options.compression_algorithm.clone(),
+                compression_algorithm: self.options.compression_algorithm,
             }));
             self.block_metas.push(BlockMeta {
                 offset: self.buf.len(),
@@ -319,6 +347,14 @@ impl SstableBuilder {
         block_meta.last_key = self.last_full_key.clone();
         block_meta.len = self.buf.len() - block_meta.offset;
         self.last_full_key.clear();
+    }
+
+    pub fn len(&self) -> usize {
+        self.user_key_hashes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.user_key_hashes.is_empty()
     }
 }
 

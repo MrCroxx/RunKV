@@ -1522,6 +1522,7 @@ dependencies = [
  "runkv-proto",
  "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
