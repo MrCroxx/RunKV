@@ -49,8 +49,12 @@ impl MergeIterator {
         self.iters.extend(self.max_heap.drain());
         for iter in self.iters.iter_mut() {
             match self.direction {
-                Direction::Forward => iter.seek(Seek::RandomForward(&key)).await?,
-                Direction::Backward => iter.seek(Seek::RandomBackward(&key)).await?,
+                Direction::Forward => {
+                    iter.seek(Seek::RandomForward(&key)).await?;
+                }
+                Direction::Backward => {
+                    iter.seek(Seek::RandomBackward(&key)).await?;
+                }
             }
         }
         match self.direction {
@@ -123,8 +127,8 @@ impl Iterator for MergeIterator {
         }
     }
 
-    async fn seek<'s>(&mut self, seek: Seek<'s>) -> Result<()> {
-        match seek {
+    async fn seek<'s>(&mut self, seek: Seek<'s>) -> Result<bool> {
+        let found = match seek {
             Seek::First => {
                 self.direction = Direction::Forward;
                 self.iters.extend(self.min_heap.drain().map(|r| r.0));
@@ -134,6 +138,7 @@ impl Iterator for MergeIterator {
                     iter.seek(Seek::First).await?;
                     self.min_heap.push(Reverse(iter));
                 }
+                self.is_valid()
             }
             Seek::Last => {
                 self.direction = Direction::Backward;
@@ -144,6 +149,7 @@ impl Iterator for MergeIterator {
                     iter.seek(Seek::Last).await?;
                     self.max_heap.push(iter);
                 }
+                self.is_valid()
             }
             Seek::RandomForward(key) => {
                 self.direction = Direction::Forward;
@@ -156,6 +162,7 @@ impl Iterator for MergeIterator {
                         self.min_heap.push(Reverse(iter));
                     }
                 }
+                self.is_valid() && self.key() == key
             }
             Seek::RandomBackward(key) => {
                 self.direction = Direction::Backward;
@@ -168,9 +175,10 @@ impl Iterator for MergeIterator {
                         self.max_heap.push(iter);
                     }
                 }
+                self.is_valid() && self.key() == key
             }
-        }
-        Ok(())
+        };
+        Ok(found)
     }
 }
 

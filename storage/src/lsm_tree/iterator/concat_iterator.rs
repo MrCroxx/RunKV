@@ -41,7 +41,8 @@ impl ConcatIterator {
                     Ok(())
                 } else {
                     self.offset += 1;
-                    self.iters[self.offset].seek(Seek::First).await
+                    self.iters[self.offset].seek(Seek::First).await?;
+                    Ok(())
                 }
             }
         }
@@ -60,7 +61,8 @@ impl ConcatIterator {
                     Ok(())
                 } else {
                     self.offset -= 1;
-                    self.iters[self.offset].seek(Seek::Last).await
+                    self.iters[self.offset].seek(Seek::Last).await?;
+                    Ok(())
                 }
             }
         }
@@ -147,25 +149,32 @@ impl Iterator for ConcatIterator {
         self.offset < self.iters.len()
     }
 
-    async fn seek<'s>(&mut self, seek: Seek<'s>) -> Result<()> {
-        match seek {
+    async fn seek<'s>(&mut self, seek: Seek<'s>) -> Result<bool> {
+        let found = match seek {
             Seek::First => {
                 self.offset = 0;
-                self.iters[self.offset].seek(Seek::First).await
+                self.iters[self.offset].seek(Seek::First).await?;
+                self.is_valid()
             }
             Seek::Last => {
                 self.offset = self.iters.len() - 1;
-                self.iters[self.offset].seek(Seek::Last).await
+                self.iters[self.offset].seek(Seek::Last).await?;
+                self.is_valid()
             }
-            Seek::RandomForward(key) => self.binary_seek(key).await,
+            Seek::RandomForward(key) => {
+                self.binary_seek(key).await?;
+                self.is_valid() && self.key() == key
+            }
             Seek::RandomBackward(key) => {
                 self.binary_seek(key).await?;
                 if !self.is_valid() {
                     self.seek(Seek::Last).await?;
                 }
-                self.prev_until_key(key).await
+                self.prev_until_key(key).await?;
+                self.is_valid() && self.key() == key
             }
-        }
+        };
+        Ok(found)
     }
 }
 
