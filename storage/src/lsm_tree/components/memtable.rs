@@ -1,3 +1,5 @@
+use bytes::Bytes;
+
 use crate::lsm_tree::utils::{full_key, raw_value, value, IterRef, KeyComparator, Skiplist};
 
 #[derive(Clone)]
@@ -27,15 +29,19 @@ impl Memtable {
         }
     }
 
-    pub fn put(&self, key: &[u8], value: Option<&[u8]>, timestamp: u64) {
+    pub fn put(&self, key: &Bytes, value: Option<&Bytes>, timestamp: u64) {
         let key = full_key(key, timestamp);
-        self.inner.put(key, raw_value(value));
+        self.inner.put(key, raw_value(value.map(|v| &v[..])));
     }
 
-    pub fn get(&self, key: &[u8], timestamp: u64) -> Option<&[u8]> {
+    pub fn get(&self, key: &Bytes, timestamp: u64) -> Option<Bytes> {
+        let raw = self.get_raw(key, timestamp)?;
+        value(&raw).map(Bytes::copy_from_slice)
+    }
+
+    pub fn get_raw(&self, key: &Bytes, timestamp: u64) -> Option<Bytes> {
         let key = full_key(key, timestamp);
-        let raw = self.inner.get(&key).map(|k| &k[..])?;
-        value(raw)
+        self.inner.get(&key).cloned()
     }
 
     pub fn mem_remain(&self) -> usize {
@@ -79,17 +85,9 @@ mod tests {
                 async move {
                     let mut rng = thread_rng();
                     tokio::time::sleep(Duration::from_millis(rng.gen_range(0..500))).await;
-                    memtable_clone.put(
-                        format!("k{:08}", i).as_bytes(),
-                        Some(format!("v{:08}", i).as_bytes()),
-                        i * 4,
-                    );
-                    memtable_clone.put(format!("k{:08}", i).as_bytes(), None, i * 4 + 1);
-                    memtable_clone.put(
-                        format!("k{:08}", i).as_bytes(),
-                        Some(format!("v{:08}", i).as_bytes()),
-                        i * 4 + 2,
-                    );
+                    memtable_clone.put(&key(i), Some(&value(i)), i * 4);
+                    memtable_clone.put(&key(i), None, i * 4 + 1);
+                    memtable_clone.put(&key(i), Some(&value(i)), i * 4 + 2);
                 }
             })
             .collect_vec();
@@ -97,7 +95,7 @@ mod tests {
         let mut iter = MemtableIterator::new(&memtable, u64::MAX);
         iter.seek(Seek::First).await.unwrap();
         for i in 1..=10000 {
-            assert_eq!(iter.key(), format!("k{:08}", i).as_bytes());
+            assert_eq!(iter.key(), &key(i));
             iter.next().await.unwrap();
         }
         assert!(!iter.is_valid());
@@ -108,11 +106,7 @@ mod tests {
                 async move {
                     let mut rng = thread_rng();
                     tokio::time::sleep(Duration::from_millis(rng.gen_range(0..500))).await;
-                    memtable_clone.put(
-                        format!("k{:08}", i).as_bytes(),
-                        Some(format!("v{:08}", i).as_bytes()),
-                        i * 4 + 3,
-                    );
+                    memtable_clone.put(&key(i), Some(&value(i)), i * 4 + 3);
                 }
             })
             .collect_vec();
@@ -122,8 +116,8 @@ mod tests {
                 async move {
                     let mut rng = thread_rng();
                     tokio::time::sleep(Duration::from_millis(rng.gen_range(0..500))).await;
-                    let v = memtable_clone.get(format!("k{:08}", i).as_bytes(), i * 4 + 2);
-                    assert_eq!(v, Some(format!("v{:08}", i).as_bytes()));
+                    let v = memtable_clone.get(&key(i), i * 4 + 2);
+                    assert_eq!(v, Some(value(i)));
                 }
             })
             .collect_vec();
@@ -138,17 +132,9 @@ mod tests {
         // Then iterate from start to end and check results while inserting kvs concurrently.
         let memtable = Memtable::new(DEFAULT_MEMTABLE_SIZE * 4);
         for i in 1..=10000 {
-            memtable.put(
-                format!("k{:08}", i).as_bytes(),
-                Some(format!("v{:08}", i).as_bytes()),
-                i * 3,
-            );
-            memtable.put(format!("k{:08}", i).as_bytes(), None, i * 3 + 1);
-            memtable.put(
-                format!("k{:08}", i).as_bytes(),
-                Some(format!("v{:08}", i).as_bytes()),
-                i * 3 + 2,
-            );
+            memtable.put(&key(i), Some(&value(i)), i * 3);
+            memtable.put(&key(i), None, i * 3 + 1);
+            memtable.put(&key(i), Some(&value(i)), i * 3 + 2);
         }
 
         let memtable_clone = memtable.clone();
@@ -156,7 +142,7 @@ mod tests {
             let mut iter = MemtableIterator::new(&memtable_clone, 39999);
             iter.seek(Seek::First).await.unwrap();
             for i in 1..=10000 {
-                assert_eq!(iter.key(), format!("k{:08}", i).as_bytes());
+                assert_eq!(iter.key(), &key(i));
                 iter.next().await.unwrap();
             }
             assert!(!iter.is_valid());
@@ -166,7 +152,7 @@ mod tests {
             let mut iter = MemtableIterator::new(&memtable_clone, 39999);
             iter.seek(Seek::Last).await.unwrap();
             for i in (1..=10000).rev() {
-                assert_eq!(iter.key(), format!("k{:08}", i).as_bytes());
+                assert_eq!(iter.key(), &key(i));
                 iter.prev().await.unwrap();
             }
             assert!(!iter.is_valid());
@@ -177,23 +163,11 @@ mod tests {
                 async move {
                     let mut rng = thread_rng();
                     tokio::time::sleep(Duration::from_millis(rng.gen_range(0..500))).await;
-                    memtable_clone.put(
-                        format!("k{:08}", i).as_bytes(),
-                        Some(format!("v{:08}", i).as_bytes()),
-                        i + 40000,
-                    );
+                    memtable_clone.put(&key(i), Some(&value(i)), i + 40000);
                     tokio::time::sleep(Duration::from_millis(rng.gen_range(0..500))).await;
-                    memtable_clone.put(
-                        format!("k{:08}", i).as_bytes(),
-                        Some(format!("v{:08}", i).as_bytes()),
-                        i + 50000,
-                    );
+                    memtable_clone.put(&key(i), Some(&value(i)), i + 50000);
                     tokio::time::sleep(Duration::from_millis(rng.gen_range(0..500))).await;
-                    memtable_clone.put(
-                        format!("k{:08}", i).as_bytes(),
-                        Some(format!("v{:08}", i).as_bytes()),
-                        i + 60000,
-                    );
+                    memtable_clone.put(&key(i), Some(&value(i)), i + 60000);
                 }
             })
             .collect_vec();
@@ -202,5 +176,13 @@ mod tests {
             future::join(assert_forward, assert_backward),
         )
         .await;
+    }
+
+    fn key(i: u64) -> Bytes {
+        Bytes::from(format!("k{:08}", i))
+    }
+
+    fn value(i: u64) -> Bytes {
+        Bytes::from(format!("v{:08}", i))
     }
 }
