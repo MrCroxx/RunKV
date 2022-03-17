@@ -150,9 +150,12 @@ impl S3LsmTreeCore {
                     )
                 }
             };
-            iter.seek(Seek::RandomForward(key)).await?;
-            if iter.is_valid() && iter.key() == key {
-                return Ok(Some(Bytes::from(iter.value().to_vec())));
+            if iter.seek(Seek::RandomForward(key)).await? {
+                if iter.is_valid() && iter.key() == key {
+                    return Ok(Some(Bytes::from(iter.value().to_vec())));
+                } else {
+                    return Ok(None);
+                }
             }
         }
         Ok(None)

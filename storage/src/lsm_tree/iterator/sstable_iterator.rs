@@ -177,8 +177,8 @@ impl Iterator for SstableIterator {
         self.offset < self.sstable.blocks_len()
     }
 
-    async fn seek<'s>(&mut self, seek: Seek<'s>) -> Result<()> {
-        match seek {
+    async fn seek<'s>(&mut self, seek: Seek<'s>) -> Result<bool> {
+        let found = match seek {
             Seek::First => {
                 self.offset = 0;
                 let block = self
@@ -186,7 +186,8 @@ impl Iterator for SstableIterator {
                     .block(&self.sstable, self.offset, self.cache_policy)
                     .await?;
                 self.iter = Some(BlockIterator::new(block));
-                self.iter.as_mut().unwrap().seek(Seek::First).await
+                self.iter.as_mut().unwrap().seek(Seek::First).await?;
+                self.is_valid()
             }
             Seek::Last => {
                 self.offset = self.sstable.blocks_len() - 1;
@@ -195,17 +196,23 @@ impl Iterator for SstableIterator {
                     .block(&self.sstable, self.offset, self.cache_policy)
                     .await?;
                 self.iter = Some(BlockIterator::new(block));
-                self.iter.as_mut().unwrap().seek(Seek::Last).await
+                self.iter.as_mut().unwrap().seek(Seek::Last).await?;
+                self.is_valid()
             }
-            Seek::RandomForward(key) => self.binary_seek(key).await,
+            Seek::RandomForward(key) => {
+                self.binary_seek(key).await?;
+                self.is_valid() && self.key() == key
+            }
             Seek::RandomBackward(key) => {
                 self.binary_seek(key).await?;
                 if !self.is_valid() {
                     self.seek(Seek::Last).await?;
                 }
-                self.prev_until_key(key).await
+                self.prev_until_key(key).await?;
+                self.is_valid() && self.key() == key
             }
-        }
+        };
+        Ok(found)
     }
 }
 

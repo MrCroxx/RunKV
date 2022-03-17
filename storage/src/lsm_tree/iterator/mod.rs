@@ -97,12 +97,15 @@ pub trait Iterator: Send + Sync {
 
     /// Initialize or reset iterator with the given seek mode. For more details, refer to [`Seek`].
     ///
+    /// `seek` returns a bool which means a visible version of the given seek condition is found in
+    /// this iterator (but can be existing or be deleted).
+    ///
     /// Note:
     ///
     /// - Do not decide whether the position is valid or not by checking the returned error of this
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
-    async fn seek<'s>(&mut self, seek: Seek<'s>) -> Result<()>;
+    async fn seek<'s>(&mut self, seek: Seek<'s>) -> Result<bool>;
 }
 
 pub type BoxedIterator = Box<dyn Iterator>;

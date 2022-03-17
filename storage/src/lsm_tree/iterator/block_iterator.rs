@@ -166,16 +166,21 @@ impl Iterator for BlockIterator {
         self.offset < self.block.len()
     }
 
-    async fn seek<'s>(&mut self, seek: Seek<'s>) -> Result<()> {
-        match seek {
-            Seek::First => self.seek_restart_point_by_index(0),
+    async fn seek<'s>(&mut self, seek: Seek<'s>) -> Result<bool> {
+        let found = match seek {
+            Seek::First => {
+                self.seek_restart_point_by_index(0);
+                self.is_valid()
+            }
             Seek::Last => {
                 self.seek_restart_point_by_index(self.block.restart_point_len() - 1);
-                self.next_until_prev(self.block.len())
+                self.next_until_prev(self.block.len());
+                self.is_valid()
             }
             Seek::RandomForward(key) => {
                 self.seek_restart_point_by_key(key);
                 self.next_until_key(key);
+                self.is_valid() && self.key() == key
             }
             Seek::RandomBackward(key) => {
                 self.seek_restart_point_by_key(key);
@@ -184,9 +189,10 @@ impl Iterator for BlockIterator {
                     self.seek(Seek::Last).await?;
                 }
                 self.prev_until_key(key);
+                self.is_valid() && self.key() == key
             }
-        }
-        Ok(())
+        };
+        Ok(found)
     }
 }
 
