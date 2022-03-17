@@ -175,12 +175,12 @@ mod tests {
             for t in ts {
                 if t >= 0 {
                     memtable.put(
-                        format!("k{:02}", k).as_bytes(),
+                        &Bytes::from(format!("k{:02}", k)),
                         Some(&Bytes::from(format!("v{:02}-{:02}", k, t))),
                         t as u64,
                     );
                 } else {
-                    memtable.put(format!("k{:02}", k).as_bytes(), None, -t as u64);
+                    memtable.put(&Bytes::from(format!("k{:02}", k)), None, -t as u64);
                 }
             }
         }
