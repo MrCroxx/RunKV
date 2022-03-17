@@ -51,6 +51,14 @@ impl Memtable {
     pub(in crate::lsm_tree) fn iter(&self) -> IterRef<Skiplist<Comparator>, Comparator> {
         self.inner.iter()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    pub fn unwrap(self) -> Skiplist<Comparator> {
+        self.inner
+    }
 }
 
 #[cfg(test)]

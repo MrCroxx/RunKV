@@ -8,69 +8,50 @@ use bytes::Bytes;
 use bytesize::ByteSize;
 use parking_lot::RwLock;
 
-use crate::components::{BlockCache, Memtable, SstableStore, SstableStoreOptions, SstableStoreRef};
+use crate::components::{Memtable, SstableStoreRef};
 use crate::iterator::{Iterator, MergeIterator, Seek, SstableIterator, UserKeyIterator};
-use crate::manifest::{
-    LevelCompactionStrategy, LevelOptions, VersionManager, VersionManagerOptions,
-};
+use crate::manifest::{LevelCompactionStrategy, VersionManager};
 use crate::utils::{value, SKIPLIST_NODE_TOWER_MAX_HEIGHT};
-use crate::{LsmTree, ObjectStoreRef, Result};
+use crate::{LsmTree, Result};
 
 #[derive(Clone)]
-pub struct S3LsmTreeOptions {
-    /// Data directory path on S3.
-    pub path: String,
-    /// Object store client.
-    pub object_store: ObjectStoreRef,
+pub struct ObjectStoreLsmTreeOptions {
+    /// Reference of sstable store.
+    pub sstable_store: SstableStoreRef,
     /// Memtable capacity.
     pub write_buffer_capacity: ByteSize,
     /// Block cache capacity.
     pub block_cache_capacity: ByteSize,
     /// Meta cache capacity.
     pub meta_cache_capacity: ByteSize,
-    /// Options for eash level of LSM-Tree.
-    pub lsm_tree_level_options: Vec<LevelOptions>,
+    /// Local version manager.
+    pub version_manager: VersionManager,
 }
 
-pub struct S3LsmTreeCore {
+pub struct ObjectStoreLsmTreeCore {
     /// Options.
-    options: S3LsmTreeOptions,
+    options: ObjectStoreLsmTreeOptions,
     /// Current mutable memtable.
     memtable: RefCell<Memtable>,
     /// Immutable memtabls, waiting to be uploaded to S3.
     immutable_memtables: RefCell<VecDeque<Memtable>>,
-    version_manager: tokio::sync::RwLock<VersionManager>,
+    version_manager: VersionManager,
     sstable_store: SstableStoreRef,
     /// Use a external lock to tighten the critical section.
     rwlock: RwLock<PhantomData<Memtable>>,
 }
 
-impl S3LsmTreeCore {
-    pub fn new(options: S3LsmTreeOptions) -> Self {
-        let sstable_store_options = SstableStoreOptions {
-            path: options.path.clone(),
-            object_store: options.object_store.clone(),
-            block_cache: BlockCache::new(options.block_cache_capacity.0 as usize),
-            meta_cache_capacity: options.meta_cache_capacity.0 as usize,
-        };
-        let sstable_store = Arc::new(SstableStore::new(sstable_store_options));
+impl ObjectStoreLsmTreeCore {
+    pub fn new(options: ObjectStoreLsmTreeOptions) -> Self {
         let memtable = RefCell::new(Memtable::new(options.write_buffer_capacity.0 as usize));
         let immutable_memtables = RefCell::new(VecDeque::with_capacity(32));
-        // TODO: Recover sstable levels.
-        let levels = vec![vec![]; options.lsm_tree_level_options.len()];
-        let version_manager_options = VersionManagerOptions {
-            level_options: options.lsm_tree_level_options.clone(),
-            levels,
-            sstable_store: sstable_store.clone(),
-        };
-        let version_manager = VersionManager::new(version_manager_options);
         Self {
-            options,
             memtable,
             immutable_memtables,
-            version_manager: tokio::sync::RwLock::new(version_manager),
-            sstable_store,
+            version_manager: options.version_manager.clone(),
+            sstable_store: options.sstable_store.clone(),
             rwlock: RwLock::new(PhantomData),
+            options,
         }
     }
 
@@ -96,6 +77,7 @@ impl S3LsmTreeCore {
 
         // Seek from memtables.
         for memtable in memtables.iter() {
+            // println!("find key {:?} in memtable {}", key, i);
             if let Some(raw) = memtable.get_raw(key, timestamp) {
                 return Ok(value(&raw).map(Bytes::copy_from_slice));
             }
@@ -103,14 +85,15 @@ impl S3LsmTreeCore {
 
         // Pick overlap ssts.
         let levels = {
-            let version_manager_guard = self.version_manager.read().await;
-            let levels = version_manager_guard
-                .pick_overlap_ssts_by_key(0..version_manager_guard.levels(), key, timestamp)
+            let levels = self
+                .version_manager
+                .pick_overlap_ssts_by_key(0..self.version_manager.levels().await, key)
                 .await
                 .unwrap();
-            drop(version_manager_guard);
             levels
         };
+
+        // println!("find key {:?} in ssts:\n{:?}", key, levels);
 
         // Seek from ssts.
         for (level_idx, level) in levels.into_iter().enumerate() {
@@ -119,9 +102,8 @@ impl S3LsmTreeCore {
             }
             let compaction_strategy = self
                 .version_manager
-                .read()
-                .await
-                .level_compaction_strategy(level_idx as u64)?;
+                .level_compaction_strategy(level_idx as u64)
+                .await?;
 
             let mut iter = match compaction_strategy {
                 LevelCompactionStrategy::Overlap => {
@@ -178,7 +160,7 @@ impl S3LsmTreeCore {
         // Rotate active memtable within lock guard.
         if self.memtable.borrow().mem_remain() < approximate_size {
             let guard = self.rwlock.write();
-            println!("rotate!");
+            // println!("rotate memtable");
             let imm = self.memtable.borrow().clone();
             *self.memtable.borrow_mut() =
                 Memtable::new(self.options.meta_cache_capacity.0 as usize);
@@ -189,17 +171,32 @@ impl S3LsmTreeCore {
         self.memtable.borrow_mut().put(key, value, timestamp);
         Ok(())
     }
+
+    fn get_oldest_immutable_memtable(&self) -> Option<Memtable> {
+        let guard = self.rwlock.read();
+        let imm = self.immutable_memtables.borrow().back().cloned();
+        drop(guard);
+        imm
+    }
+
+    fn drop_oldest_immutable_memtable(&self) {
+        let guard = self.rwlock.write();
+        let mut imms = self.immutable_memtables.borrow_mut();
+        assert!(!imms.is_empty());
+        imms.pop_back();
+        drop(guard);
+    }
 }
 
-// unsafe impl Send for S3LsmTreeCore {}
-unsafe impl Sync for S3LsmTreeCore {}
+unsafe impl Sync for ObjectStoreLsmTreeCore {}
 
-pub struct S3LsmTree {
-    inner: Arc<S3LsmTreeCore>,
+#[derive(Clone)]
+pub struct ObjectStoreLsmTree {
+    inner: Arc<ObjectStoreLsmTreeCore>,
 }
 
 #[async_trait]
-impl LsmTree for S3LsmTree {
+impl LsmTree for ObjectStoreLsmTree {
     async fn put(&self, key: &Bytes, value: &Bytes, timestamp: u64) -> Result<()> {
         self.inner.put(key, value, timestamp).await
     }
@@ -213,7 +210,21 @@ impl LsmTree for S3LsmTree {
     }
 }
 
-impl S3LsmTree {}
+impl ObjectStoreLsmTree {
+    pub fn new(options: ObjectStoreLsmTreeOptions) -> Self {
+        Self {
+            inner: Arc::new(ObjectStoreLsmTreeCore::new(options)),
+        }
+    }
+
+    pub fn get_oldest_immutable_memtable(&self) -> Option<Memtable> {
+        self.inner.get_oldest_immutable_memtable()
+    }
+
+    pub fn drop_oldest_immutable_memtable(&self) {
+        self.inner.drop_oldest_immutable_memtable()
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -224,7 +235,9 @@ mod tests {
     use rand::{thread_rng, Rng};
 
     use super::*;
-    use crate::manifest::LevelCompactionStrategy;
+    use crate::components::{BlockCache, SstableStore, SstableStoreOptions};
+    use crate::manifest::{LevelCompactionStrategy, LevelOptions, VersionManagerOptions};
+    use crate::uploader::{Uploader, UploaderOptions};
     use crate::utils::CompressionAlgorighm;
     use crate::MemObjectStore;
 
@@ -232,53 +245,60 @@ mod tests {
 
     #[test]
     fn ensure_send_sync() {
-        is_send_sync::<S3LsmTreeCore>();
-        is_send_sync::<S3LsmTreeCore>();
+        is_send_sync::<ObjectStoreLsmTreeCore>();
+        is_send_sync::<Uploader>();
     }
 
     #[tokio::test]
     async fn test_concurrent_put() {
-        let lsmtree = default_s3_lsm_tree_options_for_test();
-        let lsmtree = Arc::new(lsmtree);
+        let lsmtree = default_lsm_tree_for_test().await;
         let futures = (1..=10000)
             .map(|i| {
                 let lsmtree_clone = lsmtree.clone();
                 async move {
                     let mut rng = thread_rng();
-                    tokio::time::sleep(Duration::from_millis(rng.gen_range(0..500))).await;
-                    lsmtree_clone.put(&key(i), &value(i), i * 4).await.unwrap();
-                    println!("put k{:08}", i);
+                    tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                    lsmtree_clone.put(&key(i), &value(i), 1).await.unwrap();
+                    // println!("put {:?} at {}", key(i), 1);
+                    tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                    // println!("get {:?} at {}", key(i), 3);
+                    assert_eq!(lsmtree_clone.get(&key(i), 3).await.unwrap(), Some(value(i)));
+                    tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                    lsmtree_clone.delete(&key(i), 5).await.unwrap();
+                    // println!("delete {:?} at {}", key(i), 5);
+                    tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                    // println!("get {:?} at {}", key(i), 7);
+                    assert_eq!(lsmtree_clone.get(&key(i), 7).await.unwrap(), None);
+                    tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                    lsmtree_clone.put(&key(i), &value(i), 9).await.unwrap();
+                    // println!("put {:?} at {}", key(i), 9);
+                    tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                    // println!("get {:?} at {}", key(i), 11);
                     assert_eq!(
-                        lsmtree_clone.get(&key(i), i * 4).await.unwrap(),
-                        Some(value(i))
-                    );
-                    lsmtree_clone.delete(&key(i), i * 4 + 1).await.unwrap();
-                    println!("delete k{:08}", i);
-                    assert_eq!(lsmtree_clone.get(&key(i), i * 4 + 1).await.unwrap(), None);
-                    lsmtree_clone
-                        .put(&key(i), &value(i), i * 4 + 2)
-                        .await
-                        .unwrap();
-                    println!("put k{:08}", i);
-                    assert_eq!(
-                        lsmtree_clone.get(&key(i), i * 4 + 2).await.unwrap(),
+                        lsmtree_clone.get(&key(i), 11).await.unwrap(),
                         Some(value(i))
                     );
                 }
             })
             .collect_vec();
         future::join_all(futures).await;
+        while lsmtree.get_oldest_immutable_memtable().is_some() {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
     }
 
-    fn default_s3_lsm_tree_options_for_test() -> S3LsmTreeCore {
+    async fn default_lsm_tree_for_test() -> ObjectStoreLsmTree {
         let object_store = Arc::new(MemObjectStore::default());
-        let options = S3LsmTreeOptions {
+        let block_cache = BlockCache::new(65536);
+        let sstable_store_options = SstableStoreOptions {
             path: "test".to_string(),
             object_store,
-            write_buffer_capacity: ByteSize(64 * 1024),
-            block_cache_capacity: ByteSize(64 * 1024),
-            meta_cache_capacity: ByteSize(1024 * 1024),
-            lsm_tree_level_options: vec![
+            block_cache,
+            meta_cache_capacity: 1024,
+        };
+        let sstable_store = Arc::new(SstableStore::new(sstable_store_options));
+        let version_manager_options = VersionManagerOptions {
+            level_options: vec![
                 LevelOptions {
                     compaction_strategy: LevelCompactionStrategy::Overlap,
                     compression_algorighm: CompressionAlgorighm::None,
@@ -308,15 +328,42 @@ mod tests {
                     compression_algorighm: CompressionAlgorighm::Lz4,
                 },
             ],
+            levels: vec![vec![]; 7],
+            sstable_store: sstable_store.clone(),
         };
-        S3LsmTreeCore::new(options)
+
+        let version_manager = VersionManager::new(version_manager_options);
+
+        let lsm_tree_options = ObjectStoreLsmTreeOptions {
+            sstable_store: sstable_store.clone(),
+            write_buffer_capacity: ByteSize(64 * 1024),
+            block_cache_capacity: ByteSize(64 * 1024),
+            meta_cache_capacity: ByteSize(1024 * 1024),
+            version_manager: version_manager.clone(),
+        };
+        let lsm_tree = ObjectStoreLsmTree::new(lsm_tree_options);
+
+        let uploader_options = UploaderOptions {
+            lsm_tree: lsm_tree.clone(),
+            sstable_store,
+            version_manager,
+            sstable_capacity: ByteSize(16 * 1024),
+            block_capacity: ByteSize(1024),
+            restart_interval: 2,
+            bloom_false_positive: 0.1,
+            compression_algorithm: CompressionAlgorighm::None,
+            poll_interval: Duration::from_millis(100),
+        };
+        let uploader = Uploader::new(uploader_options);
+        tokio::spawn(async move { uploader.run().await });
+        lsm_tree
     }
 
     fn key(i: u64) -> Bytes {
-        Bytes::from(format!("k{:08}", i))
+        Bytes::from(format!("k{:064}", i))
     }
 
     fn value(i: u64) -> Bytes {
-        Bytes::from(format!("v{:08}", i))
+        Bytes::from(format!("v{:064}", i))
     }
 }

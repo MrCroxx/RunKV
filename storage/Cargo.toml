@@ -32,3 +32,4 @@ tokio = { version = "1", features = [
     "macros",
     "time",
 ] }
+tracing = "0.1"
