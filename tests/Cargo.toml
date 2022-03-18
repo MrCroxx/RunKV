@@ -1,30 +1,26 @@
 [package]
-name = "runkv-rudder"
+name = "tests"
 version = "0.1.0"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[test]]
+name = "integrations"
+path = "integrations/mod.rs"
+
 [dependencies]
 anyhow = "1.0"
-async-trait = "0.1"
-base64 = "0.13"
 bytes = "1"
-bytesize = { version = "1.1.0", features = ["serde"] }
-clap = { version = "3.1.6", features = ["derive"] }
+bytesize = "1.1.0"
+futures = "0.3"
 itertools = "0.10.3"
-prost = "0.9"
-runkv-proto = { path = "../proto" }
+rand = "0.8.5"
+runkv-rudder = { path = "../rudder" }
 runkv-storage = { path = "../storage" }
-serde = "1.0"
-serde_derive = "1.0"
-thiserror = "1.0"
+runkv-wheel = { path = "../wheel" }
 tokio = { version = "1", features = [
     "rt-multi-thread",
     "sync",
     "macros",
     "time",
 ] }
-toml = "0.4.2"
-tonic = "0.6.2"
-tracing = "0.1"
-tracing-subscriber = "0.2.0"

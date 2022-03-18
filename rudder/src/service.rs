@@ -1,13 +1,15 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
-use runkv_proto::runkv::rudder_service_server::RudderService;
-use runkv_proto::runkv::{HeartbeatRequest, HeartbeatResponse};
+use itertools::Itertools;
+use runkv_proto::manifest::{SsTableDiff, SsTableOp, VersionDiff};
+use runkv_proto::rudder::rudder_service_server::RudderService;
+use runkv_proto::rudder::{HeartbeatRequest, HeartbeatResponse, InsertL0Request, InsertL0Response};
 use runkv_storage::components::SstableStoreRef;
 use runkv_storage::manifest::VersionManager;
 use tonic::{Request, Response, Status};
 
-use crate::meta::{MetaManager, MetaManagerOptions, MetaManagerRef};
+fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
+    Status::internal(e.into().to_string())
+}
 
 pub struct RudderOptions {
     pub version_manager: VersionManager,
@@ -15,20 +17,24 @@ pub struct RudderOptions {
 }
 
 pub struct Rudder {
-    _meta_manager: MetaManagerRef,
+    /// Manifest of sstables.
+    version_manager: VersionManager,
+    /// The smallest pinned timestamp. Any data whose timestamp is smaller than `watermark` can be
+    /// safely delete.
+    ///
+    /// `wheel node` maintains its own watermark, and `rudder node` collects watermarks from each
+    /// `wheel node` periodically and choose the min watermark among them as its own watermark.
+    _watermark: u64,
+    _sstable_store: SstableStoreRef,
 }
 
 impl Rudder {
     pub fn new(options: RudderOptions) -> Self {
-        let meta_manager_options = MetaManagerOptions {
-            version_manager: options.version_manager.clone(),
-            // TODO: Recover it.
-            watermark: 0,
-            sstable_store: options.sstable_store,
-        };
-        let meta_manager = Arc::new(MetaManager::new(meta_manager_options));
         Self {
-            _meta_manager: meta_manager,
+            version_manager: options.version_manager,
+            // TODO: Restore from meta store.
+            _watermark: 0,
+            _sstable_store: options.sstable_store,
         }
     }
 }
@@ -40,5 +46,30 @@ impl RudderService for Rudder {
         _request: Request<HeartbeatRequest>,
     ) -> core::result::Result<Response<HeartbeatResponse>, Status> {
         todo!()
+    }
+
+    async fn insert_l0(
+        &self,
+        request: Request<InsertL0Request>,
+    ) -> core::result::Result<Response<InsertL0Response>, Status> {
+        let req = request.into_inner();
+        let diff = VersionDiff {
+            id: 0,
+            sstable_diffs: req
+                .sst_ids
+                .iter()
+                .map(|&sst_id| SsTableDiff {
+                    id: sst_id,
+                    level: 0,
+                    op: SsTableOp::Insert.into(),
+                })
+                .collect_vec(),
+        };
+        self.version_manager
+            .update(diff, false)
+            .await
+            .map_err(internal)?;
+        let rsp = InsertL0Response::default();
+        Ok(Response::new(rsp))
     }
 }

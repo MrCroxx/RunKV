@@ -2,7 +2,7 @@ pub mod components;
 pub mod iterator;
 pub mod manifest;
 pub mod object_store_lsm_tree;
-pub mod uploader;
+pub mod sstable_uploader;
 pub mod utils;
 
 use async_trait::async_trait;

@@ -1,6 +1,8 @@
+host = "127.0.0.1"
 port = 12400
 data_path = "data"
 meta_path = "meta"
+poll_interval = "1s"
 
 [rudder]
 host = "127.0.0.1"
@@ -11,3 +13,44 @@ url = 'minio://minioadmin:minioadmin@127.0.0.1:9000/runkv'
 
 [s3]
 bucket = "runkv"
+
+[buffer]
+write_buffer_capacity = "64 MiB"
+
+[cache]
+block_cache_capacity = "512 MiB"
+meta_cache_capacity = "256 MiB"
+
+[lsm_tree]
+sstable_capacity = "4 MiB"
+block_capacity = "64 KiB"
+restart_interval = 8
+bloom_false_positive = 0.1
+
+[[lsm_tree.levels_options]]
+compaction_strategy = "Overlap"
+compression_algorithm = "None"
+
+[[lsm_tree.levels_options]]
+compaction_strategy = "NonOverlap"
+compression_algorithm = "None"
+
+[[lsm_tree.levels_options]]
+compaction_strategy = "NonOverlap"
+compression_algorithm = "None"
+
+[[lsm_tree.levels_options]]
+compaction_strategy = "NonOverlap"
+compression_algorithm = "None"
+
+[[lsm_tree.levels_options]]
+compaction_strategy = "NonOverlap"
+compression_algorithm = "Lz4"
+
+[[lsm_tree.levels_options]]
+compaction_strategy = "NonOverlap"
+compression_algorithm = "Lz4"
+
+[[lsm_tree.levels_options]]
+compaction_strategy = "NonOverlap"
+compression_algorithm = "Lz4"

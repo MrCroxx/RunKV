@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 pub mod common {
     tonic::include_proto!("common");
 }
@@ -10,6 +11,10 @@ pub mod meta {
     tonic::include_proto!("meta");
 }
 
-pub mod runkv {
-    tonic::include_proto!("runkv");
+pub mod rudder {
+    tonic::include_proto!("rudder");
+}
+
+pub mod wheel {
+    tonic::include_proto!("wheel");
 }

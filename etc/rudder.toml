@@ -3,7 +3,6 @@ port = 12300
 data_path = "data"
 meta_path = "meta"
 
-
 [minio]
 url = 'minio://minioadmin:minioadmin@127.0.0.1:9000/runkv'
 
@@ -11,8 +10,7 @@ url = 'minio://minioadmin:minioadmin@127.0.0.1:9000/runkv'
 # bucket = "runkv"
 
 [cache]
-meta_capacity = "256 MB"
-
+meta_cache_capacity = "256 MiB"
 
 [lsm_tree]
 

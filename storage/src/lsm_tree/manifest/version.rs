@@ -70,10 +70,15 @@ impl VersionManagerCore {
         self.levels.len()
     }
 
-    async fn update(&mut self, diff: VersionDiff) -> Result<()> {
-        let current_diff_id = self.diffs.back().map(|diff| diff.id).unwrap_or_else(|| 0);
-        if !self.diffs.is_empty() && current_diff_id + 1 != diff.id {
-            return Err(ManifestError::VersionDiffIdNotMatch(current_diff_id, diff.id).into());
+    async fn update(&mut self, mut diff: VersionDiff, sync: bool) -> Result<()> {
+        if sync {
+            let current_diff_id = self.diffs.back().map(|diff| diff.id).unwrap_or_else(|| 0);
+            if !self.diffs.is_empty() && current_diff_id + 1 != diff.id {
+                return Err(ManifestError::VersionDiffIdNotMatch(current_diff_id, diff.id).into());
+            }
+        } else {
+            let diff_id = self.diffs.back().map_or_else(|| 1, |diff| diff.id + 1);
+            diff.id = diff_id;
         }
 
         for sstable_diff in &diff.sstable_diffs {
@@ -303,8 +308,8 @@ impl VersionManager {
         self.inner.read().await.levels()
     }
 
-    pub async fn update(&self, diff: VersionDiff) -> Result<()> {
-        self.inner.write().await.update(diff).await
+    pub async fn update(&self, diff: VersionDiff, sync: bool) -> Result<()> {
+        self.inner.write().await.update(diff, sync).await
     }
 
     /// Revoke all version diffs whose id is smaller than given `diff_id`.
@@ -433,7 +438,7 @@ mod tests {
         ];
 
         for diff in &insert_diffs {
-            version_manager.update(diff.clone()).await.unwrap()
+            version_manager.update(diff.clone(), false).await.unwrap()
         }
 
         assert_eq!(
@@ -469,7 +474,7 @@ mod tests {
         ];
 
         for diff in &delete_diffs {
-            version_manager.update(diff.clone()).await.unwrap()
+            version_manager.update(diff.clone(), false).await.unwrap()
         }
 
         assert_eq!(
@@ -500,14 +505,17 @@ mod tests {
         );
 
         assert!(version_manager
-            .update(VersionDiff {
-                id: 10,
-                sstable_diffs: vec![SsTableDiff {
+            .update(
+                VersionDiff {
                     id: 10,
-                    level: 1,
-                    op: SsTableOp::Insert.into(),
-                }],
-            })
+                    sstable_diffs: vec![SsTableDiff {
+                        id: 10,
+                        level: 1,
+                        op: SsTableOp::Insert.into(),
+                    }],
+                },
+                false
+            )
             .await
             .is_err());
 
@@ -528,14 +536,17 @@ mod tests {
         ingest_meta(&sstable_store, 4, fkey(b"abb"), fkey(b"bdd")).await;
         assert_matches!(
             version_manager
-                .update(VersionDiff {
-                    id: 1,
-                    sstable_diffs: vec![SsTableDiff {
-                        id: 4,
-                        level: 1,
-                        op: SsTableOp::Insert.into(),
-                    }],
-                })
+                .update(
+                    VersionDiff {
+                        id: 1,
+                        sstable_diffs: vec![SsTableDiff {
+                            id: 4,
+                            level: 1,
+                            op: SsTableOp::Insert.into(),
+                        }],
+                    },
+                    false
+                )
                 .await,
             Err(crate::Error::ManifestError(
                 ManifestError::InvalidVersionDiff(_)
