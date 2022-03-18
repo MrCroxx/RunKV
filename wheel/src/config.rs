@@ -2,13 +2,15 @@ use runkv_storage::manifest::LevelOptions;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
-pub struct RudderConfig {
+pub struct WheelConfig {
     pub host: String,
     pub port: u16,
     pub data_path: String,
     pub meta_path: String,
+    pub poll_interval: String,
     pub s3: Option<S3Config>,
     pub minio: Option<MinioConfig>,
+    pub buffer: BufferConfig,
     pub cache: CacheConfig,
     pub lsm_tree: LsmTreeConfig,
 }
@@ -25,11 +27,21 @@ pub struct MinioConfig {
 }
 
 #[derive(Deserialize, Debug)]
+pub struct BufferConfig {
+    pub write_buffer_capacity: String,
+}
+
+#[derive(Deserialize, Debug)]
 pub struct CacheConfig {
+    pub data_cache_capacity: String,
     pub meta_cache_capacity: String,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct LsmTreeConfig {
+    pub sstable_capacity: String,
+    pub block_capacity: String,
+    pub restart_interval: usize,
+    pub bloom_false_positive: f64,
     pub levels_options: Vec<LevelOptions>,
 }

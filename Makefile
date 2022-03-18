@@ -11,7 +11,7 @@ fmt_check:
 	cargo fmt --all -- --check
 
 clippy:
-	cargo clippy --all-targets -- -D warnings
+	cargo clippy --all-targets
 
 clippy_locked:
 	cargo clippy --all-targets --locked -- -D warnings

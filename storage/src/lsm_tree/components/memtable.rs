@@ -48,6 +48,10 @@ impl Memtable {
         self.capacity - self.inner.mem_size() as usize
     }
 
+    pub fn mem_size(&self) -> usize {
+        self.inner.mem_size() as usize
+    }
+
     pub(in crate::lsm_tree) fn iter(&self) -> IterRef<Skiplist<Comparator>, Comparator> {
         self.inner.iter()
     }
