@@ -17,9 +17,12 @@ message HeartbeatResponse {
 message InsertL0Request {
   uint64 node_id = 1;
   repeated uint64 sst_ids = 2;
+  uint64 latest_version_id = 3;
 }
 
-message InsertL0Response {}
+message InsertL0Response {
+  repeated manifest.VersionDiff version_diffs = 1;
+}
 
 service RudderService {
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);

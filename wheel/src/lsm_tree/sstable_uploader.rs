@@ -2,17 +2,22 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use itertools::Itertools;
-use runkv_proto::manifest::{SsTableDiff, SsTableOp};
+use runkv_proto::rudder::rudder_service_client::RudderServiceClient;
+use runkv_proto::rudder::InsertL0Request;
+use runkv_storage::components::{
+    CachePolicy, Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef,
+};
+use runkv_storage::manifest::{ManifestError, VersionManager};
+use runkv_storage::utils::{timestamp, user_key, value, CompressionAlgorithm};
+use tonic::transport::Channel;
+use tonic::Request;
 use tracing::{debug, warn};
 
-use crate::components::{Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef};
-use crate::manifest::VersionManager;
-use crate::object_store_lsm_tree::ObjectStoreLsmTree;
-use crate::utils::{timestamp, user_key, value, CompressionAlgorithm};
-use crate::Result;
+use crate::error::Result;
+use crate::lsm_tree::ObjectStoreLsmTree;
 
 pub struct SstableUploaderOptions {
+    pub node_id: u64,
     pub lsm_tree: ObjectStoreLsmTree,
     pub sstable_store: SstableStoreRef,
     pub version_manager: VersionManager,
@@ -22,13 +27,16 @@ pub struct SstableUploaderOptions {
     pub bloom_false_positive: f64,
     pub compression_algorithm: CompressionAlgorithm,
     pub poll_interval: Duration,
+    pub rudder_client: RudderServiceClient<Channel>,
 }
 
 pub struct SstableUploader {
+    node_id: u64,
     options: SstableUploaderOptions,
     lsm_tree: ObjectStoreLsmTree,
     sstable_store: SstableStoreRef,
     version_manager: VersionManager,
+    pub rudder_client: RudderServiceClient<Channel>,
     // TODO: Get a global unique sst id from rudder.
     id: AtomicU64,
 }
@@ -36,25 +44,30 @@ pub struct SstableUploader {
 impl SstableUploader {
     pub fn new(options: SstableUploaderOptions) -> Self {
         Self {
+            node_id: options.node_id,
             lsm_tree: options.lsm_tree.clone(),
             sstable_store: options.sstable_store.clone(),
             version_manager: options.version_manager.clone(),
+            rudder_client: options.rudder_client.clone(),
             options,
             id: AtomicU64::new(1),
         }
     }
 
-    pub async fn run(&self) -> Result<()> {
+    pub async fn run(&mut self) -> Result<()> {
         // TODO: Gracefully kill.
         loop {
             match self.run_inner().await {
                 Ok(_) => {}
-                Err(e) => warn!("error occur when uploader running: {}", e),
+                Err(e) => {
+                    println!("error occur when uploader running: {}", e);
+                    warn!("error occur when uploader running: {}", e);
+                }
             }
         }
     }
 
-    async fn run_inner(&self) -> Result<()> {
+    async fn run_inner(&mut self) -> Result<()> {
         if let Some(memtable) = self.lsm_tree.get_oldest_immutable_memtable() {
             let mut sst_ids =
                 Vec::with_capacity(memtable.mem_size() / self.options.sstable_capacity + 1);
@@ -108,7 +121,7 @@ impl SstableUploader {
             }
 
             // TODO: After local version manager awared the diff, can drop immutable table.
-            self.lsm_tree.drop_oldest_immutable_memtable();
+            // self.lsm_tree.drop_oldest_immutable_memtable();
         } else {
             tokio::time::sleep(self.options.poll_interval).await;
         }
@@ -121,7 +134,7 @@ impl SstableUploader {
         let sst = Sstable::new(id, Arc::new(meta));
 
         self.sstable_store
-            .put(&sst, data, crate::components::CachePolicy::Fill)
+            .put(&sst, data, CachePolicy::Fill)
             .await?;
         // println!("sst {} uploaded", id);
         debug!("sst {} uploaded", id);
@@ -129,24 +142,29 @@ impl SstableUploader {
         Ok(())
     }
 
-    async fn notify_update_version(&self, sst_ids: Vec<u64>) -> Result<()> {
-        // TODO: Call global version manager, let it update local version manager.
-        self.version_manager
-            .update(
-                runkv_proto::manifest::VersionDiff {
-                    id: 0,
-                    sstable_diffs: sst_ids
-                        .into_iter()
-                        .map(|sst_id| SsTableDiff {
-                            id: sst_id,
-                            level: 0,
-                            op: SsTableOp::Insert.into(),
-                        })
-                        .collect_vec(),
-                },
-                false,
-            )
-            .await?;
+    async fn notify_update_version(&mut self, sst_ids: Vec<u64>) -> Result<()> {
+        // println!("notify update version");
+        let request = Request::new(InsertL0Request {
+            node_id: self.node_id,
+            sst_ids,
+            latest_version_id: self.version_manager.latest_version_id().await + 1,
+        });
+        let rsp = self.rudder_client.insert_l0(request).await?.into_inner();
+        let version_diffs = rsp.version_diffs;
+        for version_diff in version_diffs {
+            if let Err(runkv_storage::Error::ManifestError(ManifestError::VersionDiffIdNotMatch(
+                old,
+                new,
+            ))) = self.version_manager.update(version_diff, true).await
+            {
+                warn!(
+                    "version diff id not match, skip: [old: {}] [new: {}]",
+                    old, new
+                );
+            }
+        }
+        self.lsm_tree.drop_oldest_immutable_memtable();
+        // println!("last imm dropped");
         Ok(())
     }
 }

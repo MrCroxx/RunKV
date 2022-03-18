@@ -81,7 +81,7 @@ jobs:
       - name: Install required tools for test with coverage
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          cargo install cargo-llvm-cov --git https://github.com/skyzh/cargo-llvm-cov --rev 1b0d581
+          cargo install cargo-llvm-cov
           cargo install cargo-nextest
       - name: Run rust test with coverage
         run: |

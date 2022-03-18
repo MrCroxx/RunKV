@@ -1,50 +1,27 @@
 pub mod config;
 pub mod error;
+pub mod lsm_tree;
 pub mod service;
 
 use std::sync::Arc;
 
 use bytesize::ByteSize;
 use error::{config_err, err, Error, Result};
+use lsm_tree::sstable_uploader::{SstableUploader, SstableUploaderOptions};
+use lsm_tree::{WheelVersionManager, WheelVersionManagerOptions};
+use runkv_proto::rudder::rudder_service_client::RudderServiceClient;
 use runkv_proto::wheel::wheel_service_server::WheelServiceServer;
 use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions, SstableStoreRef};
 use runkv_storage::manifest::{VersionManager, VersionManagerOptions};
-use runkv_storage::object_store_lsm_tree::{ObjectStoreLsmTree, ObjectStoreLsmTreeOptions};
-use runkv_storage::sstable_uploader::{
-    SstableUploader, SstableUploaderOptions, SstableUploaderRef,
-};
 use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
 use service::{Wheel, WheelOptions};
-use tonic::transport::Server;
+use tonic::transport::{Channel, Server};
 use tracing::info;
 
 use crate::config::WheelConfig;
+use crate::lsm_tree::{ObjectStoreLsmTree, ObjectStoreLsmTreeOptions};
 
-pub async fn bootstrap_wheel(config: WheelConfig) -> Result<()> {
-    let object_store = create_object_store(&config).await;
-    bootstrap_wheel_with_object_store(config, object_store).await
-}
-
-pub async fn bootstrap_wheel_with_object_store(
-    config: WheelConfig,
-    object_store: ObjectStoreRef,
-) -> Result<()> {
-    let sstable_store = create_sstable_store(&config, object_store)?;
-
-    let version_manager = create_version_manager(&config, sstable_store.clone())?;
-
-    let lsm_tree = create_lsm_tree(&config, sstable_store.clone(), version_manager.clone())?;
-
-    let sstable_uploader =
-        create_sstable_uploader(&config, lsm_tree.clone(), sstable_store, version_manager)?;
-
-    let options = WheelOptions {
-        lsm_tree,
-        sstable_uploader,
-    };
-
-    let wheel = Wheel::new(options);
-
+pub async fn bootstrap_wheel(config: &WheelConfig, wheel: Wheel) -> Result<()> {
     let addr_str = format!("{}:{}", config.host, config.port);
 
     Server::builder()
@@ -52,6 +29,52 @@ pub async fn bootstrap_wheel_with_object_store(
         .serve(addr_str.parse().map_err(err)?)
         .await
         .map_err(err)
+}
+
+pub async fn build_wheel(config: &WheelConfig) -> Result<(Wheel, ObjectStoreLsmTree)> {
+    let object_store = create_object_store(config).await;
+    build_wheel_with_object_store(config, object_store).await
+}
+
+pub async fn build_wheel_with_object_store(
+    config: &WheelConfig,
+    object_store: ObjectStoreRef,
+) -> Result<(Wheel, ObjectStoreLsmTree)> {
+    let sstable_store = create_sstable_store(config, object_store)?;
+
+    let version_manager = create_version_manager(config, sstable_store.clone())?;
+
+    let lsm_tree = create_lsm_tree(config, sstable_store.clone(), version_manager.clone())?;
+
+    let rudder_client = RudderServiceClient::connect(format!(
+        "http://{}:{}",
+        config.rudder.host, config.rudder.port
+    ))
+    .await?;
+
+    let mut sstable_uploader = create_sstable_uploader(
+        config,
+        lsm_tree.clone(),
+        sstable_store,
+        version_manager.clone(),
+        rudder_client.clone(),
+    )?;
+
+    let mut _wheel_version_manager =
+        create_wheel_version_manager(config, version_manager, rudder_client)?;
+
+    // TODO: Do not spawn when building.
+    tokio::spawn(async move { sstable_uploader.run().await });
+    // tokio::spawn(async move { wheel_version_manager.run().await });
+
+    let options = WheelOptions {
+        lsm_tree: lsm_tree.clone(),
+        // sstable_uploader,
+    };
+
+    let wheel = Wheel::new(options);
+
+    Ok((wheel, lsm_tree))
 }
 
 async fn create_object_store(config: &WheelConfig) -> ObjectStoreRef {
@@ -74,7 +97,7 @@ fn create_sstable_store(
     let block_cache = BlockCache::new(
         config
             .cache
-            .data_cache_capacity
+            .block_cache_capacity
             .parse::<ByteSize>()
             .map_err(config_err)?
             .0 as usize,
@@ -130,8 +153,10 @@ fn create_sstable_uploader(
     lsm_tree: ObjectStoreLsmTree,
     sstable_store: SstableStoreRef,
     version_manager: VersionManager,
-) -> Result<SstableUploaderRef> {
+    rudder_client: RudderServiceClient<Channel>,
+) -> Result<SstableUploader> {
     let sstable_uploader = SstableUploaderOptions {
+        node_id: config.id,
         lsm_tree,
         sstable_store,
         version_manager,
@@ -160,6 +185,25 @@ fn create_sstable_uploader(
             .parse::<humantime::Duration>()
             .map_err(config_err)?
             .into(),
+        rudder_client,
     };
-    Ok(Arc::new(SstableUploader::new(sstable_uploader)))
+    Ok(SstableUploader::new(sstable_uploader))
+}
+
+fn create_wheel_version_manager(
+    config: &WheelConfig,
+    version_manager: VersionManager,
+    rudder_client: RudderServiceClient<Channel>,
+) -> Result<WheelVersionManager> {
+    let wheel_version_manager_options = WheelVersionManagerOptions {
+        node_id: config.id,
+        version_manager,
+        client: rudder_client,
+        heartbeat_interval: config
+            .heartbeat_interval
+            .parse::<humantime::Duration>()
+            .map_err(config_err)?
+            .into(),
+    };
+    Ok(WheelVersionManager::new(wheel_version_manager_options))
 }

@@ -1,9 +1,9 @@
 use std::fs::read_to_string;
 
 use clap::Parser;
-use runkv_rudder::bootstrap_rudder;
 use runkv_rudder::config::RudderConfig;
 use runkv_rudder::error::{config_err, err, Result};
+use runkv_rudder::{bootstrap_rudder, build_rudder};
 use tracing::info;
 use tracing_subscriber::FmtSubscriber;
 
@@ -26,5 +26,6 @@ async fn main() -> Result<()> {
             .map_err(config_err)?;
     info!("config: {:?}", config);
 
-    bootstrap_rudder(config).await
+    let rudder = build_rudder(&config).await?;
+    bootstrap_rudder(&config, rudder).await
 }

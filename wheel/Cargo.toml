@@ -12,6 +12,8 @@ bytesize = { version = "1.1.0", features = ["serde"] }
 clap = { version = "3.1.6", features = ["derive"] }
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
+itertools = "0.10.3"
+parking_lot = "0.12"
 prost = "0.9"
 runkv-proto = { path = "../proto" }
 runkv-storage = { path = "../storage" }

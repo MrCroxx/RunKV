@@ -6,12 +6,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 use parking_lot::RwLock;
+use runkv_storage::components::{CachePolicy, Memtable, SstableStoreRef};
+use runkv_storage::iterator::{Iterator, MergeIterator, Seek, SstableIterator, UserKeyIterator};
+use runkv_storage::manifest::{LevelCompactionStrategy, VersionManager};
+use runkv_storage::utils::{value, SKIPLIST_NODE_TOWER_MAX_HEIGHT};
 
-use crate::components::{Memtable, SstableStoreRef};
-use crate::iterator::{Iterator, MergeIterator, Seek, SstableIterator, UserKeyIterator};
-use crate::manifest::{LevelCompactionStrategy, VersionManager};
-use crate::utils::{value, SKIPLIST_NODE_TOWER_MAX_HEIGHT};
-use crate::{LsmTree, Result};
+use super::LsmTree;
+use crate::error::Result;
 
 #[derive(Clone)]
 pub struct ObjectStoreLsmTreeOptions {
@@ -108,7 +109,7 @@ impl ObjectStoreLsmTreeCore {
                         let iter = Box::new(SstableIterator::new(
                             self.sstable_store.clone(),
                             sst,
-                            crate::components::CachePolicy::Fill,
+                            CachePolicy::Fill,
                         ));
                         iters.push(iter);
                     }
@@ -121,7 +122,7 @@ impl ObjectStoreLsmTreeCore {
                         Box::new(SstableIterator::new(
                             self.sstable_store.clone(),
                             sst,
-                            crate::components::CachePolicy::Fill,
+                            CachePolicy::Fill,
                         )),
                         timestamp,
                     )
@@ -151,6 +152,12 @@ impl ObjectStoreLsmTreeCore {
             + 8
             + 4 * SKIPLIST_NODE_TOWER_MAX_HEIGHT
             + 8;
+
+        // println!(
+        //     "remain:{} approximate:{}",
+        //     self.memtable.borrow().mem_remain(),
+        //     approximate_size
+        // );
 
         // Rotate active memtable within lock guard.
         if self.memtable.borrow().mem_remain() < approximate_size {

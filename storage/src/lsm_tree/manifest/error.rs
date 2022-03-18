@@ -8,6 +8,8 @@ pub enum ManifestError {
     VersionDiffExpired(u64),
     #[error("level not exists: [idx: {0}] [total: {1}]")]
     LevelNotExists(u64, u64),
+    #[error("invalid watermark: [current: {0}] [given: {1}]")]
+    InvalidWatermark(u64, u64),
     #[error("other: {0}")]
     Other(String),
 }
