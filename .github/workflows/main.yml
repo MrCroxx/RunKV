@@ -11,9 +11,9 @@ on:
     branches: [main]
   workflow_dispatch:
 env:
-  RUST_TOOLCHAIN: nightly-2022-02-21
+  RUST_TOOLCHAIN: nightly-2022-03-09
   CARGO_TERM_COLOR: always
-  CACHE_KEY_SUFFIX: 20220318v1
+  CACHE_KEY_SUFFIX: 20220318v2
 jobs:
   misc-check:
     name: misc check
@@ -73,15 +73,15 @@ jobs:
           make rust_cargo_sort_check
       - name: Run rust format check
         run: |
-          make rust_fmt_check
+          make fmt_check
       - name: Run rust clippy check
         run: |
           # If new CI checks are added, the one with `--locked` must be run first.
-          make rust_clippy_check_locked
+          make clippy_locked
       - name: Install required tools for test with coverage
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          cargo install cargo-llvm-cov
+          cargo install cargo-llvm-cov --git https://github.com/skyzh/cargo-llvm-cov --rev 1b0d581
           cargo install cargo-nextest
       - name: Run rust test with coverage
         run: |
