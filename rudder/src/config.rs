@@ -3,6 +3,7 @@ use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
 pub struct RudderConfig {
+    pub id: u64,
     pub host: String,
     pub port: u16,
     pub data_path: String,

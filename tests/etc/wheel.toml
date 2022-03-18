@@ -1,5 +1,5 @@
-host = "127.0.0.1"
 id = 101
+host = "127.0.0.1"
 port = 12400
 data_path = "data"
 meta_path = "meta"
@@ -10,23 +10,23 @@ heartbeat_interval = "100ms"
 host = "127.0.0.1"
 port = 12300
 
-[minio]
-url = 'minio://minioadmin:minioadmin@127.0.0.1:9000/runkv'
+# [minio]
+# url = 'minio://minioadmin:minioadmin@127.0.0.1:9000/runkv'
 
-[s3]
-bucket = "runkv"
+# [s3]
+# bucket = "runkv"
 
 [buffer]
-write_buffer_capacity = "64 MiB"
+write_buffer_capacity = "64 KiB"
 
 [cache]
-block_cache_capacity = "512 MiB"
-meta_cache_capacity = "256 MiB"
+block_cache_capacity = "64 KiB"
+meta_cache_capacity = "1 KiB"
 
 [lsm_tree]
-sstable_capacity = "4 MiB"
-block_capacity = "64 KiB"
-restart_interval = 8
+sstable_capacity = "64 KiB"
+block_capacity = "4 KiB"
+restart_interval = 2
 bloom_false_positive = 0.1
 
 [[lsm_tree.levels_options]]

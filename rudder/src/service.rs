@@ -69,7 +69,12 @@ impl RudderService for Rudder {
             .update(diff, false)
             .await
             .map_err(internal)?;
-        let rsp = InsertL0Response::default();
+        let version_diffs = self
+            .version_manager
+            .version_diffs_from(req.latest_version_id, usize::MAX)
+            .await
+            .map_err(internal)?;
+        let rsp = InsertL0Response { version_diffs };
         Ok(Response::new(rsp))
     }
 }

@@ -1684,6 +1684,8 @@ dependencies = [
  "clap",
  "humantime",
  "humantime-serde",
+ "itertools",
+ "parking_lot 0.12.0",
  "prost",
  "runkv-proto",
  "runkv-storage",
@@ -1962,6 +1964,7 @@ dependencies = [
  "runkv-storage",
  "runkv-wheel",
  "tokio",
+ "toml",
 ]
 
 [[package]]

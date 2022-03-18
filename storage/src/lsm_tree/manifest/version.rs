@@ -53,6 +53,8 @@ pub struct VersionManagerCore {
     diffs: VecDeque<VersionDiff>,
     /// `sstable_store` is used to fetch sstable meta.
     sstable_store: SstableStoreRef,
+    /// Minimum accessable timestamp.
+    watermark: u64,
 }
 
 impl VersionManagerCore {
@@ -63,11 +65,28 @@ impl VersionManagerCore {
             levels: options.levels,
             diffs: VecDeque::default(),
             sstable_store: options.sstable_store,
+            watermark: 0,
         }
     }
 
     fn levels(&self) -> usize {
         self.levels.len()
+    }
+
+    fn watermark(&self) -> u64 {
+        self.watermark
+    }
+
+    fn advance(&mut self, watermark: u64) -> Result<()> {
+        if watermark < self.watermark {
+            return Err(ManifestError::InvalidWatermark(self.watermark, watermark).into());
+        }
+        self.watermark = watermark;
+        Ok(())
+    }
+
+    fn latest_version_id(&self) -> u64 {
+        self.diffs.back().map_or_else(|| 0, |diff| diff.id)
     }
 
     async fn update(&mut self, mut diff: VersionDiff, sync: bool) -> Result<()> {
@@ -245,6 +264,8 @@ impl VersionManagerCore {
         levels: Range<usize>,
         key: &[u8],
     ) -> Result<Vec<Vec<u64>>> {
+        // println!("pick: {:?}", Bytes::copy_from_slice(key));
+        // println!("levels: {:?}", self.levels);
         let mut result = vec![vec![]; levels.end - levels.start];
         for level in levels {
             let compaction_strategy = self
@@ -306,6 +327,18 @@ impl VersionManager {
 
     pub async fn levels(&self) -> usize {
         self.inner.read().await.levels()
+    }
+
+    pub async fn watermark(&self) -> u64 {
+        self.inner.read().await.watermark()
+    }
+
+    pub async fn advance(&self, watermark: u64) -> Result<()> {
+        self.inner.write().await.advance(watermark)
+    }
+
+    pub async fn latest_version_id(&self) -> u64 {
+        self.inner.read().await.latest_version_id()
     }
 
     pub async fn update(&self, diff: VersionDiff, sync: bool) -> Result<()> {

@@ -17,18 +17,28 @@ use service::{Rudder, RudderOptions};
 use tonic::transport::Server;
 use tracing::info;
 
-pub async fn bootstrap_rudder(config: RudderConfig) -> Result<()> {
-    let object_store = create_object_store(&config).await;
-    bootstrap_rudder_with_object_store(config, object_store).await
+pub async fn bootstrap_rudder(config: &RudderConfig, rudder: Rudder) -> Result<()> {
+    let addr_str = format!("{}:{}", config.host, config.port);
+
+    Server::builder()
+        .add_service(RudderServiceServer::new(rudder))
+        .serve(addr_str.parse().map_err(err)?)
+        .await
+        .map_err(err)
 }
 
-pub async fn bootstrap_rudder_with_object_store(
-    config: RudderConfig,
-    object_store: ObjectStoreRef,
-) -> Result<()> {
-    let sstable_store = create_sstable_store(&config, object_store)?;
+pub async fn build_rudder(config: &RudderConfig) -> Result<Rudder> {
+    let object_store = create_object_store(config).await;
+    build_rudder_with_object_store(config, object_store).await
+}
 
-    let version_manager = create_version_manager(&config, sstable_store.clone())?;
+pub async fn build_rudder_with_object_store(
+    config: &RudderConfig,
+    object_store: ObjectStoreRef,
+) -> Result<Rudder> {
+    let sstable_store = create_sstable_store(config, object_store)?;
+
+    let version_manager = create_version_manager(config, sstable_store.clone())?;
 
     let options = RudderOptions {
         version_manager,
@@ -37,13 +47,7 @@ pub async fn bootstrap_rudder_with_object_store(
 
     let rudder = Rudder::new(options);
 
-    let addr_str = format!("{}:{}", config.host, config.port);
-
-    Server::builder()
-        .add_service(RudderServiceServer::new(rudder))
-        .serve(addr_str.parse().map_err(err)?)
-        .await
-        .map_err(err)
+    Ok(rudder)
 }
 
 async fn create_object_store(config: &RudderConfig) -> ObjectStoreRef {
