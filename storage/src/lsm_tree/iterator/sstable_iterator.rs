@@ -227,7 +227,7 @@ mod tests {
         BlockCache, SstableBuilder, SstableBuilderOptions, SstableMeta, SstableStore,
         SstableStoreOptions,
     };
-    use crate::lsm_tree::utils::{full_key, CompressionAlgorighm};
+    use crate::lsm_tree::utils::{full_key, CompressionAlgorithm};
     use crate::lsm_tree::TEST_DEFAULT_RESTART_INTERVAL;
     use crate::MemObjectStore;
 
@@ -237,7 +237,7 @@ mod tests {
             block_capacity: 32,
             restart_interval: TEST_DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
-            compression_algorithm: CompressionAlgorighm::Lz4,
+            compression_algorithm: CompressionAlgorithm::Lz4,
         };
         let mut builder = SstableBuilder::new(options);
         builder.add(b"k01", 1, Some(b"v01")).unwrap();

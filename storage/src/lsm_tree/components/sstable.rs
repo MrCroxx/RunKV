@@ -5,7 +5,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 use super::{BlockBuilder, BlockBuilderOptions};
 use crate::lsm_tree::utils::{
-    crc32check, crc32sum, full_key, raw_value, Bloom, CompressionAlgorighm,
+    crc32check, crc32sum, full_key, raw_value, Bloom, CompressionAlgorithm,
 };
 use crate::lsm_tree::{
     DEFAULT_BLOCK_SIZE, DEFAULT_BLOOM_FALSE_POSITIVE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL,
@@ -219,7 +219,7 @@ pub struct SstableBuilderOptions {
     /// False prsitive probability of bloom filter.
     pub bloom_false_positive: f64,
     /// Compression algorithm.
-    pub compression_algorithm: CompressionAlgorighm,
+    pub compression_algorithm: CompressionAlgorithm,
 }
 
 impl Default for SstableBuilderOptions {
@@ -233,7 +233,7 @@ impl Default for SstableBuilderOptions {
                 TEST_DEFAULT_RESTART_INTERVAL
             },
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
-            compression_algorithm: CompressionAlgorighm::None,
+            compression_algorithm: CompressionAlgorithm::None,
         }
     }
 }
@@ -374,7 +374,7 @@ mod tests {
             block_capacity: 32,
             restart_interval: TEST_DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
-            compression_algorithm: CompressionAlgorighm::None,
+            compression_algorithm: CompressionAlgorithm::None,
         };
         let mut builder = SstableBuilder::new(options);
         builder.add(b"k01", 1, Some(b"v01")).unwrap();
@@ -424,7 +424,7 @@ mod tests {
             block_capacity: 32,
             restart_interval: TEST_DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
-            compression_algorithm: CompressionAlgorighm::Lz4,
+            compression_algorithm: CompressionAlgorithm::Lz4,
         };
         let mut builder = SstableBuilder::new(options);
         builder.add(b"k01", 1, Some(b"v01")).unwrap();
@@ -474,7 +474,7 @@ mod tests {
             block_capacity: 32,
             restart_interval: TEST_DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
-            compression_algorithm: CompressionAlgorighm::None,
+            compression_algorithm: CompressionAlgorithm::None,
         };
         let mut builder = SstableBuilder::new(options);
         builder.add(b"k01", 1, Some(b"v01")).unwrap();

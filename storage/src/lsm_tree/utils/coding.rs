@@ -1,6 +1,7 @@
 use std::{cmp, ptr};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use serde::Deserialize;
 
 use crate::error::{Error, Result};
 
@@ -112,13 +113,13 @@ pub fn crc32check(data: &[u8], crc32sum: u32) -> bool {
     hasher.finalize() == crc32sum
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum CompressionAlgorighm {
+#[derive(Deserialize, Clone, Copy, Debug)]
+pub enum CompressionAlgorithm {
     None,
     Lz4,
 }
 
-impl CompressionAlgorighm {
+impl CompressionAlgorithm {
     pub fn encode(&self, buf: &mut impl BufMut) {
         let v = match self {
             Self::None => 0,

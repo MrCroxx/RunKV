@@ -1,0 +1,45 @@
+host = "127.0.0.1"
+port = 12300
+data_path = "data"
+meta_path = "meta"
+
+
+[minio]
+url = 'minio://minioadmin:minioadmin@127.0.0.1:9000/runkv'
+
+# [s3]
+# bucket = "runkv"
+
+[cache]
+meta_capacity = "256 MB"
+
+
+[lsm_tree]
+
+[[lsm_tree.levels_options]]
+compaction_strategy = "Overlap"
+compression_algorithm = "None"
+
+[[lsm_tree.levels_options]]
+compaction_strategy = "NonOverlap"
+compression_algorithm = "None"
+
+[[lsm_tree.levels_options]]
+compaction_strategy = "NonOverlap"
+compression_algorithm = "None"
+
+[[lsm_tree.levels_options]]
+compaction_strategy = "NonOverlap"
+compression_algorithm = "None"
+
+[[lsm_tree.levels_options]]
+compaction_strategy = "NonOverlap"
+compression_algorithm = "Lz4"
+
+[[lsm_tree.levels_options]]
+compaction_strategy = "NonOverlap"
+compression_algorithm = "Lz4"
+
+[[lsm_tree.levels_options]]
+compaction_strategy = "NonOverlap"
+compression_algorithm = "Lz4"

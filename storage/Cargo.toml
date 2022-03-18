@@ -25,6 +25,8 @@ moka = { version = "0.7", features = ["future"] }
 parking_lot = "0.12"
 rand = "0.8.5"
 runkv-proto = { path = "../proto" }
+serde = "1.0"
+serde_derive = "1.0"
 thiserror = "1.0"
 tokio = { version = "1", features = [
     "rt-multi-thread",

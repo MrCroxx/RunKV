@@ -3,30 +3,31 @@ use std::ops::{Range, RangeInclusive};
 use std::sync::Arc;
 
 use runkv_proto::manifest::{SsTableOp, VersionDiff};
+use serde::Deserialize;
 use tokio::sync::RwLock;
 
 use super::ManifestError;
 use crate::components::SstableStoreRef;
-use crate::lsm_tree::utils::CompressionAlgorighm;
+use crate::lsm_tree::utils::CompressionAlgorithm;
 use crate::Result;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LevelCompactionStrategy {
     Overlap,
     NonOverlap,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct LevelOptions {
     pub compaction_strategy: LevelCompactionStrategy,
-    pub compression_algorighm: CompressionAlgorighm,
+    pub compression_algorithm: CompressionAlgorithm,
 }
 
 pub struct VersionManagerOptions {
     /// Level compaction and compression strategies for each level.
     ///
     /// Usually, L0 uses `Overlap`, the others use `NonOverlap`.
-    pub level_options: Vec<LevelOptions>,
+    pub levels_options: Vec<LevelOptions>,
     /// Initial sst ids of each level.
     ///
     /// If the compaction strategy is `NonOverlap`, the sstable ids of the level must be guaranteed
@@ -56,9 +57,9 @@ pub struct VersionManagerCore {
 
 impl VersionManagerCore {
     fn new(options: VersionManagerOptions) -> Self {
-        assert_eq!(options.levels.len(), options.level_options.len());
+        assert_eq!(options.levels.len(), options.levels_options.len());
         Self {
-            level_options: options.level_options,
+            level_options: options.levels_options,
             levels: options.levels,
             diffs: VecDeque::default(),
             sstable_store: options.sstable_store,
@@ -156,7 +157,7 @@ impl VersionManagerCore {
         }
     }
 
-    fn level_compression_algorithm(&self, level_idx: u64) -> Result<CompressionAlgorighm> {
+    fn level_compression_algorithm(&self, level_idx: u64) -> Result<CompressionAlgorithm> {
         let options =
             self.level_options
                 .get(level_idx as usize)
@@ -164,7 +165,7 @@ impl VersionManagerCore {
                     level_idx,
                     self.level_options.len() as u64,
                 ))?;
-        Ok(options.compression_algorighm)
+        Ok(options.compression_algorithm)
     }
 
     fn level_compaction_strategy(&self, level_idx: u64) -> Result<LevelCompactionStrategy> {
@@ -314,7 +315,7 @@ impl VersionManager {
     pub async fn level_compression_algorithm(
         &self,
         level_idx: u64,
-    ) -> Result<CompressionAlgorighm> {
+    ) -> Result<CompressionAlgorithm> {
         self.inner
             .read()
             .await
@@ -767,35 +768,35 @@ mod tests {
         let level_options = vec![
             LevelOptions {
                 compaction_strategy: LevelCompactionStrategy::Overlap,
-                compression_algorighm: CompressionAlgorighm::None,
+                compression_algorithm: CompressionAlgorithm::None,
             },
             LevelOptions {
                 compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                compression_algorighm: CompressionAlgorighm::None,
+                compression_algorithm: CompressionAlgorithm::None,
             },
             LevelOptions {
                 compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                compression_algorighm: CompressionAlgorighm::None,
+                compression_algorithm: CompressionAlgorithm::None,
             },
             LevelOptions {
                 compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                compression_algorighm: CompressionAlgorighm::Lz4,
+                compression_algorithm: CompressionAlgorithm::Lz4,
             },
             LevelOptions {
                 compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                compression_algorighm: CompressionAlgorighm::Lz4,
+                compression_algorithm: CompressionAlgorithm::Lz4,
             },
             LevelOptions {
                 compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                compression_algorighm: CompressionAlgorighm::Lz4,
+                compression_algorithm: CompressionAlgorithm::Lz4,
             },
             LevelOptions {
                 compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                compression_algorighm: CompressionAlgorighm::Lz4,
+                compression_algorithm: CompressionAlgorithm::Lz4,
             },
         ];
         let version_manager_options = VersionManagerOptions {
-            level_options,
+            levels_options: level_options,
             levels: vec![vec![]; 7],
             sstable_store,
         };
