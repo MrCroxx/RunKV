@@ -1,4 +1,4 @@
-extend = [{ path = "common.toml" }, { path = "minio.toml" }]
+extend = [{ path = "make/common.toml" }, { path = "make/minio.toml" }]
 
 [env]
 RUST_BACKTRACE = 1
@@ -38,19 +38,16 @@ echo success
 [tasks.pre-dev]
 category = "Develop"
 description = "Downloads necessary tools and build required components."
-dependencies = [
-    "download-minio",
-    "download-mcli",
-    "clean-data",
-]
+dependencies = ["download-minio", "download-mcli", "clean-data"]
 script = '''
 #!/bin/bash
 # run minio
 tmux new -d -s runkv-minio ${PREFIX_BIN}/minio server --address 127.0.0.1:9000 --console-address 127.0.0.1:9090 ${PREFIX_DATA}
 # create test bucket
-tmux new -d -s runkv-mcli \ ' \
+tmux new -d -s runkv-mcli ' \
 ${PREFIX_BIN}/mcli alias set local http://127.0.0.1:9000 minioadmin minioadmin ; \
 ${PREFIX_BIN}/mcli mb local/test ; \
+'
 '''
 
 [tasks.k]

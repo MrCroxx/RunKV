@@ -6,7 +6,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use lz4::Decoder;
 
 use crate::lsm_tree::utils::{
-    crc32check, crc32sum, key_diff, var_u32_len, BufExt, BufMutExt, CompressionAlgorighm,
+    crc32check, crc32sum, key_diff, var_u32_len, BufExt, BufMutExt, CompressionAlgorithm,
 };
 use crate::lsm_tree::{
     DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, TEST_DEFAULT_RESTART_INTERVAL,
@@ -29,10 +29,10 @@ impl Block {
         }
 
         // Decompress.
-        let compression = CompressionAlgorighm::decode(&mut &buf[buf.len() - 5..buf.len() - 4])?;
+        let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 5..buf.len() - 4])?;
         let buf = match compression {
-            CompressionAlgorighm::None => buf.slice(..buf.len() - 5),
-            CompressionAlgorighm::Lz4 => {
+            CompressionAlgorithm::None => buf.slice(..buf.len() - 5),
+            CompressionAlgorithm::Lz4 => {
                 let mut decoder = Decoder::new(buf.reader())
                     .map_err(Error::decode_error)
                     .unwrap();
@@ -164,7 +164,7 @@ pub struct BlockBuilderOptions {
     /// Reserved bytes size when creating buffer to avoid frequent allocating.
     pub capacity: usize,
     /// Compression algorithm.
-    pub compression_algorithm: CompressionAlgorighm,
+    pub compression_algorithm: CompressionAlgorithm,
     /// Restart point interval.
     pub restart_interval: usize,
 }
@@ -173,7 +173,7 @@ impl Default for BlockBuilderOptions {
     fn default() -> Self {
         Self {
             capacity: DEFAULT_BLOCK_SIZE,
-            compression_algorithm: CompressionAlgorighm::None,
+            compression_algorithm: CompressionAlgorithm::None,
             restart_interval: if cfg!(test) {
                 DEFAULT_RESTART_INTERVAL
             } else {
@@ -196,7 +196,7 @@ pub struct BlockBuilder {
     /// Count of entries in current block.
     entry_count: usize,
     /// Compression algorithm.
-    compression_algorithm: CompressionAlgorighm,
+    compression_algorithm: CompressionAlgorithm,
 }
 
 impl BlockBuilder {
@@ -273,8 +273,8 @@ impl BlockBuilder {
         }
         self.buf.put_u32_le(self.restart_points.len() as u32);
         let mut buf = match self.compression_algorithm {
-            CompressionAlgorighm::None => self.buf,
-            CompressionAlgorighm::Lz4 => {
+            CompressionAlgorithm::None => self.buf,
+            CompressionAlgorithm::Lz4 => {
                 let mut encoder = lz4::EncoderBuilder::new()
                     .level(4)
                     .build(BytesMut::with_capacity(self.buf.len()).writer())
@@ -348,7 +348,7 @@ mod tests {
     #[tokio::test]
     async fn test_compressed_block_enc_dec() {
         let options = BlockBuilderOptions {
-            compression_algorithm: CompressionAlgorighm::Lz4,
+            compression_algorithm: CompressionAlgorithm::Lz4,
             ..Default::default()
         };
         let mut builder = BlockBuilder::new(options);

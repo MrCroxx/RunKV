@@ -145,7 +145,7 @@ mod tests {
 
     use super::*;
     use crate::components::{SstableBuilder, SstableBuilderOptions};
-    use crate::lsm_tree::utils::CompressionAlgorighm;
+    use crate::lsm_tree::utils::CompressionAlgorithm;
     use crate::lsm_tree::TEST_DEFAULT_RESTART_INTERVAL;
     use crate::MemObjectStore;
 
@@ -155,7 +155,7 @@ mod tests {
             block_capacity: 32,
             restart_interval: TEST_DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
-            compression_algorithm: CompressionAlgorighm::None,
+            compression_algorithm: CompressionAlgorithm::None,
         };
         let mut builder = SstableBuilder::new(options);
         builder.add(b"k01", 1, Some(b"v01")).unwrap();

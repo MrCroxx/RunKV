@@ -238,7 +238,7 @@ mod tests {
     use crate::components::{BlockCache, SstableStore, SstableStoreOptions};
     use crate::manifest::{LevelCompactionStrategy, LevelOptions, VersionManagerOptions};
     use crate::uploader::{Uploader, UploaderOptions};
-    use crate::utils::CompressionAlgorighm;
+    use crate::utils::CompressionAlgorithm;
     use crate::MemObjectStore;
 
     fn is_send_sync<T: Send + Sync>() {}
@@ -298,34 +298,34 @@ mod tests {
         };
         let sstable_store = Arc::new(SstableStore::new(sstable_store_options));
         let version_manager_options = VersionManagerOptions {
-            level_options: vec![
+            levels_options: vec![
                 LevelOptions {
                     compaction_strategy: LevelCompactionStrategy::Overlap,
-                    compression_algorighm: CompressionAlgorighm::None,
+                    compression_algorithm: CompressionAlgorithm::None,
                 },
                 LevelOptions {
                     compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                    compression_algorighm: CompressionAlgorighm::None,
+                    compression_algorithm: CompressionAlgorithm::None,
                 },
                 LevelOptions {
                     compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                    compression_algorighm: CompressionAlgorighm::None,
+                    compression_algorithm: CompressionAlgorithm::None,
                 },
                 LevelOptions {
                     compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                    compression_algorighm: CompressionAlgorighm::Lz4,
+                    compression_algorithm: CompressionAlgorithm::Lz4,
                 },
                 LevelOptions {
                     compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                    compression_algorighm: CompressionAlgorighm::Lz4,
+                    compression_algorithm: CompressionAlgorithm::Lz4,
                 },
                 LevelOptions {
                     compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                    compression_algorighm: CompressionAlgorighm::Lz4,
+                    compression_algorithm: CompressionAlgorithm::Lz4,
                 },
                 LevelOptions {
                     compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                    compression_algorighm: CompressionAlgorighm::Lz4,
+                    compression_algorithm: CompressionAlgorithm::Lz4,
                 },
             ],
             levels: vec![vec![]; 7],
@@ -351,7 +351,7 @@ mod tests {
             block_capacity: ByteSize(1024),
             restart_interval: 2,
             bloom_false_positive: 0.1,
-            compression_algorithm: CompressionAlgorighm::None,
+            compression_algorithm: CompressionAlgorithm::None,
             poll_interval: Duration::from_millis(100),
         };
         let uploader = Uploader::new(uploader_options);

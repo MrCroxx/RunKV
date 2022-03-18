@@ -1,15 +1,15 @@
 pub mod common {
-    include!(concat!(env!("OUT_DIR"), "/common.rs"));
+    tonic::include_proto!("common");
 }
 
 pub mod manifest {
-    include!(concat!(env!("OUT_DIR"), "/manifest.rs"));
+    tonic::include_proto!("manifest");
 }
 
 pub mod meta {
-    include!(concat!(env!("OUT_DIR"), "/meta.rs"));
+    tonic::include_proto!("meta");
 }
 
 pub mod runkv {
-    include!(concat!(env!("OUT_DIR"), "/runkv.rs"));
+    tonic::include_proto!("runkv");
 }

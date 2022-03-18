@@ -3,10 +3,10 @@ use std::sync::Arc;
 use runkv_storage::components::SstableStoreRef;
 use runkv_storage::manifest::VersionManager;
 
-use crate::{Error, Result};
+use crate::error::{Error, Result};
 
 pub struct MetaManagerOptions {
-    pub version: VersionManager,
+    pub version_manager: VersionManager,
     pub watermark: u64,
     pub sstable_store: SstableStoreRef,
 }
@@ -26,7 +26,7 @@ pub struct MetaManager {
 impl MetaManager {
     pub fn new(options: MetaManagerOptions) -> Self {
         Self {
-            _version_manager: options.version,
+            _version_manager: options.version_manager,
             watermark: options.watermark,
             _sstable_store: options.sstable_store,
         }
@@ -48,7 +48,7 @@ pub type MetaManagerRef = Arc<MetaManager>;
 mod tests {
     use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions};
     use runkv_storage::manifest::{LevelCompactionStrategy, LevelOptions, VersionManagerOptions};
-    use runkv_storage::utils::CompressionAlgorighm;
+    use runkv_storage::utils::CompressionAlgorithm;
     use runkv_storage::MemObjectStore;
 
     use super::*;
@@ -59,31 +59,31 @@ mod tests {
         let level_options = vec![
             LevelOptions {
                 compaction_strategy: LevelCompactionStrategy::Overlap,
-                compression_algorighm: CompressionAlgorighm::None,
+                compression_algorithm: CompressionAlgorithm::None,
             },
             LevelOptions {
                 compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                compression_algorighm: CompressionAlgorighm::None,
+                compression_algorithm: CompressionAlgorithm::None,
             },
             LevelOptions {
                 compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                compression_algorighm: CompressionAlgorighm::None,
+                compression_algorithm: CompressionAlgorithm::None,
             },
             LevelOptions {
                 compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                compression_algorighm: CompressionAlgorighm::Lz4,
+                compression_algorithm: CompressionAlgorithm::Lz4,
             },
             LevelOptions {
                 compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                compression_algorighm: CompressionAlgorighm::Lz4,
+                compression_algorithm: CompressionAlgorithm::Lz4,
             },
             LevelOptions {
                 compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                compression_algorighm: CompressionAlgorighm::Lz4,
+                compression_algorithm: CompressionAlgorithm::Lz4,
             },
             LevelOptions {
                 compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                compression_algorighm: CompressionAlgorighm::Lz4,
+                compression_algorithm: CompressionAlgorithm::Lz4,
             },
         ];
         let object_store = Arc::new(MemObjectStore::default());
@@ -96,13 +96,13 @@ mod tests {
         };
         let sstable_store = Arc::new(SstableStore::new(sstable_store_options));
         let version_manager_options = VersionManagerOptions {
-            level_options,
+            levels_options: level_options,
             levels: vec![vec![]; 7],
             sstable_store: sstable_store.clone(),
         };
         let version_manager = VersionManager::new(version_manager_options);
         let meta_manager_options = MetaManagerOptions {
-            version: version_manager,
+            version_manager,
             watermark: 0,
             sstable_store,
         };

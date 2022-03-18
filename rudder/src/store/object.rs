@@ -1,7 +1,8 @@
 use bytes::Bytes;
 use runkv_storage::ObjectStoreRef;
 
-use crate::{Error, MetaStore, Result};
+use super::MetaStore;
+use crate::error::{Error, Result};
 
 // TODO: Remove allow dead code.
 #[allow(dead_code)]

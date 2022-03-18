@@ -20,6 +20,7 @@ const DEFAULT_SSTABLE_META_SIZE: usize = 4 * 1024; // 4 KiB
 #[cfg(test)]
 const DEFAULT_MEMTABLE_SIZE: usize = 4 * 1024 * 1024; // 4 MiB
 
+// TODO: Support iterator on [`LsmTree`].
 #[async_trait]
 pub trait LsmTree: Send + Sync + Clone {
     /// Put a new `key` `value` pair into LSM-Tree with given `timestamp`.

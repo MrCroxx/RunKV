@@ -9,7 +9,7 @@ use tracing::{debug, warn};
 use crate::components::{Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef};
 use crate::manifest::VersionManager;
 use crate::object_store_lsm_tree::ObjectStoreLsmTree;
-use crate::utils::{timestamp, user_key, value, CompressionAlgorighm};
+use crate::utils::{timestamp, user_key, value, CompressionAlgorithm};
 use crate::Result;
 
 pub struct UploaderOptions {
@@ -20,7 +20,7 @@ pub struct UploaderOptions {
     pub block_capacity: ByteSize,
     pub restart_interval: usize,
     pub bloom_false_positive: f64,
-    pub compression_algorithm: CompressionAlgorighm,
+    pub compression_algorithm: CompressionAlgorithm,
     pub poll_interval: Duration,
 }
 

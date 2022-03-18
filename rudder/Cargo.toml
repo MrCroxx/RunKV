@@ -9,9 +9,13 @@ anyhow = "1.0"
 async-trait = "0.1"
 base64 = "0.13"
 bytes = "1"
+bytesize = { version = "1.1.0", features = ["serde"] }
+clap = { version = "3.1.6", features = ["derive"] }
 prost = "0.9"
 runkv-proto = { path = "../proto" }
 runkv-storage = { path = "../storage" }
+serde = "1.0"
+serde_derive = "1.0"
 thiserror = "1.0"
 tokio = { version = "1", features = [
     "rt-multi-thread",
@@ -19,4 +23,7 @@ tokio = { version = "1", features = [
     "macros",
     "time",
 ] }
+toml = "0.4.2"
 tonic = "0.6.2"
+tracing = "0.1"
+tracing-subscriber = "0.2.0"
