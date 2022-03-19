@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use runkv_proto::rudder::rudder_service_client::RudderServiceClient;
 use runkv_proto::rudder::InsertL0Request;
 use runkv_storage::components::{
@@ -13,8 +14,9 @@ use tonic::transport::Channel;
 use tonic::Request;
 use tracing::{debug, warn};
 
+use super::Worker;
 use crate::error::Result;
-use crate::lsm_tree::ObjectStoreLsmTree;
+use crate::storage::lsm_tree::ObjectStoreLsmTree;
 
 pub struct SstableUploaderOptions {
     pub node_id: u64,
@@ -41,6 +43,22 @@ pub struct SstableUploader {
     id: AtomicU64,
 }
 
+#[async_trait]
+impl Worker for SstableUploader {
+    async fn run(&mut self) -> Result<()> {
+        // TODO: Gracefully kill.
+        loop {
+            match self.run_inner().await {
+                Ok(_) => {}
+                Err(e) => {
+                    println!("error occur when uploader running: {}", e);
+                    warn!("error occur when uploader running: {}", e);
+                }
+            }
+        }
+    }
+}
+
 impl SstableUploader {
     pub fn new(options: SstableUploaderOptions) -> Self {
         Self {
@@ -51,19 +69,6 @@ impl SstableUploader {
             rudder_client: options.rudder_client.clone(),
             options,
             id: AtomicU64::new(1),
-        }
-    }
-
-    pub async fn run(&mut self) -> Result<()> {
-        // TODO: Gracefully kill.
-        loop {
-            match self.run_inner().await {
-                Ok(_) => {}
-                Err(e) => {
-                    println!("error occur when uploader running: {}", e);
-                    warn!("error occur when uploader running: {}", e);
-                }
-            }
         }
     }
 
@@ -147,7 +152,7 @@ impl SstableUploader {
         let request = Request::new(InsertL0Request {
             node_id: self.node_id,
             sst_ids,
-            latest_version_id: self.version_manager.latest_version_id().await + 1,
+            next_version_id: self.version_manager.latest_version_id().await + 1,
         });
         let rsp = self.rudder_client.insert_l0(request).await?.into_inner();
         let version_diffs = rsp.version_diffs;
@@ -168,5 +173,3 @@ impl SstableUploader {
         Ok(())
     }
 }
-
-pub type SstableUploaderRef = Arc<SstableUploader>;

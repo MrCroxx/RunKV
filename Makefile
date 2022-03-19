@@ -1,20 +1,11 @@
 SHELL := /bin/bash
 .PHONY: proto
 
-rust_cargo_sort_check:
-	cargo sort -c -w
-
 fmt:
-	cargo fmt --all
+	cargo sort -w && cargo fmt --all && cargo clippy --all-targets
 
 fmt_check:
-	cargo fmt --all -- --check
-
-clippy:
-	cargo clippy --all-targets
-
-clippy_locked:
-	cargo clippy --all-targets --locked -- -D warnings
+	cargo sort -c -w && cargo fmt --all -- --check && cargo clippy --all-targets --locked -- -D warnings
 
 test:
 	cargo nextest run

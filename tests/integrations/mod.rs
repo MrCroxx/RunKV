@@ -8,9 +8,8 @@ use itertools::Itertools;
 use rand::{thread_rng, Rng};
 use runkv_rudder::config::RudderConfig;
 use runkv_rudder::{bootstrap_rudder, build_rudder_with_object_store};
-use runkv_storage::MemObjectStore;
+use runkv_storage::{LsmTree, MemObjectStore};
 use runkv_wheel::config::WheelConfig;
-use runkv_wheel::lsm_tree::LsmTree;
 use runkv_wheel::{bootstrap_wheel, build_wheel_with_object_store};
 
 const RUDDER_CONFIG_PATH: &str = "etc/rudder.toml";
@@ -30,10 +29,11 @@ async fn test_concurrent_put_get() {
 
     let wheel_config: WheelConfig =
         toml::from_str(&read_to_string(WHEEL_CONFIG_PATH).unwrap()).unwrap();
-    let (wheel, lsmtree) = build_wheel_with_object_store(&wheel_config, object_store)
-        .await
-        .unwrap();
-    tokio::spawn(async move { bootstrap_wheel(&wheel_config, wheel).await });
+    let (wheel, lsmtree, wheel_workers) =
+        build_wheel_with_object_store(&wheel_config, object_store)
+            .await
+            .unwrap();
+    tokio::spawn(async move { bootstrap_wheel(&wheel_config, wheel, wheel_workers).await });
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     let futures = (1..=10000)

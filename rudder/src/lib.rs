@@ -1,6 +1,5 @@
 pub mod config;
 pub mod error;
-// pub mod lib;
 pub mod service;
 pub mod store;
 

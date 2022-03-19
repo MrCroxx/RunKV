@@ -7,6 +7,8 @@ use runkv_storage::components::SstableStoreRef;
 use runkv_storage::manifest::VersionManager;
 use tonic::{Request, Response, Status};
 
+const DEFAULT_VERSION_DIFF_BATCH: usize = 10;
+
 fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
     Status::internal(e.into().to_string())
 }
@@ -43,9 +45,16 @@ impl Rudder {
 impl RudderService for Rudder {
     async fn heartbeat(
         &self,
-        _request: Request<HeartbeatRequest>,
+        request: Request<HeartbeatRequest>,
     ) -> core::result::Result<Response<HeartbeatResponse>, Status> {
-        todo!()
+        let req = request.into_inner();
+        let version_diffs = self
+            .version_manager
+            .version_diffs_from(req.next_version_id, DEFAULT_VERSION_DIFF_BATCH)
+            .await
+            .map_err(internal)?;
+        let rsp = HeartbeatResponse { version_diffs };
+        Ok(Response::new(rsp))
     }
 
     async fn insert_l0(
@@ -71,7 +80,7 @@ impl RudderService for Rudder {
             .map_err(internal)?;
         let version_diffs = self
             .version_manager
-            .version_diffs_from(req.latest_version_id, usize::MAX)
+            .version_diffs_from(req.next_version_id, usize::MAX)
             .await
             .map_err(internal)?;
         let rsp = InsertL0Response { version_diffs };
