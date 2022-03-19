@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use bytesize::ByteSize;
 use error::{config_err, err, Error, Result};
+use runkv_common::BoxedWorker;
 use runkv_proto::rudder::rudder_service_client::RudderServiceClient;
 use runkv_proto::wheel::wheel_service_server::WheelServiceServer;
 use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions, SstableStoreRef};
@@ -18,7 +19,6 @@ use tonic::transport::{Channel, Server};
 use tracing::info;
 use worker::sstable_uploader::{SstableUploader, SstableUploaderOptions};
 use worker::version_syncer::{VersionSyncer, VersionSyncerOptions};
-use worker::BoxedWorker;
 
 use crate::config::WheelConfig;
 use crate::storage::lsm_tree::{ObjectStoreLsmTree, ObjectStoreLsmTreeOptions};

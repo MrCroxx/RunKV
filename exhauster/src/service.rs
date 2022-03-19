@@ -2,6 +2,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bytes::Bytes;
+use itertools::Itertools;
 use runkv_proto::exhauster::exhauster_service_server::ExhausterService;
 use runkv_proto::exhauster::{CompactionRequest, CompactionResponse};
 use runkv_storage::components::{
@@ -14,6 +16,7 @@ use tracing::debug;
 
 use crate::compaction_filter::{CompactionFilter, DefaultCompactionFilter};
 use crate::error::Result;
+use crate::partitioner::{DefaultPartitioner, Partitioner};
 
 fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
     Status::internal(e.into().to_string())
@@ -72,17 +75,27 @@ impl ExhausterService for Exhauster {
         let mut sst_id = 0;
         let mut compaction_filter =
             DefaultCompactionFilter::new(req.watermark, req.remove_tombstone);
-
+        let partition_points = req
+            .partition_points
+            .into_iter()
+            .map(Bytes::from)
+            .collect_vec();
+        let mut partitioner = DefaultPartitioner::new(partition_points);
         let mut sst_ids = Vec::with_capacity(req.sst_ids.len());
         // Filter key value pairs.
         while iter.is_valid() {
+            let uk = user_key(iter.key());
+            let ts = timestamp(iter.key());
+            let v = value(iter.value());
+
             if sstable_builder.is_none() {
                 sst_id = self.gen_sstable_id();
                 sstable_builder = Some(SstableBuilder::new(sstable_builder_options.clone()));
             }
-            if !sstable_builder.as_ref().unwrap().is_empty()
+            if (!sstable_builder.as_ref().unwrap().is_empty()
                 && sstable_builder.as_ref().unwrap().approximate_len()
-                    >= sstable_builder_options.capacity
+                    >= sstable_builder_options.capacity)
+                || partitioner.partition(uk, v, ts)
             {
                 let builder = sstable_builder.take().unwrap();
                 self.build_and_upload_sst(sst_id, builder)
@@ -92,9 +105,7 @@ impl ExhausterService for Exhauster {
                 continue;
             }
             let builder = sstable_builder.as_mut().unwrap();
-            let uk = user_key(iter.key());
-            let ts = timestamp(iter.key());
-            let v = value(iter.value());
+
             if compaction_filter.filter(uk, v, ts) {
                 builder.add(uk, ts, v).map_err(internal)?;
             }

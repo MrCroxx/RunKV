@@ -4,14 +4,33 @@ package rudder;
 
 import "manifest.proto";
 
+message WheelHeartbeatRequest {
+  uint64 watermark = 1;
+  uint64 next_version_id = 2;
+}
+
+message WheelHeartbeatResponse {
+  repeated manifest.VersionDiff version_diffs = 1;
+}
+
+message ExhausterHeartbeatRequest {}
+
+message ExhausterHeartbeatResponse {}
+
+// TODO: Add status report.
 message HeartbeatRequest {
   uint64 node_id = 1;
-  uint64 watermark = 2;
-  uint64 next_version_id = 3;
+  oneof heartbeat_message {
+    WheelHeartbeatRequest wheel_heartbeat = 2;
+    ExhausterHeartbeatRequest exhauster_heartbeat = 3;
+  }
 }
 
 message HeartbeatResponse {
-  repeated manifest.VersionDiff version_diffs = 1;
+  oneof heartbeat_message {
+    WheelHeartbeatResponse wheel_heartbeat = 1;
+    ExhausterHeartbeatResponse exhauster_heartbeat = 2;
+  }
 }
 
 message InsertL0Request {

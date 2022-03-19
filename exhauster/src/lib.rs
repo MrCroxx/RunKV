@@ -1,6 +1,7 @@
 pub mod compaction_filter;
 pub mod config;
 pub mod error;
+pub mod partitioner;
 pub mod service;
 
 use std::sync::Arc;

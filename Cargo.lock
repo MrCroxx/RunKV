@@ -1602,6 +1602,10 @@ dependencies = [
 [[package]]
 name = "runkv-common"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+]
 
 [[package]]
 name = "runkv-exhauster"
@@ -1651,7 +1655,10 @@ dependencies = [
  "bytesize",
  "clap",
  "itertools",
+ "parking_lot 0.12.0",
  "prost",
+ "rand",
+ "runkv-common",
  "runkv-proto",
  "runkv-storage",
  "serde",
@@ -1709,6 +1716,7 @@ dependencies = [
  "itertools",
  "parking_lot 0.12.0",
  "prost",
+ "runkv-common",
  "runkv-proto",
  "runkv-storage",
  "serde",
