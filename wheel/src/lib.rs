@@ -1,14 +1,13 @@
 pub mod config;
 pub mod error;
-pub mod lsm_tree;
 pub mod service;
+pub mod storage;
+pub mod worker;
 
 use std::sync::Arc;
 
 use bytesize::ByteSize;
 use error::{config_err, err, Error, Result};
-use lsm_tree::sstable_uploader::{SstableUploader, SstableUploaderOptions};
-use lsm_tree::{WheelVersionManager, WheelVersionManagerOptions};
 use runkv_proto::rudder::rudder_service_client::RudderServiceClient;
 use runkv_proto::wheel::wheel_service_server::WheelServiceServer;
 use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions, SstableStoreRef};
@@ -17,12 +16,23 @@ use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
 use service::{Wheel, WheelOptions};
 use tonic::transport::{Channel, Server};
 use tracing::info;
+use worker::sstable_uploader::{SstableUploader, SstableUploaderOptions};
+use worker::version_syncer::{VersionSyncer, VersionSyncerOptions};
+use worker::BoxedWorker;
 
 use crate::config::WheelConfig;
-use crate::lsm_tree::{ObjectStoreLsmTree, ObjectStoreLsmTreeOptions};
+use crate::storage::lsm_tree::{ObjectStoreLsmTree, ObjectStoreLsmTreeOptions};
 
-pub async fn bootstrap_wheel(config: &WheelConfig, wheel: Wheel) -> Result<()> {
+pub async fn bootstrap_wheel(
+    config: &WheelConfig,
+    wheel: Wheel,
+    workers: Vec<BoxedWorker>,
+) -> Result<()> {
     let addr_str = format!("{}:{}", config.host, config.port);
+
+    for mut worker in workers.into_iter() {
+        tokio::spawn(async move { worker.run().await });
+    }
 
     Server::builder()
         .add_service(WheelServiceServer::new(wheel))
@@ -31,7 +41,9 @@ pub async fn bootstrap_wheel(config: &WheelConfig, wheel: Wheel) -> Result<()> {
         .map_err(err)
 }
 
-pub async fn build_wheel(config: &WheelConfig) -> Result<(Wheel, ObjectStoreLsmTree)> {
+pub async fn build_wheel(
+    config: &WheelConfig,
+) -> Result<(Wheel, ObjectStoreLsmTree, Vec<BoxedWorker>)> {
     let object_store = create_object_store(config).await;
     build_wheel_with_object_store(config, object_store).await
 }
@@ -39,7 +51,7 @@ pub async fn build_wheel(config: &WheelConfig) -> Result<(Wheel, ObjectStoreLsmT
 pub async fn build_wheel_with_object_store(
     config: &WheelConfig,
     object_store: ObjectStoreRef,
-) -> Result<(Wheel, ObjectStoreLsmTree)> {
+) -> Result<(Wheel, ObjectStoreLsmTree, Vec<BoxedWorker>)> {
     let sstable_store = create_sstable_store(config, object_store)?;
 
     let version_manager = create_version_manager(config, sstable_store.clone())?;
@@ -52,7 +64,7 @@ pub async fn build_wheel_with_object_store(
     ))
     .await?;
 
-    let mut sstable_uploader = create_sstable_uploader(
+    let sstable_uploader = create_sstable_uploader(
         config,
         lsm_tree.clone(),
         sstable_store,
@@ -60,12 +72,7 @@ pub async fn build_wheel_with_object_store(
         rudder_client.clone(),
     )?;
 
-    let mut _wheel_version_manager =
-        create_wheel_version_manager(config, version_manager, rudder_client)?;
-
-    // TODO: Do not spawn when building.
-    tokio::spawn(async move { sstable_uploader.run().await });
-    // tokio::spawn(async move { wheel_version_manager.run().await });
+    let version_syncer = create_version_syncer(config, version_manager, rudder_client)?;
 
     let options = WheelOptions {
         lsm_tree: lsm_tree.clone(),
@@ -74,7 +81,11 @@ pub async fn build_wheel_with_object_store(
 
     let wheel = Wheel::new(options);
 
-    Ok((wheel, lsm_tree))
+    Ok((
+        wheel,
+        lsm_tree,
+        vec![Box::new(sstable_uploader), Box::new(version_syncer)],
+    ))
 }
 
 async fn create_object_store(config: &WheelConfig) -> ObjectStoreRef {
@@ -190,12 +201,12 @@ fn create_sstable_uploader(
     Ok(SstableUploader::new(sstable_uploader))
 }
 
-fn create_wheel_version_manager(
+fn create_version_syncer(
     config: &WheelConfig,
     version_manager: VersionManager,
     rudder_client: RudderServiceClient<Channel>,
-) -> Result<WheelVersionManager> {
-    let wheel_version_manager_options = WheelVersionManagerOptions {
+) -> Result<VersionSyncer> {
+    let wheel_version_manager_options = VersionSyncerOptions {
         node_id: config.id,
         version_manager,
         client: rudder_client,
@@ -205,5 +216,5 @@ fn create_wheel_version_manager(
             .map_err(config_err)?
             .into(),
     };
-    Ok(WheelVersionManager::new(wheel_version_manager_options))
+    Ok(VersionSyncer::new(wheel_version_manager_options))
 }

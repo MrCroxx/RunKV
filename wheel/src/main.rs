@@ -25,6 +25,6 @@ async fn main() -> Result<()> {
         .map_err(config_err)?;
     info!("config: {:?}", config);
 
-    let (wheel, _lsm_tree) = build_wheel(&config).await?;
-    bootstrap_wheel(&config, wheel).await
+    let (wheel, _lsm_tree, workers) = build_wheel(&config).await?;
+    bootstrap_wheel(&config, wheel, workers).await
 }

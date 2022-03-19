@@ -10,9 +10,7 @@ use runkv_storage::components::{CachePolicy, Memtable, SstableStoreRef};
 use runkv_storage::iterator::{Iterator, MergeIterator, Seek, SstableIterator, UserKeyIterator};
 use runkv_storage::manifest::{LevelCompactionStrategy, VersionManager};
 use runkv_storage::utils::{value, SKIPLIST_NODE_TOWER_MAX_HEIGHT};
-
-use super::LsmTree;
-use crate::error::Result;
+use runkv_storage::{LsmTree, Result};
 
 #[derive(Clone)]
 pub struct ObjectStoreLsmTreeOptions {

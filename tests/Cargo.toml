@@ -25,3 +25,4 @@ tokio = { version = "1", features = [
     "time",
 ] }
 toml = "0.4.2"
+tracing = "0.1"

@@ -35,7 +35,7 @@ jobs:
         uses: ludeeus/action-shellcheck@master
       - name: Check protobuf style
         run: |
-          make proto_check
+          cd proto/src/proto && prototool format -d && buf lint 
   rust-test:
     name: rust test with codecov
     runs-on: ubuntu-latest
@@ -63,14 +63,14 @@ jobs:
           cargo install cargo-sort
       - name: Run rust cargo-sort check
         run: |
-          make rust_cargo_sort_check
+          cargo sort -w -c
       - name: Run rust format check
         run: |
-          make fmt_check
+          cargo fmt --all -- --check
       - name: Run rust clippy check
         run: |
           # If new CI checks are added, the one with `--locked` must be run first.
-          make clippy_locked
+          cargo clippy --all-targets --locked -- -D warnings
       - name: Install required tools for test with coverage
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
