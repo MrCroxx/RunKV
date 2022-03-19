@@ -1,6 +1,6 @@
 id = 1
 host = "127.0.0.1"
-port = 12300
+port = 12301
 data_path = "data"
 meta_path = "meta"
 

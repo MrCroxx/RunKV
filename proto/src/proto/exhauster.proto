@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package exhauster;
+
+message CompactionRequest {
+  repeated uint64 sst_ids = 1;
+  uint64 watermark = 2;
+  uint64 sstable_capacity = 3;
+  uint64 block_capacity = 4;
+  uint64 restart_interval = 5;
+  double bloom_false_positive = 6;
+  uint64 compression_algorithm = 7;
+  bool remove_tombstone = 8;
+}
+
+message CompactionResponse {
+  repeated uint64 sst_ids = 1;
+}
+
+service ExhausterService {
+  rpc Compaction(CompactionRequest) returns (CompactionResponse);
+}

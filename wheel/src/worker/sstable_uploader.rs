@@ -40,7 +40,7 @@ pub struct SstableUploader {
     version_manager: VersionManager,
     pub rudder_client: RudderServiceClient<Channel>,
     // TODO: Get a global unique sst id from rudder.
-    id: AtomicU64,
+    sstable_sequential_id: AtomicU64,
 }
 
 #[async_trait]
@@ -68,7 +68,7 @@ impl SstableUploader {
             version_manager: options.version_manager.clone(),
             rudder_client: options.rudder_client.clone(),
             options,
-            id: AtomicU64::new(1),
+            sstable_sequential_id: AtomicU64::new(1),
         }
     }
 
@@ -88,15 +88,15 @@ impl SstableUploader {
                 let skiplist = memtable.unwrap();
                 let mut iter = skiplist.iter();
                 iter.seek_to_first();
-                let mut id = 0;
+                let mut sst_id = 0;
                 while iter.valid() {
                     // TODO: Get a global unique sst id from rudder.
-                    id = self.id.load(Ordering::SeqCst);
                     // Rotate sstable builder if necessary.
                     if sstable_builder.is_none() {
+                        sst_id = self.gen_sstable_id();
                         sstable_builder =
                             Some(SstableBuilder::new(sstable_builder_options.clone()));
-                        debug!("build and upload sst {}", id);
+                        debug!("build and upload sst {}", sst_id);
                         // println!("build and upload sst {}", id);
                     }
                     if !sstable_builder.as_ref().unwrap().is_empty()
@@ -104,8 +104,8 @@ impl SstableUploader {
                             >= self.options.sstable_capacity
                     {
                         let builder = sstable_builder.take().unwrap();
-                        self.build_and_upload_sst(id, builder).await?;
-                        sst_ids.push(id);
+                        self.build_and_upload_sst(sst_id, builder).await?;
+                        sst_ids.push(sst_id);
                         continue;
                     }
 
@@ -119,8 +119,8 @@ impl SstableUploader {
                     iter.next();
                 }
                 if let Some(builder) = sstable_builder.take() {
-                    self.build_and_upload_sst(id, builder).await?;
-                    sst_ids.push(id);
+                    self.build_and_upload_sst(sst_id, builder).await?;
+                    sst_ids.push(sst_id);
                 }
                 self.notify_update_version(sst_ids).await?;
             }
@@ -143,7 +143,6 @@ impl SstableUploader {
             .await?;
         // println!("sst {} uploaded", id);
         debug!("sst {} uploaded", id);
-        self.id.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
@@ -171,5 +170,11 @@ impl SstableUploader {
         self.lsm_tree.drop_oldest_immutable_memtable();
         // println!("last imm dropped");
         Ok(())
+    }
+
+    fn gen_sstable_id(&self) -> u64 {
+        let sequential_id = self.sstable_sequential_id.fetch_add(1, Ordering::SeqCst);
+        let node_id = self.options.node_id;
+        (node_id << 32) | sequential_id
     }
 }
