@@ -1606,6 +1606,28 @@ version = "0.1.0"
 [[package]]
 name = "runkv-exhauster"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "bytesize",
+ "clap",
+ "humantime",
+ "humantime-serde",
+ "itertools",
+ "parking_lot 0.12.0",
+ "prost",
+ "runkv-proto",
+ "runkv-storage",
+ "serde",
+ "serde_derive",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "runkv-proto"

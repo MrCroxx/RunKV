@@ -1,6 +1,6 @@
 id = 101
 host = "127.0.0.1"
-port = 12400
+port = 12401
 data_path = "data"
 meta_path = "meta"
 poll_interval = "100ms"
@@ -8,7 +8,7 @@ heartbeat_interval = "100ms"
 
 [rudder]
 host = "127.0.0.1"
-port = 12300
+port = 12301
 
 # [minio]
 # url = 'minio://minioadmin:minioadmin@127.0.0.1:9000/runkv'

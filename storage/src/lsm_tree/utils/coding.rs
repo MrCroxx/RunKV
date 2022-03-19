@@ -139,6 +139,28 @@ impl CompressionAlgorithm {
     }
 }
 
+impl From<CompressionAlgorithm> for u8 {
+    fn from(ca: CompressionAlgorithm) -> Self {
+        match ca {
+            CompressionAlgorithm::None => 0,
+            CompressionAlgorithm::Lz4 => 1,
+        }
+    }
+}
+
+impl TryFrom<u8> for CompressionAlgorithm {
+    type Error = Error;
+    fn try_from(v: u8) -> core::result::Result<Self, Self::Error> {
+        match v {
+            0 => Ok(Self::None),
+            1 => Ok(Self::Lz4),
+            _ => Err(Error::DecodeError(
+                "not valid compression algorithm".to_string(),
+            )),
+        }
+    }
+}
+
 /// Key categories:
 ///
 /// A full key value pair looks like:
