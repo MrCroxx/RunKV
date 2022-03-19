@@ -1,14 +1,16 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
+use runkv_common::Worker;
 use runkv_proto::rudder::rudder_service_client::RudderServiceClient;
-use runkv_proto::rudder::HeartbeatRequest;
+use runkv_proto::rudder::{
+    heartbeat_request, heartbeat_response, HeartbeatRequest, WheelHeartbeatRequest,
+};
 use runkv_storage::manifest::{ManifestError, VersionManager};
 use tonic::transport::Channel;
 use tonic::Request;
 use tracing::warn;
 
-use super::Worker;
 use crate::error::Result;
 
 pub struct VersionSyncerOptions {
@@ -26,7 +28,7 @@ pub struct VersionSyncer {
 
 #[async_trait]
 impl Worker for VersionSyncer {
-    async fn run(&mut self) -> Result<()> {
+    async fn run(&mut self) -> anyhow::Result<()> {
         // TODO: Gracefully kill.
         loop {
             match self.run_inner().await {
@@ -49,12 +51,21 @@ impl VersionSyncer {
     async fn run_inner(&mut self) -> Result<()> {
         let request = Request::new(HeartbeatRequest {
             node_id: self.options.node_id,
-            watermark: self.version_manager.watermark().await,
-            next_version_id: self.version_manager.latest_version_id().await + 1,
+            heartbeat_message: Some(heartbeat_request::HeartbeatMessage::WheelHeartbeat(
+                WheelHeartbeatRequest {
+                    watermark: self.version_manager.watermark().await,
+                    next_version_id: self.version_manager.latest_version_id().await + 1,
+                },
+            )),
         });
+
         let rsp = self.client.heartbeat(request).await?.into_inner();
-        let version_diffs = rsp.version_diffs;
-        for version_diff in version_diffs {
+
+        let hb = match rsp.heartbeat_message.unwrap() {
+            heartbeat_response::HeartbeatMessage::WheelHeartbeat(hb) => hb,
+            _ => unreachable!(),
+        };
+        for version_diff in hb.version_diffs {
             if let Err(runkv_storage::Error::ManifestError(ManifestError::VersionDiffIdNotMatch(
                 old,
                 new,

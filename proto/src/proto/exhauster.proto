@@ -11,6 +11,7 @@ message CompactionRequest {
   double bloom_false_positive = 6;
   uint64 compression_algorithm = 7;
   bool remove_tombstone = 8;
+  repeated bytes partition_points = 9;
 }
 
 message CompactionResponse {

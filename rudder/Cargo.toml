@@ -12,7 +12,10 @@ bytes = "1"
 bytesize = { version = "1.1.0", features = ["serde"] }
 clap = { version = "3.1.6", features = ["derive"] }
 itertools = "0.10.3"
+parking_lot = "0.12"
 prost = "0.9"
+rand = "0.8.5"
+runkv-common = { path = "../common" }
 runkv-proto = { path = "../proto" }
 runkv-storage = { path = "../storage" }
 serde = "1.0"

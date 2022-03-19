@@ -2,10 +2,17 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use runkv_proto::manifest::{SsTableDiff, SsTableOp, VersionDiff};
 use runkv_proto::rudder::rudder_service_server::RudderService;
-use runkv_proto::rudder::{HeartbeatRequest, HeartbeatResponse, InsertL0Request, InsertL0Response};
+use runkv_proto::rudder::{
+    heartbeat_request, heartbeat_response, ExhausterHeartbeatRequest, HeartbeatRequest,
+    HeartbeatResponse, InsertL0Request, InsertL0Response, WheelHeartbeatRequest,
+    WheelHeartbeatResponse,
+};
 use runkv_storage::components::SstableStoreRef;
 use runkv_storage::manifest::VersionManager;
 use tonic::{Request, Response, Status};
+
+use crate::error::Result;
+use crate::meta::MetaStoreRef;
 
 const DEFAULT_VERSION_DIFF_BATCH: usize = 10;
 
@@ -16,6 +23,7 @@ fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
 pub struct RudderOptions {
     pub version_manager: VersionManager,
     pub sstable_store: SstableStoreRef,
+    pub meta_store: MetaStoreRef,
 }
 
 pub struct Rudder {
@@ -28,6 +36,7 @@ pub struct Rudder {
     /// `wheel node` periodically and choose the min watermark among them as its own watermark.
     _watermark: u64,
     _sstable_store: SstableStoreRef,
+    _meta_store: MetaStoreRef,
 }
 
 impl Rudder {
@@ -37,6 +46,7 @@ impl Rudder {
             // TODO: Restore from meta store.
             _watermark: 0,
             _sstable_store: options.sstable_store,
+            _meta_store: options.meta_store,
         }
     }
 }
@@ -48,12 +58,20 @@ impl RudderService for Rudder {
         request: Request<HeartbeatRequest>,
     ) -> core::result::Result<Response<HeartbeatResponse>, Status> {
         let req = request.into_inner();
-        let version_diffs = self
-            .version_manager
-            .version_diffs_from(req.next_version_id, DEFAULT_VERSION_DIFF_BATCH)
-            .await
-            .map_err(internal)?;
-        let rsp = HeartbeatResponse { version_diffs };
+
+        let msg = match req.heartbeat_message.unwrap() {
+            heartbeat_request::HeartbeatMessage::WheelHeartbeat(hb) => {
+                self.handle_wheel_heartbeat(hb).await
+            }
+            heartbeat_request::HeartbeatMessage::ExhausterHeartbeat(hb) => {
+                self.handle_exhauster_heartbeat(hb).await
+            }
+        }
+        .map_err(internal)?;
+
+        let rsp = HeartbeatResponse {
+            heartbeat_message: Some(msg),
+        };
         Ok(Response::new(rsp))
     }
 
@@ -85,5 +103,28 @@ impl RudderService for Rudder {
             .map_err(internal)?;
         let rsp = InsertL0Response { version_diffs };
         Ok(Response::new(rsp))
+    }
+}
+
+impl Rudder {
+    async fn handle_wheel_heartbeat(
+        &self,
+        hb: WheelHeartbeatRequest,
+    ) -> Result<heartbeat_response::HeartbeatMessage> {
+        let version_diffs = self
+            .version_manager
+            .version_diffs_from(hb.next_version_id, DEFAULT_VERSION_DIFF_BATCH)
+            .await?;
+        let rsp = heartbeat_response::HeartbeatMessage::WheelHeartbeat(WheelHeartbeatResponse {
+            version_diffs,
+        });
+        Ok(rsp)
+    }
+
+    async fn handle_exhauster_heartbeat(
+        &self,
+        _hb: ExhausterHeartbeatRequest,
+    ) -> Result<heartbeat_response::HeartbeatMessage> {
+        todo!()
     }
 }

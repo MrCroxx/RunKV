@@ -1,18 +1,17 @@
 use bytes::Bytes;
 use runkv_storage::ObjectStoreRef;
 
-use super::MetaStore;
 use crate::error::{Error, Result};
 
-// TODO: Remove allow dead code.
-#[allow(dead_code)]
 pub struct ObjectMetaStore {
     object_store: ObjectStoreRef,
     path: String,
 }
 
-// TODO: Remove allow dead code.
-#[allow(dead_code)]
+// TODO: Impl me.
+// #[async_trait]
+// impl MetaStore for ObjectMetaStore {}
+
 impl ObjectMetaStore {
     pub fn new(object_store: ObjectStoreRef, path: String) -> Self {
         Self { object_store, path }
@@ -43,8 +42,6 @@ impl ObjectMetaStore {
         format!("{}/{}", self.path, base64::encode(key))
     }
 }
-
-impl MetaStore for ObjectMetaStore {}
 
 #[cfg(test)]
 mod tests {

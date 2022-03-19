@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use runkv_common::Worker;
 use runkv_proto::rudder::rudder_service_client::RudderServiceClient;
 use runkv_proto::rudder::InsertL0Request;
 use runkv_storage::components::{
@@ -14,7 +15,6 @@ use tonic::transport::Channel;
 use tonic::Request;
 use tracing::{debug, warn};
 
-use super::Worker;
 use crate::error::Result;
 use crate::storage::lsm_tree::ObjectStoreLsmTree;
 
@@ -45,7 +45,7 @@ pub struct SstableUploader {
 
 #[async_trait]
 impl Worker for SstableUploader {
-    async fn run(&mut self) -> Result<()> {
+    async fn run(&mut self) -> anyhow::Result<()> {
         // TODO: Gracefully kill.
         loop {
             match self.run_inner().await {

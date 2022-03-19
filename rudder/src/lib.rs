@@ -1,13 +1,16 @@
 pub mod config;
 pub mod error;
+pub mod meta;
 pub mod service;
-pub mod store;
+pub mod worker;
 
 use std::sync::Arc;
 
 use bytesize::ByteSize;
 use config::RudderConfig;
 use error::{config_err, err, Result};
+use meta::mem::MemoryMetaStore;
+use meta::MetaStoreRef;
 use runkv_proto::rudder::rudder_service_server::RudderServiceServer;
 use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions, SstableStoreRef};
 use runkv_storage::manifest::{VersionManager, VersionManagerOptions};
@@ -39,9 +42,12 @@ pub async fn build_rudder_with_object_store(
 
     let version_manager = create_version_manager(config, sstable_store.clone())?;
 
+    let meta_store = create_meta_store();
+
     let options = RudderOptions {
         version_manager,
         sstable_store,
+        meta_store,
     };
 
     let rudder = Rudder::new(options);
@@ -93,4 +99,9 @@ fn create_version_manager(
         sstable_store,
     };
     Ok(VersionManager::new(version_manager_options))
+}
+
+fn create_meta_store() -> MetaStoreRef {
+    // TODO: Build with storage.
+    Arc::new(MemoryMetaStore::default())
 }
