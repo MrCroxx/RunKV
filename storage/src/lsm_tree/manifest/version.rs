@@ -165,7 +165,9 @@ impl VersionManagerCore {
         }
 
         self.diffs.push_back(diff);
-        // println!("levels: {:?}", self.levels);
+        // if !sync {
+        //     println!("levels: {:?}", self.levels);
+        // }
         Ok(())
     }
 
@@ -231,6 +233,7 @@ impl VersionManagerCore {
         range: RangeInclusive<&[u8]>,
     ) -> Result<Vec<Vec<u64>>> {
         let mut result = vec![vec![]; levels.end - levels.start];
+        let level_start = levels.start;
         for level in levels {
             let compaction_strategy = self
                 .level_options
@@ -242,7 +245,7 @@ impl VersionManagerCore {
             for sst_id in &self.levels[level] {
                 let sst = self.sstable_store.sstable(*sst_id).await?;
                 if sst.is_overlap_with_user_key_range(range.clone()) {
-                    result[level].push(*sst_id);
+                    result[level - level_start].push(*sst_id);
                 }
                 if compaction_strategy == LevelCompactionStrategy::NonOverlap
                     && sst.first_key() > range.end()
@@ -267,6 +270,7 @@ impl VersionManagerCore {
         // println!("pick: {:?}", Bytes::copy_from_slice(key));
         // println!("levels: {:?}", self.levels);
         let mut result = vec![vec![]; levels.end - levels.start];
+        let level_start = levels.start;
         for level in levels {
             let compaction_strategy = self
                 .level_options
@@ -279,7 +283,7 @@ impl VersionManagerCore {
             for sst_id in &self.levels[level] {
                 let sst = self.sstable_store.sstable(*sst_id).await?;
                 if sst.may_contain_key(key) && sst.is_overlap_with_user_key_range(key..=key) {
-                    result[level].push(*sst_id);
+                    result[level - level_start].push(*sst_id);
                 }
                 if compaction_strategy == LevelCompactionStrategy::NonOverlap
                     && sst.first_key() > key
@@ -289,6 +293,16 @@ impl VersionManagerCore {
             }
         }
         Ok(result)
+    }
+
+    async fn pick_overlap_ssts_by_sst_id(
+        &self,
+        levels: Range<usize>,
+        sst_id: u64,
+    ) -> Result<Vec<Vec<u64>>> {
+        let sst = self.sstable_store.sstable(sst_id).await?;
+        self.pick_overlap_ssts(levels, sst.first_key()..=sst.last_key())
+            .await
     }
 
     /// Verify if ASC order and non-overlap is guaranteed with non-overlap levels.
@@ -410,6 +424,18 @@ impl VersionManager {
             .read()
             .await
             .pick_overlap_ssts_by_key(levels, key)
+            .await
+    }
+
+    pub async fn pick_overlap_ssts_by_sst_id(
+        &self,
+        levels: Range<usize>,
+        sst_id: u64,
+    ) -> Result<Vec<Vec<u64>>> {
+        self.inner
+            .read()
+            .await
+            .pick_overlap_ssts_by_sst_id(levels, sst_id)
             .await
     }
 

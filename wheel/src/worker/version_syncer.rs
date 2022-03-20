@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use runkv_common::Worker;
+use runkv_proto::common::Endpoint;
 use runkv_proto::rudder::rudder_service_client::RudderServiceClient;
 use runkv_proto::rudder::{
     heartbeat_request, heartbeat_response, HeartbeatRequest, WheelHeartbeatRequest,
@@ -18,6 +19,7 @@ pub struct VersionSyncerOptions {
     pub version_manager: VersionManager,
     pub client: RudderServiceClient<Channel>,
     pub heartbeat_interval: Duration,
+    pub endpoint: Endpoint,
 }
 
 pub struct VersionSyncer {
@@ -44,6 +46,7 @@ impl VersionSyncer {
         Self {
             version_manager: options.version_manager.clone(),
             client: options.client.clone(),
+
             options,
         }
     }
@@ -51,6 +54,7 @@ impl VersionSyncer {
     async fn run_inner(&mut self) -> Result<()> {
         let request = Request::new(HeartbeatRequest {
             node_id: self.options.node_id,
+            endpoint: Some(self.options.endpoint.clone()),
             heartbeat_message: Some(heartbeat_request::HeartbeatMessage::WheelHeartbeat(
                 WheelHeartbeatRequest {
                     watermark: self.version_manager.watermark().await,

@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package rudder;
 
+import "common.proto";
 import "manifest.proto";
 
 message WheelHeartbeatRequest {
@@ -20,9 +21,10 @@ message ExhausterHeartbeatResponse {}
 // TODO: Add status report.
 message HeartbeatRequest {
   uint64 node_id = 1;
+  common.Endpoint endpoint = 2;
   oneof heartbeat_message {
-    WheelHeartbeatRequest wheel_heartbeat = 2;
-    ExhausterHeartbeatRequest exhauster_heartbeat = 3;
+    WheelHeartbeatRequest wheel_heartbeat = 3;
+    ExhausterHeartbeatRequest exhauster_heartbeat = 4;
   }
 }
 

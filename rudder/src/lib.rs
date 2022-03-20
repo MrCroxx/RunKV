@@ -11,6 +11,7 @@ use config::RudderConfig;
 use error::{config_err, err, Result};
 use meta::mem::MemoryMetaStore;
 use meta::MetaStoreRef;
+use runkv_common::BoxedWorker;
 use runkv_proto::rudder::rudder_service_server::RudderServiceServer;
 use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions, SstableStoreRef};
 use runkv_storage::manifest::{VersionManager, VersionManagerOptions};
@@ -18,9 +19,18 @@ use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
 use service::{Rudder, RudderOptions};
 use tonic::transport::Server;
 use tracing::info;
+use worker::compactor::{Compactor, CompactorOptions};
 
-pub async fn bootstrap_rudder(config: &RudderConfig, rudder: Rudder) -> Result<()> {
+pub async fn bootstrap_rudder(
+    config: &RudderConfig,
+    rudder: Rudder,
+    workers: Vec<BoxedWorker>,
+) -> Result<()> {
     let addr_str = format!("{}:{}", config.host, config.port);
+
+    for mut worker in workers.into_iter() {
+        tokio::spawn(async move { worker.run().await });
+    }
 
     Server::builder()
         .add_service(RudderServiceServer::new(rudder))
@@ -29,7 +39,7 @@ pub async fn bootstrap_rudder(config: &RudderConfig, rudder: Rudder) -> Result<(
         .map_err(err)
 }
 
-pub async fn build_rudder(config: &RudderConfig) -> Result<Rudder> {
+pub async fn build_rudder(config: &RudderConfig) -> Result<(Rudder, Vec<BoxedWorker>)> {
     let object_store = create_object_store(config).await;
     build_rudder_with_object_store(config, object_store).await
 }
@@ -37,12 +47,14 @@ pub async fn build_rudder(config: &RudderConfig) -> Result<Rudder> {
 pub async fn build_rudder_with_object_store(
     config: &RudderConfig,
     object_store: ObjectStoreRef,
-) -> Result<Rudder> {
+) -> Result<(Rudder, Vec<BoxedWorker>)> {
     let sstable_store = create_sstable_store(config, object_store)?;
 
     let version_manager = create_version_manager(config, sstable_store.clone())?;
 
     let meta_store = create_meta_store();
+
+    let compactor = create_compactor(config, meta_store.clone(), version_manager.clone())?;
 
     let options = RudderOptions {
         version_manager,
@@ -52,7 +64,7 @@ pub async fn build_rudder_with_object_store(
 
     let rudder = Rudder::new(options);
 
-    Ok(rudder)
+    Ok((rudder, vec![compactor]))
 }
 
 async fn create_object_store(config: &RudderConfig) -> ObjectStoreRef {
@@ -104,4 +116,50 @@ fn create_version_manager(
 fn create_meta_store() -> MetaStoreRef {
     // TODO: Build with storage.
     Arc::new(MemoryMetaStore::default())
+}
+
+fn create_compactor(
+    config: &RudderConfig,
+    meta_store: MetaStoreRef,
+    version_manager: VersionManager,
+) -> Result<BoxedWorker> {
+    let compactor_options = CompactorOptions {
+        meta_store,
+        version_manager,
+        trigger_l0_compaction_ssts: config.lsm_tree.trigger_l0_compaction_ssts,
+        trigger_l0_compaction_interval: config
+            .lsm_tree
+            .trigger_compaction_interval
+            .parse::<humantime::Duration>()
+            .map_err(config_err)?
+            .into(),
+        trigger_compaction_interval: config
+            .lsm_tree
+            .trigger_compaction_interval
+            .parse::<humantime::Duration>()
+            .map_err(config_err)?
+            .into(),
+        sstable_capacity: config
+            .lsm_tree
+            .sstable_capacity
+            .parse::<ByteSize>()
+            .map_err(config_err)?
+            .0 as usize,
+        block_capacity: config
+            .lsm_tree
+            .block_capacity
+            .parse::<ByteSize>()
+            .map_err(config_err)?
+            .0 as usize,
+        restart_interval: config.lsm_tree.restart_interval,
+        bloom_false_positive: config.lsm_tree.bloom_false_positive,
+        levels_options: config.lsm_tree.levels_options.clone(),
+        health_timeout: config
+            .health_timeout
+            .parse::<humantime::Duration>()
+            .map_err(config_err)?
+            .into(),
+    };
+
+    Ok(Box::new(Compactor::new(compactor_options)))
 }

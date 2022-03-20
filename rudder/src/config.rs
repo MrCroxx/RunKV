@@ -8,6 +8,7 @@ pub struct RudderConfig {
     pub port: u16,
     pub data_path: String,
     pub meta_path: String,
+    pub health_timeout: String,
     pub s3: Option<S3Config>,
     pub minio: Option<MinioConfig>,
     pub cache: CacheConfig,
@@ -32,5 +33,12 @@ pub struct CacheConfig {
 
 #[derive(Deserialize, Debug)]
 pub struct LsmTreeConfig {
+    pub trigger_l0_compaction_ssts: usize,
+    pub trigger_l0_compaction_interval: String,
+    pub trigger_compaction_interval: String,
+    pub sstable_capacity: String,
+    pub block_capacity: String,
+    pub restart_interval: usize,
+    pub bloom_false_positive: f64,
     pub levels_options: Vec<LevelOptions>,
 }
