@@ -7,7 +7,7 @@ heartbeat_interval = "1 s"
 
 [rudder]
 host = "127.0.0.1"
-port = 12300
+port = 12301
 
 [minio]
 url = 'minio://minioadmin:minioadmin@127.0.0.1:9000/runkv'

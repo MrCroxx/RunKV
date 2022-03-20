@@ -6,6 +6,8 @@ use bytes::Bytes;
 use futures::future;
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
+use runkv_exhauster::config::ExhausterConfig;
+use runkv_exhauster::{bootstrap_exhauster, build_exhauster_with_object_store};
 use runkv_rudder::config::RudderConfig;
 use runkv_rudder::{bootstrap_rudder, build_rudder_with_object_store};
 use runkv_storage::{LsmTree, MemObjectStore};
@@ -14,6 +16,7 @@ use runkv_wheel::{bootstrap_wheel, build_wheel_with_object_store};
 
 const RUDDER_CONFIG_PATH: &str = "etc/rudder.toml";
 const WHEEL_CONFIG_PATH: &str = "etc/wheel.toml";
+const EXHAUSTER_CONFIG_PATH: &str = "etc/exhauster.toml";
 
 #[tokio::test]
 async fn test_concurrent_put_get() {
@@ -21,19 +24,32 @@ async fn test_concurrent_put_get() {
 
     let rudder_config: RudderConfig =
         toml::from_str(&read_to_string(RUDDER_CONFIG_PATH).unwrap()).unwrap();
-    let rudder = build_rudder_with_object_store(&rudder_config, object_store.clone())
-        .await
-        .unwrap();
-    tokio::spawn(async move { bootstrap_rudder(&rudder_config, rudder).await });
+    let (rudder, rudder_workers) =
+        build_rudder_with_object_store(&rudder_config, object_store.clone())
+            .await
+            .unwrap();
+    tokio::spawn(async move { bootstrap_rudder(&rudder_config, rudder, rudder_workers).await });
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     let wheel_config: WheelConfig =
         toml::from_str(&read_to_string(WHEEL_CONFIG_PATH).unwrap()).unwrap();
     let (wheel, lsmtree, wheel_workers) =
-        build_wheel_with_object_store(&wheel_config, object_store)
+        build_wheel_with_object_store(&wheel_config, object_store.clone())
             .await
             .unwrap();
     tokio::spawn(async move { bootstrap_wheel(&wheel_config, wheel, wheel_workers).await });
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    let exhauster_config: ExhausterConfig =
+        toml::from_str(&read_to_string(EXHAUSTER_CONFIG_PATH).unwrap()).unwrap();
+    let (exhuaster, exhauster_workers) =
+        build_exhauster_with_object_store(&exhauster_config, object_store)
+            .await
+            .unwrap();
+
+    tokio::spawn(async move {
+        bootstrap_exhauster(&exhauster_config, exhuaster, exhauster_workers).await
+    });
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     let futures = (1..=10000)

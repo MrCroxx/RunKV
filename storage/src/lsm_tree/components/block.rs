@@ -228,6 +228,14 @@ impl BlockBuilder {
     /// Panic if key is not added in ASCEND order.
     pub fn add(&mut self, key: &[u8], value: &[u8]) {
         if self.entry_count > 0 {
+            // TODO: Remove me.
+            // if self.last_key >= key {
+            //     println!(
+            //         "last key: {:?}\n     key: {:?}",
+            //         Bytes::from(self.last_key.clone()),
+            //         Bytes::copy_from_slice(key)
+            //     );
+            // }
             assert!(self.last_key < key);
         }
         // Update restart point if needed and calculate diff key.

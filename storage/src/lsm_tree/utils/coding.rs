@@ -148,6 +148,15 @@ impl From<CompressionAlgorithm> for u8 {
     }
 }
 
+impl From<CompressionAlgorithm> for u64 {
+    fn from(ca: CompressionAlgorithm) -> Self {
+        match ca {
+            CompressionAlgorithm::None => 0,
+            CompressionAlgorithm::Lz4 => 1,
+        }
+    }
+}
+
 impl TryFrom<u8> for CompressionAlgorithm {
     type Error = Error;
     fn try_from(v: u8) -> core::result::Result<Self, Self::Error> {

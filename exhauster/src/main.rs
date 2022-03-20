@@ -25,6 +25,6 @@ async fn main() -> Result<()> {
         toml::from_str(&read_to_string(&args.config_file_path)?).map_err(config_err)?;
     info!("config: {:?}", config);
 
-    let exhauster = build_exhauster(&config).await?;
-    bootstrap_exhauster(&config, exhauster).await
+    let (exhauster, workers) = build_exhauster(&config).await?;
+    bootstrap_exhauster(&config, exhauster, workers).await
 }

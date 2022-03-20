@@ -1,10 +1,11 @@
 use async_trait::async_trait;
 use itertools::Itertools;
+use runkv_proto::common::Endpoint as PbEndpoint;
 use runkv_proto::manifest::{SsTableDiff, SsTableOp, VersionDiff};
 use runkv_proto::rudder::rudder_service_server::RudderService;
 use runkv_proto::rudder::{
-    heartbeat_request, heartbeat_response, ExhausterHeartbeatRequest, HeartbeatRequest,
-    HeartbeatResponse, InsertL0Request, InsertL0Response, WheelHeartbeatRequest,
+    heartbeat_request, heartbeat_response, ExhausterHeartbeatRequest, ExhausterHeartbeatResponse,
+    HeartbeatRequest, HeartbeatResponse, InsertL0Request, InsertL0Response, WheelHeartbeatRequest,
     WheelHeartbeatResponse,
 };
 use runkv_storage::components::SstableStoreRef;
@@ -36,7 +37,7 @@ pub struct Rudder {
     /// `wheel node` periodically and choose the min watermark among them as its own watermark.
     _watermark: u64,
     _sstable_store: SstableStoreRef,
-    _meta_store: MetaStoreRef,
+    meta_store: MetaStoreRef,
 }
 
 impl Rudder {
@@ -46,7 +47,7 @@ impl Rudder {
             // TODO: Restore from meta store.
             _watermark: 0,
             _sstable_store: options.sstable_store,
-            _meta_store: options.meta_store,
+            meta_store: options.meta_store,
         }
     }
 }
@@ -61,10 +62,12 @@ impl RudderService for Rudder {
 
         let msg = match req.heartbeat_message.unwrap() {
             heartbeat_request::HeartbeatMessage::WheelHeartbeat(hb) => {
-                self.handle_wheel_heartbeat(hb).await
+                self.handle_wheel_heartbeat(req.node_id, req.endpoint.as_ref().unwrap(), hb)
+                    .await
             }
             heartbeat_request::HeartbeatMessage::ExhausterHeartbeat(hb) => {
-                self.handle_exhauster_heartbeat(hb).await
+                self.handle_exhauster_heartbeat(req.node_id, req.endpoint.as_ref().unwrap(), hb)
+                    .await
             }
         }
         .map_err(internal)?;
@@ -109,6 +112,8 @@ impl RudderService for Rudder {
 impl Rudder {
     async fn handle_wheel_heartbeat(
         &self,
+        _node_id: u64,
+        _endpoint: &PbEndpoint,
         hb: WheelHeartbeatRequest,
     ) -> Result<heartbeat_response::HeartbeatMessage> {
         let version_diffs = self
@@ -123,8 +128,15 @@ impl Rudder {
 
     async fn handle_exhauster_heartbeat(
         &self,
+        node_id: u64,
+        endpoint: &PbEndpoint,
         _hb: ExhausterHeartbeatRequest,
     ) -> Result<heartbeat_response::HeartbeatMessage> {
-        todo!()
+        self.meta_store
+            .update_exhauster(node_id, endpoint.clone())
+            .await?;
+        let rsp =
+            heartbeat_response::HeartbeatMessage::ExhausterHeartbeat(ExhausterHeartbeatResponse {});
+        Ok(rsp)
     }
 }

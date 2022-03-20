@@ -9,6 +9,7 @@ use std::sync::Arc;
 use bytesize::ByteSize;
 use error::{config_err, err, Error, Result};
 use runkv_common::BoxedWorker;
+use runkv_proto::common::Endpoint as PbEndpoint;
 use runkv_proto::rudder::rudder_service_client::RudderServiceClient;
 use runkv_proto::wheel::wheel_service_server::WheelServiceServer;
 use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions, SstableStoreRef};
@@ -215,6 +216,10 @@ fn create_version_syncer(
             .parse::<humantime::Duration>()
             .map_err(config_err)?
             .into(),
+        endpoint: PbEndpoint {
+            host: config.host.clone(),
+            port: config.port as u32,
+        },
     };
     Ok(VersionSyncer::new(wheel_version_manager_options))
 }

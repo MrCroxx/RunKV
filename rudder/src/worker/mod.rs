@@ -1,2 +1,1 @@
-#[allow(dead_code)]
-mod compactor;
+pub mod compactor;

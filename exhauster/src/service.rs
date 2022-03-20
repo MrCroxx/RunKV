@@ -16,7 +16,7 @@ use tracing::debug;
 
 use crate::compaction_filter::{CompactionFilter, DefaultCompactionFilter};
 use crate::error::Result;
-use crate::partitioner::{DefaultPartitioner, Partitioner};
+use crate::partitioner::{BoxedPartitioner, DefaultPartitioner, NoPartitioner};
 
 fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
     Status::internal(e.into().to_string())
@@ -80,7 +80,11 @@ impl ExhausterService for Exhauster {
             .into_iter()
             .map(Bytes::from)
             .collect_vec();
-        let mut partitioner = DefaultPartitioner::new(partition_points);
+        let mut partitioner: BoxedPartitioner = if partition_points.is_empty() {
+            Box::new(NoPartitioner::default())
+        } else {
+            Box::new(DefaultPartitioner::new(partition_points))
+        };
         let mut sst_ids = Vec::with_capacity(req.sst_ids.len());
         // Filter key value pairs.
         while iter.is_valid() {
@@ -92,10 +96,10 @@ impl ExhausterService for Exhauster {
                 sst_id = self.gen_sstable_id();
                 sstable_builder = Some(SstableBuilder::new(sstable_builder_options.clone()));
             }
-            if (!sstable_builder.as_ref().unwrap().is_empty()
-                && sstable_builder.as_ref().unwrap().approximate_len()
-                    >= sstable_builder_options.capacity)
-                || partitioner.partition(uk, v, ts)
+            if !sstable_builder.as_ref().unwrap().is_empty()
+                && (sstable_builder.as_ref().unwrap().approximate_len()
+                    >= sstable_builder_options.capacity
+                    || partitioner.partition(uk, v, ts))
             {
                 let builder = sstable_builder.take().unwrap();
                 self.build_and_upload_sst(sst_id, builder)
@@ -109,6 +113,7 @@ impl ExhausterService for Exhauster {
             if compaction_filter.filter(uk, v, ts) {
                 builder.add(uk, ts, v).map_err(internal)?;
             }
+            iter.next().await.map_err(internal)?;
         }
         if let Some(builder) = sstable_builder.take() {
             self.build_and_upload_sst(sst_id, builder)
@@ -116,7 +121,8 @@ impl ExhausterService for Exhauster {
                 .map_err(internal)?;
             sst_ids.push(sst_id);
         }
-        todo!()
+        let rsp = CompactionResponse { sst_ids };
+        Ok(Response::new(rsp))
     }
 }
 

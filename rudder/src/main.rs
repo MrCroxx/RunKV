@@ -26,6 +26,6 @@ async fn main() -> Result<()> {
             .map_err(config_err)?;
     info!("config: {:?}", config);
 
-    let rudder = build_rudder(&config).await?;
-    bootstrap_rudder(&config, rudder).await
+    let (rudder, workers) = build_rudder(&config).await?;
+    bootstrap_rudder(&config, rudder, workers).await
 }

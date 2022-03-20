@@ -7,6 +7,7 @@ pub struct ExhausterConfig {
     pub port: u16,
     pub data_path: String,
     pub meta_path: String,
+    pub heartbeat_interval: String,
     pub rudder: RudderConfig,
     pub s3: Option<S3Config>,
     pub minio: Option<MinioConfig>,
