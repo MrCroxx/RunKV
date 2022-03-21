@@ -40,5 +40,6 @@ pub struct LsmTreeConfig {
     pub block_capacity: String,
     pub restart_interval: usize,
     pub bloom_false_positive: f64,
+    pub compaction_pin_ttl: String,
     pub levels_options: Vec<LevelOptions>,
 }

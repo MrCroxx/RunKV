@@ -5,6 +5,7 @@ use std::sync::Arc;
 use runkv_proto::manifest::{SsTableOp, VersionDiff};
 use serde::Deserialize;
 use tokio::sync::RwLock;
+use tracing::trace;
 
 use super::ManifestError;
 use crate::components::SstableStoreRef;
@@ -165,9 +166,10 @@ impl VersionManagerCore {
         }
 
         self.diffs.push_back(diff);
-        // if !sync {
-        //     println!("levels: {:?}", self.levels);
-        // }
+        if !sync {
+            // println!("updated levels: {:?}", self.levels);
+            trace!("updated levels: {:?}", self.levels);
+        }
         Ok(())
     }
 

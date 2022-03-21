@@ -52,7 +52,7 @@ pub async fn build_rudder_with_object_store(
 
     let version_manager = build_version_manager(config, sstable_store.clone())?;
 
-    let meta_store = build_meta_store();
+    let meta_store = build_meta_store(config)?;
 
     let compactor = build_compactor(config, meta_store.clone(), version_manager.clone())?;
 
@@ -113,9 +113,17 @@ fn build_version_manager(
     Ok(VersionManager::new(version_manager_options))
 }
 
-fn build_meta_store() -> MetaStoreRef {
+fn build_meta_store(config: &RudderConfig) -> Result<MetaStoreRef> {
     // TODO: Build with storage.
-    Arc::new(MemoryMetaStore::default())
+    let meta_store = MemoryMetaStore::new(
+        config
+            .lsm_tree
+            .compaction_pin_ttl
+            .parse::<humantime::Duration>()
+            .map_err(config_err)?
+            .into(),
+    );
+    Ok(Arc::new(meta_store))
 }
 
 fn build_compactor(
@@ -129,7 +137,7 @@ fn build_compactor(
         trigger_l0_compaction_ssts: config.lsm_tree.trigger_l0_compaction_ssts,
         trigger_l0_compaction_interval: config
             .lsm_tree
-            .trigger_compaction_interval
+            .trigger_l0_compaction_interval
             .parse::<humantime::Duration>()
             .map_err(config_err)?
             .into(),
@@ -154,6 +162,12 @@ fn build_compactor(
         restart_interval: config.lsm_tree.restart_interval,
         bloom_false_positive: config.lsm_tree.bloom_false_positive,
         levels_options: config.lsm_tree.levels_options.clone(),
+        compaction_pin_ttl: config
+            .lsm_tree
+            .compaction_pin_ttl
+            .parse::<humantime::Duration>()
+            .map_err(config_err)?
+            .into(),
         health_timeout: config
             .health_timeout
             .parse::<humantime::Duration>()

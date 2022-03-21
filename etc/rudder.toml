@@ -24,6 +24,8 @@ block_capacity = "4 KiB"
 restart_interval = 2
 bloom_false_positive = 0.1
 
+compaction_pin_ttl = "15 s"
+
 [[lsm_tree.levels_options]]
 compaction_strategy = "Overlap"
 compression_algorithm = "None"

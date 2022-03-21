@@ -58,8 +58,8 @@ impl Worker for Heartbeater {
             match self.run_inner().await {
                 Ok(_) => {}
                 Err(e) => {
-                    println!("error occur when uploader running: {}", e);
-                    warn!("error occur when uploader running: {}", e);
+                    println!("error occur when heartbeater running: {}", e);
+                    warn!("error occur when heartbeater running: {}", e);
                 }
             }
         }

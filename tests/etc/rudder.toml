@@ -16,13 +16,15 @@ meta_cache_capacity = "64 kiB"
 
 [lsm_tree]
 trigger_l0_compaction_ssts = 4
-trigger_l0_compaction_interval = "10 s"
+trigger_l0_compaction_interval = "500 ms"
 trigger_compaction_interval = "5 s"
 
 sstable_capacity = "64 KiB"
 block_capacity = "4 KiB"
 restart_interval = 2
 bloom_false_positive = 0.1
+
+compaction_pin_ttl = "15 s"
 
 [[lsm_tree.levels_options]]
 compaction_strategy = "Overlap"
