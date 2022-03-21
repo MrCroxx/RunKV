@@ -16,7 +16,7 @@ meta_cache_capacity = "256 MiB"
 
 [lsm_tree]
 trigger_l0_compaction_ssts = 4
-trigger_l0_compaction_interval = "500 ms"
+trigger_l0_compaction_interval = "1 s"
 trigger_compaction_interval = "5 s"
 
 sstable_capacity = "64 KiB"
