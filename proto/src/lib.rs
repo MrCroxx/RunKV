@@ -11,6 +11,20 @@ pub mod manifest {
 pub mod meta {
     #![allow(clippy::all)]
     tonic::include_proto!("meta");
+
+    impl Eq for KeyRange {}
+
+    impl PartialOrd for KeyRange {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.cmp(&other))
+        }
+    }
+
+    impl Ord for KeyRange {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+            self.start_key.cmp(&other.start_key)
+        }
+    }
 }
 
 pub mod rudder {

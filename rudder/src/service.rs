@@ -112,13 +112,16 @@ impl RudderService for Rudder {
 impl Rudder {
     async fn handle_wheel_heartbeat(
         &self,
-        _node_id: u64,
+        node_id: u64,
         _endpoint: &PbEndpoint,
         hb: WheelHeartbeatRequest,
     ) -> Result<heartbeat_response::HeartbeatMessage> {
         let version_diffs = self
             .version_manager
             .version_diffs_from(hb.next_version_id, DEFAULT_VERSION_DIFF_BATCH)
+            .await?;
+        self.meta_store
+            .update_node_ranges(node_id, hb.key_ranges)
             .await?;
         let rsp = heartbeat_response::HeartbeatMessage::WheelHeartbeat(WheelHeartbeatResponse {
             version_diffs,

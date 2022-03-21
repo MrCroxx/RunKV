@@ -1,5 +1,6 @@
 pub mod config;
 pub mod error;
+pub mod meta;
 pub mod service;
 pub mod storage;
 pub mod worker;
@@ -8,6 +9,8 @@ use std::sync::Arc;
 
 use bytesize::ByteSize;
 use error::{config_err, err, Error, Result};
+use meta::mem::MemoryMetaStore;
+use meta::MetaStoreRef;
 use runkv_common::BoxedWorker;
 use runkv_proto::common::Endpoint as PbEndpoint;
 use runkv_proto::rudder::rudder_service_client::RudderServiceClient;
@@ -18,8 +21,8 @@ use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
 use service::{Wheel, WheelOptions};
 use tonic::transport::{Channel, Server};
 use tracing::info;
+use worker::heartbeater::{Heartbeater, HeartbeaterOptions};
 use worker::sstable_uploader::{SstableUploader, SstableUploaderOptions};
-use worker::version_syncer::{VersionSyncer, VersionSyncerOptions};
 
 use crate::config::WheelConfig;
 use crate::storage::lsm_tree::{ObjectStoreLsmTree, ObjectStoreLsmTreeOptions};
@@ -45,7 +48,7 @@ pub async fn bootstrap_wheel(
 pub async fn build_wheel(
     config: &WheelConfig,
 ) -> Result<(Wheel, ObjectStoreLsmTree, Vec<BoxedWorker>)> {
-    let object_store = create_object_store(config).await;
+    let object_store = build_object_store(config).await;
     build_wheel_with_object_store(config, object_store).await
 }
 
@@ -53,11 +56,11 @@ pub async fn build_wheel_with_object_store(
     config: &WheelConfig,
     object_store: ObjectStoreRef,
 ) -> Result<(Wheel, ObjectStoreLsmTree, Vec<BoxedWorker>)> {
-    let sstable_store = create_sstable_store(config, object_store)?;
+    let sstable_store = build_sstable_store(config, object_store)?;
 
-    let version_manager = create_version_manager(config, sstable_store.clone())?;
+    let version_manager = build_version_manager(config, sstable_store.clone())?;
 
-    let lsm_tree = create_lsm_tree(config, sstable_store.clone(), version_manager.clone())?;
+    let lsm_tree = build_lsm_tree(config, sstable_store.clone(), version_manager.clone())?;
 
     let rudder_client = RudderServiceClient::connect(format!(
         "http://{}:{}",
@@ -65,7 +68,7 @@ pub async fn build_wheel_with_object_store(
     ))
     .await?;
 
-    let sstable_uploader = create_sstable_uploader(
+    let sstable_uploader = build_sstable_uploader(
         config,
         lsm_tree.clone(),
         sstable_store,
@@ -73,11 +76,14 @@ pub async fn build_wheel_with_object_store(
         rudder_client.clone(),
     )?;
 
-    let version_syncer = create_version_syncer(config, version_manager, rudder_client)?;
+    let meta_store = build_meta_store()?;
+
+    let version_syncer =
+        build_version_syncer(config, version_manager, meta_store.clone(), rudder_client)?;
 
     let options = WheelOptions {
         lsm_tree: lsm_tree.clone(),
-        // sstable_uploader,
+        meta_store,
     };
 
     let wheel = Wheel::new(options);
@@ -89,7 +95,7 @@ pub async fn build_wheel_with_object_store(
     ))
 }
 
-async fn create_object_store(config: &WheelConfig) -> ObjectStoreRef {
+async fn build_object_store(config: &WheelConfig) -> ObjectStoreRef {
     if let Some(c) = &config.s3 {
         info!("s3 config found, create s3 object store");
         Arc::new(S3ObjectStore::new(c.bucket.clone()).await)
@@ -102,7 +108,7 @@ async fn create_object_store(config: &WheelConfig) -> ObjectStoreRef {
     }
 }
 
-fn create_sstable_store(
+fn build_sstable_store(
     config: &WheelConfig,
     object_store: ObjectStoreRef,
 ) -> Result<SstableStoreRef> {
@@ -129,7 +135,7 @@ fn create_sstable_store(
     Ok(Arc::new(sstable_store))
 }
 
-fn create_version_manager(
+fn build_version_manager(
     config: &WheelConfig,
     sstable_store: SstableStoreRef,
 ) -> Result<VersionManager> {
@@ -142,7 +148,7 @@ fn create_version_manager(
     Ok(VersionManager::new(version_manager_options))
 }
 
-fn create_lsm_tree(
+fn build_lsm_tree(
     config: &WheelConfig,
     sstable_store: SstableStoreRef,
     version_manager: VersionManager,
@@ -160,7 +166,7 @@ fn create_lsm_tree(
     Ok(ObjectStoreLsmTree::new(lsm_tree_options))
 }
 
-fn create_sstable_uploader(
+fn build_sstable_uploader(
     config: &WheelConfig,
     lsm_tree: ObjectStoreLsmTree,
     sstable_store: SstableStoreRef,
@@ -202,14 +208,16 @@ fn create_sstable_uploader(
     Ok(SstableUploader::new(sstable_uploader))
 }
 
-fn create_version_syncer(
+fn build_version_syncer(
     config: &WheelConfig,
     version_manager: VersionManager,
+    meta_store: MetaStoreRef,
     rudder_client: RudderServiceClient<Channel>,
-) -> Result<VersionSyncer> {
-    let wheel_version_manager_options = VersionSyncerOptions {
+) -> Result<Heartbeater> {
+    let wheel_version_manager_options = HeartbeaterOptions {
         node_id: config.id,
         version_manager,
+        meta_store,
         client: rudder_client,
         heartbeat_interval: config
             .heartbeat_interval
@@ -221,5 +229,10 @@ fn create_version_syncer(
             port: config.port as u32,
         },
     };
-    Ok(VersionSyncer::new(wheel_version_manager_options))
+    Ok(Heartbeater::new(wheel_version_manager_options))
+}
+
+fn build_meta_store() -> Result<MetaStoreRef> {
+    let meta_store = MemoryMetaStore::default();
+    Ok(Arc::new(meta_store))
 }

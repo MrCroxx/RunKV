@@ -13,23 +13,27 @@ use tonic::Request;
 use tracing::warn;
 
 use crate::error::Result;
+use crate::meta::MetaStoreRef;
 
-pub struct VersionSyncerOptions {
+pub struct HeartbeaterOptions {
     pub node_id: u64,
+    pub meta_store: MetaStoreRef,
     pub version_manager: VersionManager,
     pub client: RudderServiceClient<Channel>,
     pub heartbeat_interval: Duration,
     pub endpoint: Endpoint,
 }
 
-pub struct VersionSyncer {
-    options: VersionSyncerOptions,
+/// [`Heartbeater`] is respons responsible to sync local version manager.
+pub struct Heartbeater {
+    options: HeartbeaterOptions,
+    meta_store: MetaStoreRef,
     version_manager: VersionManager,
     client: RudderServiceClient<Channel>,
 }
 
 #[async_trait]
-impl Worker for VersionSyncer {
+impl Worker for Heartbeater {
     async fn run(&mut self) -> anyhow::Result<()> {
         // TODO: Gracefully kill.
         loop {
@@ -41,12 +45,12 @@ impl Worker for VersionSyncer {
     }
 }
 
-impl VersionSyncer {
-    pub fn new(options: VersionSyncerOptions) -> Self {
+impl Heartbeater {
+    pub fn new(options: HeartbeaterOptions) -> Self {
         Self {
             version_manager: options.version_manager.clone(),
+            meta_store: options.meta_store.clone(),
             client: options.client.clone(),
-
             options,
         }
     }
@@ -59,6 +63,7 @@ impl VersionSyncer {
                 WheelHeartbeatRequest {
                     watermark: self.version_manager.watermark().await,
                     next_version_id: self.version_manager.latest_version_id().await + 1,
+                    key_ranges: self.meta_store.key_ranges().await?,
                 },
             )),
         });

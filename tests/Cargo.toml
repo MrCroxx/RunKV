@@ -16,6 +16,7 @@ futures = "0.3"
 itertools = "0.10.3"
 rand = "0.8.5"
 runkv-exhauster = { path = "../exhauster" }
+runkv-proto = { path = "../proto" }
 runkv-rudder = { path = "../rudder" }
 runkv-storage = { path = "../storage" }
 runkv-wheel = { path = "../wheel" }
@@ -26,4 +27,5 @@ tokio = { version = "1", features = [
     "time",
 ] }
 toml = "0.4.2"
+tonic = "0.6.2"
 tracing = "0.1"

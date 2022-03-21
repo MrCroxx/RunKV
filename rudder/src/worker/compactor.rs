@@ -8,7 +8,6 @@ use runkv_common::Worker;
 use runkv_proto::exhauster::exhauster_service_client::ExhausterServiceClient;
 use runkv_proto::exhauster::CompactionRequest;
 use runkv_proto::manifest::{SsTableDiff, SsTableOp, VersionDiff};
-use runkv_proto::meta::KeyRange;
 use runkv_storage::manifest::{LevelOptions, VersionManager};
 use tonic::Request;
 use tracing::warn;
@@ -73,17 +72,7 @@ impl Compactor {
     }
 
     async fn trigger_l0(&mut self) -> Result<()> {
-        let mut node_ranges = self.meta_store.all_node_ranges().await?;
-
-        // TODO: Remove the mock;
-        node_ranges.insert(
-            1,
-            vec![KeyRange {
-                start_key: b"k".to_vec(),
-                end_key: b"kz".to_vec(),
-            }],
-        );
-
+        let node_ranges = self.meta_store.all_node_ranges().await?;
         let partition_points = node_ranges
             .iter()
             .flat_map(|(_node_id, ranges)| ranges.iter().map(|range| range.start_key.clone()))
