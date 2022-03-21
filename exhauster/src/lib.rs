@@ -40,7 +40,7 @@ pub async fn bootstrap_exhauster(
 }
 
 pub async fn build_exhauster(config: &ExhausterConfig) -> Result<(Exhauster, Vec<BoxedWorker>)> {
-    let object_store = create_object_store(config).await;
+    let object_store = build_object_store(config).await;
     build_exhauster_with_object_store(config, object_store).await
 }
 
@@ -48,7 +48,7 @@ pub async fn build_exhauster_with_object_store(
     config: &ExhausterConfig,
     object_store: ObjectStoreRef,
 ) -> Result<(Exhauster, Vec<BoxedWorker>)> {
-    let sstable_store = create_sstable_store(config, object_store)?;
+    let sstable_store = build_sstable_store(config, object_store)?;
 
     let options = ExhausterOptions {
         node_id: config.id,
@@ -80,7 +80,7 @@ pub async fn build_exhauster_with_object_store(
     Ok((exhauster, vec![heartbeater]))
 }
 
-async fn create_object_store(config: &ExhausterConfig) -> ObjectStoreRef {
+async fn build_object_store(config: &ExhausterConfig) -> ObjectStoreRef {
     if let Some(c) = &config.s3 {
         info!("s3 config found, create s3 object store");
         Arc::new(S3ObjectStore::new(c.bucket.clone()).await)
@@ -93,7 +93,7 @@ async fn create_object_store(config: &ExhausterConfig) -> ObjectStoreRef {
     }
 }
 
-fn create_sstable_store(
+fn build_sstable_store(
     config: &ExhausterConfig,
     object_store: ObjectStoreRef,
 ) -> Result<SstableStoreRef> {

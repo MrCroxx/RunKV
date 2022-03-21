@@ -40,7 +40,7 @@ pub async fn bootstrap_rudder(
 }
 
 pub async fn build_rudder(config: &RudderConfig) -> Result<(Rudder, Vec<BoxedWorker>)> {
-    let object_store = create_object_store(config).await;
+    let object_store = build_object_store(config).await;
     build_rudder_with_object_store(config, object_store).await
 }
 
@@ -48,13 +48,13 @@ pub async fn build_rudder_with_object_store(
     config: &RudderConfig,
     object_store: ObjectStoreRef,
 ) -> Result<(Rudder, Vec<BoxedWorker>)> {
-    let sstable_store = create_sstable_store(config, object_store)?;
+    let sstable_store = build_sstable_store(config, object_store)?;
 
-    let version_manager = create_version_manager(config, sstable_store.clone())?;
+    let version_manager = build_version_manager(config, sstable_store.clone())?;
 
-    let meta_store = create_meta_store();
+    let meta_store = build_meta_store();
 
-    let compactor = create_compactor(config, meta_store.clone(), version_manager.clone())?;
+    let compactor = build_compactor(config, meta_store.clone(), version_manager.clone())?;
 
     let options = RudderOptions {
         version_manager,
@@ -67,7 +67,7 @@ pub async fn build_rudder_with_object_store(
     Ok((rudder, vec![compactor]))
 }
 
-async fn create_object_store(config: &RudderConfig) -> ObjectStoreRef {
+async fn build_object_store(config: &RudderConfig) -> ObjectStoreRef {
     if let Some(c) = &config.s3 {
         info!("s3 config found, create s3 object store");
         Arc::new(S3ObjectStore::new(c.bucket.clone()).await)
@@ -80,7 +80,7 @@ async fn create_object_store(config: &RudderConfig) -> ObjectStoreRef {
     }
 }
 
-fn create_sstable_store(
+fn build_sstable_store(
     config: &RudderConfig,
     object_store: ObjectStoreRef,
 ) -> Result<SstableStoreRef> {
@@ -100,7 +100,7 @@ fn create_sstable_store(
     Ok(Arc::new(sstable_store))
 }
 
-fn create_version_manager(
+fn build_version_manager(
     config: &RudderConfig,
     sstable_store: SstableStoreRef,
 ) -> Result<VersionManager> {
@@ -113,12 +113,12 @@ fn create_version_manager(
     Ok(VersionManager::new(version_manager_options))
 }
 
-fn create_meta_store() -> MetaStoreRef {
+fn build_meta_store() -> MetaStoreRef {
     // TODO: Build with storage.
     Arc::new(MemoryMetaStore::default())
 }
 
-fn create_compactor(
+fn build_compactor(
     config: &RudderConfig,
     meta_store: MetaStoreRef,
     version_manager: VersionManager,

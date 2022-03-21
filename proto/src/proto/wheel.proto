@@ -2,4 +2,14 @@ syntax = "proto3";
 
 package wheel;
 
-service WheelService {}
+import "meta.proto";
+
+message UpdateKeyRangesRequest {
+  repeated meta.KeyRange key_ranges = 1;
+}
+
+message UpdateKeyRangesResponse {}
+
+service WheelService {
+  rpc UpdateKeyRanges(UpdateKeyRangesRequest) returns (UpdateKeyRangesResponse);
+}

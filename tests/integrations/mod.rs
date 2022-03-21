@@ -8,11 +8,14 @@ use itertools::Itertools;
 use rand::{thread_rng, Rng};
 use runkv_exhauster::config::ExhausterConfig;
 use runkv_exhauster::{bootstrap_exhauster, build_exhauster_with_object_store};
+use runkv_proto::meta::KeyRange;
+use runkv_proto::wheel::wheel_service_client::WheelServiceClient;
 use runkv_rudder::config::RudderConfig;
 use runkv_rudder::{bootstrap_rudder, build_rudder_with_object_store};
 use runkv_storage::{LsmTree, MemObjectStore};
 use runkv_wheel::config::WheelConfig;
 use runkv_wheel::{bootstrap_wheel, build_wheel_with_object_store};
+use tonic::Request;
 
 const RUDDER_CONFIG_PATH: &str = "etc/rudder.toml";
 const WHEEL_CONFIG_PATH: &str = "etc/wheel.toml";
@@ -50,6 +53,26 @@ async fn test_concurrent_put_get() {
     tokio::spawn(async move {
         bootstrap_exhauster(&exhauster_config, exhuaster, exhauster_workers).await
     });
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    let wheel_config: WheelConfig =
+        toml::from_str(&read_to_string(WHEEL_CONFIG_PATH).unwrap()).unwrap();
+    // TODO: Refine me.
+    let mut wheel_client = WheelServiceClient::connect(format!(
+        "http://{}:{}",
+        wheel_config.host, wheel_config.port
+    ))
+    .await
+    .unwrap();
+    wheel_client
+        .update_key_ranges(Request::new(runkv_proto::wheel::UpdateKeyRangesRequest {
+            key_ranges: vec![KeyRange {
+                start_key: b"k".to_vec(),
+                end_key: b"kz".to_vec(),
+            }],
+        }))
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     let futures = (1..=10000)

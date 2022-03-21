@@ -1,2 +1,2 @@
+pub mod heartbeater;
 pub mod sstable_uploader;
-pub mod version_syncer;

@@ -1995,11 +1995,13 @@ dependencies = [
  "itertools",
  "rand",
  "runkv-exhauster",
+ "runkv-proto",
  "runkv-rudder",
  "runkv-storage",
  "runkv-wheel",
  "tokio",
  "toml",
+ "tonic",
  "tracing",
 ]
 

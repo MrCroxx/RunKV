@@ -4,6 +4,7 @@ package meta;
 
 import "common.proto";
 
+// Assume [`KeyRange`] does not overlaps.
 message KeyRange {
   bytes start_key = 1;
   bytes end_key = 2;

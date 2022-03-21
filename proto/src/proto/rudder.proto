@@ -4,10 +4,12 @@ package rudder;
 
 import "common.proto";
 import "manifest.proto";
+import "meta.proto";
 
 message WheelHeartbeatRequest {
   uint64 watermark = 1;
   uint64 next_version_id = 2;
+  repeated meta.KeyRange key_ranges = 3;
 }
 
 message WheelHeartbeatResponse {
