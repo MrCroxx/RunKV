@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::btree_map::BTreeMap;
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
@@ -21,16 +21,21 @@ struct ExhausterInfo {
 pub struct MemoryMetaStoreCore {
     exhausters: BTreeMap<u64, ExhausterInfo>,
     node_ranges: BTreeMap<u64, Vec<KeyRange>>,
+    pinned_sstables: BTreeMap<u64, SystemTime>,
+    sstable_pin_ttl: Duration,
 }
 
 pub struct MemoryMetaStore {
     inner: RwLock<MemoryMetaStoreCore>,
 }
 
-impl Default for MemoryMetaStore {
-    fn default() -> Self {
+impl MemoryMetaStore {
+    pub fn new(sstable_pin_ttl: Duration) -> Self {
         Self {
-            inner: RwLock::new(MemoryMetaStoreCore::default()),
+            inner: RwLock::new(MemoryMetaStoreCore {
+                sstable_pin_ttl,
+                ..Default::default()
+            }),
         }
     }
 }
@@ -86,5 +91,46 @@ impl MetaStore for MemoryMetaStore {
             .flat_map(|(_node_id, ranges)| ranges.clone())
             .collect_vec();
         Ok(ranges)
+    }
+
+    async fn pin_sstables(&self, sst_ids: &[u64], time: SystemTime) -> Result<bool> {
+        let mut guard = self.inner.write();
+        let mut pin = true;
+        for sst_id in sst_ids.iter() {
+            if guard.pinned_sstables.get(sst_id).map_or_else(
+                || false,
+                |last_pin_time| *last_pin_time + guard.sstable_pin_ttl < time,
+            ) {
+                pin = false;
+                break;
+            }
+        }
+        if !pin {
+            return Ok(false);
+        }
+        for sst_id in sst_ids.iter() {
+            guard.pinned_sstables.insert(*sst_id, time);
+        }
+        Ok(true)
+    }
+
+    async fn unpin_sstables(&self, sst_ids: &[u64]) -> Result<()> {
+        let mut guard = self.inner.write();
+        for sst_id in sst_ids.iter() {
+            guard.pinned_sstables.remove(sst_id);
+        }
+        Ok(())
+    }
+
+    async fn is_sstables_pinned(&self, sst_ids: &[u64], time: SystemTime) -> Result<Vec<bool>> {
+        let mut pinned = Vec::with_capacity(sst_ids.len());
+        let guard = self.inner.read();
+        for sst_id in sst_ids {
+            pinned.push(guard.pinned_sstables.get(sst_id).map_or_else(
+                || false,
+                |last_pin_time| *last_pin_time + guard.sstable_pin_ttl >= time,
+            ));
+        }
+        Ok(pinned)
     }
 }

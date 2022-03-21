@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use runkv_proto::common::Endpoint as PbEndpoint;
@@ -23,6 +23,16 @@ pub trait MetaStore: Send + Sync + 'static {
     async fn all_node_ranges(&self) -> Result<BTreeMap<u64, Vec<KeyRange>>>;
 
     async fn all_ranges(&self) -> Result<Vec<KeyRange>>;
+
+    /// Pin sstables to prevent them from being compacted.
+    ///
+    /// Returns `true` if there is no conflicts and given sstables are pinned.
+    async fn pin_sstables(&self, sst_ids: &[u64], time: SystemTime) -> Result<bool>;
+
+    /// Unpin sstables.
+    async fn unpin_sstables(&self, sst_ids: &[u64]) -> Result<()>;
+
+    async fn is_sstables_pinned(&self, sst_ids: &[u64], time: SystemTime) -> Result<Vec<bool>>;
 }
 
 pub type MetaStoreRef = Arc<dyn MetaStore>;
