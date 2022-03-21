@@ -8,6 +8,7 @@ use runkv_common::Worker;
 use runkv_proto::exhauster::exhauster_service_client::ExhausterServiceClient;
 use runkv_proto::exhauster::CompactionRequest;
 use runkv_proto::manifest::{SsTableDiff, SsTableOp, VersionDiff};
+use runkv_proto::meta::KeyRange;
 use runkv_storage::manifest::{LevelOptions, VersionManager};
 use tonic::Request;
 use tracing::{error, trace, warn};
@@ -32,6 +33,39 @@ pub struct CompactorOptions {
     pub health_timeout: Duration,
 }
 
+#[derive(Clone)]
+struct CompactionContext {
+    level: u64,
+    meta_store: MetaStoreRef,
+    version_manager: VersionManager,
+    trigger_l0_compaction_ssts: usize,
+    sstable_capacity: usize,
+    block_capacity: usize,
+    restart_interval: usize,
+    bloom_false_positive: f64,
+    levels_options: Vec<LevelOptions>,
+    compaction_pin_ttl: Duration,
+    health_timeout: Duration,
+}
+
+#[derive(Clone)]
+struct TwoLevelSstables {
+    first: Vec<u64>,
+    second: Vec<u64>,
+}
+
+impl TwoLevelSstables {
+    fn to_vec(&self) -> Vec<u64> {
+        self.first
+            .iter()
+            .chain(self.second.iter())
+            .copied()
+            .collect_vec()
+    }
+}
+
+type PartitionPoint = Vec<u8>;
+
 pub struct Compactor {
     meta_store: MetaStoreRef,
     version_manager: VersionManager,
@@ -47,6 +81,22 @@ pub struct Compactor {
 
     compaction_pin_ttl: Duration,
     health_timeout: Duration,
+}
+
+#[async_trait]
+impl Worker for Compactor {
+    async fn run(&mut self) -> anyhow::Result<()> {
+        // TODO: Gracefully kill.
+        loop {
+            match self.run_inner().await {
+                Ok(_) => {}
+                Err(e) => {
+                    println!("error occur when compactor running: {}", e);
+                    warn!("error occur when compactor running: {}", e);
+                }
+            }
+        }
+    }
 }
 
 impl Compactor {
@@ -69,38 +119,33 @@ impl Compactor {
         }
     }
 
+    fn create_context(&self, level: u64) -> CompactionContext {
+        CompactionContext {
+            level,
+            meta_store: self.meta_store.clone(),
+            version_manager: self.version_manager.clone(),
+            trigger_l0_compaction_ssts: self.trigger_l0_compaction_ssts,
+            sstable_capacity: self.sstable_capacity,
+            block_capacity: self.block_capacity,
+            restart_interval: self.restart_interval,
+            bloom_false_positive: self.bloom_false_positive,
+            levels_options: self.levels_options.clone(),
+            compaction_pin_ttl: self.compaction_pin_ttl,
+            health_timeout: self.health_timeout,
+        }
+    }
+
     async fn run_inner(&mut self) -> Result<()> {
         let mut trigger_l0_ticker = tokio::time::interval(self.trigger_l0_compaction_interval);
 
         loop {
-            let meta_store = self.meta_store.clone();
-            let version_manager = self.version_manager.clone();
-            let trigger_l0_compaction_ssts = self.trigger_l0_compaction_ssts;
-            let sstable_capacity = self.sstable_capacity;
-            let block_capacity = self.block_capacity;
-            let restart_interval = self.restart_interval;
-            let bloom_false_positive = self.bloom_false_positive;
-            let levels_options = self.levels_options.clone();
-            let compaction_pin_ttl = self.compaction_pin_ttl;
-            let health_timeout = self.health_timeout;
-
             tokio::select! {
                 _ = trigger_l0_ticker.tick() => {
                     trace!("tick l0 compaction [interval: {:?}]", self.trigger_l0_compaction_interval);
+                    let ctx = self.create_context(0);
                     tokio::spawn(
                         async move {
-                            if let Err(e) = Self::trigger_l0(
-                                meta_store.clone(),
-                                version_manager.clone(),
-                                trigger_l0_compaction_ssts,
-                                sstable_capacity,
-                                block_capacity,
-                                restart_interval,
-                                bloom_false_positive,
-                                levels_options.clone(),
-                                compaction_pin_ttl,
-                                health_timeout,
-                            ).await {
+                            if let Err(e) = trigger(ctx).await {
                                 error!("trigger compaction l0 error: {}", e);
                                 println!("trigger compaction l0 error: {}", e);
                             }
@@ -110,228 +155,212 @@ impl Compactor {
             }
         }
     }
+}
 
-    #[allow(clippy::too_many_arguments)]
-    async fn trigger_l0(
-        meta_store: MetaStoreRef,
-        version_manager: VersionManager,
-        trigger_l0_compaction_ssts: usize,
-        sstable_capacity: usize,
-        block_capacity: usize,
-        restart_interval: usize,
-        bloom_false_positive: f64,
-        levels_options: Vec<LevelOptions>,
-        compaction_pin_ttl: Duration,
-        health_timeout: Duration,
-    ) -> Result<()> {
-        let node_ranges = meta_store.all_node_ranges().await?;
-        let partition_points = node_ranges
-            .iter()
-            .flat_map(|(_node_id, ranges)| ranges.iter().map(|range| range.start_key.clone()))
-            .collect_vec();
+async fn trigger(ctx: CompactionContext) -> Result<()> {
+    let now = SystemTime::now();
 
-        let mut old_node_ssts: BTreeMap<u64, (Vec<u64>, Vec<u64>)> = BTreeMap::default();
+    let node_ranges = ctx.meta_store.all_node_ranges().await?;
+    let partition_points = node_ranges
+        .iter()
+        .flat_map(|(_node_id, ranges)| ranges.iter().map(|range| range.start_key.clone()))
+        .collect_vec();
 
-        let now = SystemTime::now();
+    let old_node_ssts = pick_ssts(&ctx, node_ranges, now).await?;
 
-        // NOTE: Assume sstables from different range/node will not overlap for now.
-        // NOTE: The assumption may be changed after scale out.
-        for (node_id, ranges) in node_ranges {
-            let mut node_l0_ssts: BTreeSet<u64> = BTreeSet::default();
-            let mut node_l1_ssts: BTreeSet<u64> = BTreeSet::default();
-            for range in ranges {
-                let range_l0_ssts = version_manager
-                    .pick_overlap_ssts(0..1, &range.start_key..=&range.end_key)
-                    .await?;
-                assert_eq!(range_l0_ssts.len(), 1);
-                node_l0_ssts.extend(range_l0_ssts[0].iter());
-            }
-            if node_l0_ssts.len() < trigger_l0_compaction_ssts {
-                continue;
-            }
-            for l0_sst in node_l0_ssts.iter() {
-                let l1_ssts = version_manager
-                    .pick_overlap_ssts_by_sst_id(1..2, *l0_sst)
-                    .await?;
-                assert_eq!(l1_ssts.len(), 1);
-                node_l1_ssts.extend(l1_ssts[0].iter());
-            }
-            let node_l0_ssts = node_l0_ssts.into_iter().collect_vec();
-            let node_l1_ssts = node_l1_ssts.into_iter().collect_vec();
+    let old_ssts = old_node_ssts
+        .iter()
+        .flat_map(|(_node_id, old_ssts)| old_ssts.to_vec())
+        .collect_vec();
 
-            if meta_store
-                .is_sstables_pinned(&node_l0_ssts, now)
+    if old_ssts.is_empty() {
+        return Ok(());
+    }
+    assert!(verify_no_duplication(old_ssts.iter()));
+
+    let mut futures = Vec::with_capacity(old_node_ssts.len());
+    for (_node_id, old_ssts) in old_node_ssts.clone() {
+        let sub_ctx = ctx.clone();
+        let partition_points_clone = partition_points.clone();
+        let future = async move {
+            if !sub_ctx
+                .meta_store
+                .pin_sstables(&old_ssts.to_vec(), now)
                 .await?
-                .iter()
-                .chain(
-                    meta_store
-                        .is_sstables_pinned(&node_l1_ssts, now)
-                        .await?
-                        .iter(),
-                )
-                .any(|pinned| *pinned)
             {
-                continue;
+                warn!("some sstable has been pinned, skip compaction");
+                println!("some sstable has been pinned, skip compaction");
+                return Ok(());
             }
 
-            old_node_ssts.insert(node_id, (node_l0_ssts, node_l1_ssts));
-        }
+            sub_compaction(&sub_ctx, old_ssts.clone(), partition_points_clone, now).await?;
 
-        let old_ssts = old_node_ssts
-            .iter()
-            .flat_map(|(_node_id, (l0_ssts, l1_ssts))| {
-                l0_ssts.iter().chain(l1_ssts.iter()).copied()
-            })
-            .collect_vec();
-
-        if old_ssts.is_empty() {
-            return Ok(());
-        }
-        assert!(verify_no_duplication(old_ssts.iter()));
-
-        if !meta_store.pin_sstables(&old_ssts, now).await? {
-            warn!("some sstables to comapct are pinned, retry in next loop");
-            println!("some sstables to comapct are pinned, retry in next loop");
-            return Ok(());
-        }
-
-        let watermark = version_manager.watermark().await;
-        let reqs = old_node_ssts
-            .iter()
-            .map(|(_node_id, (l0_ssts, l1_ssts))| CompactionRequest {
-                sst_ids: l0_ssts.iter().chain(l1_ssts.iter()).copied().collect_vec(),
-                watermark,
-                sstable_capacity: sstable_capacity as u64,
-                block_capacity: block_capacity as u64,
-                restart_interval: restart_interval as u64,
-                bloom_false_positive,
-                compression_algorithm: levels_options
-                    .get(0)
-                    .expect("no l0 config")
-                    .compression_algorithm
-                    .into(),
-                remove_tombstone: false,
-                partition_points: partition_points.clone(),
-            })
-            .collect_vec();
-
-        let mut futures = Vec::with_capacity(reqs.len());
-
-        for req in reqs {
-            let exhauster = Self::unpin_on_err(
-                meta_store.clone(),
-                meta_store.pick_exhauster(health_timeout).await,
-                &old_ssts,
-            )
-            .await?;
-            let future = async move {
-                if let Some(endpoint) = exhauster {
-                    let mut client = ExhausterServiceClient::connect(format!(
-                        "http://{}:{}",
-                        endpoint.host, endpoint.port
-                    ))
-                    .await?;
-                    let rsp = client.compaction(Request::new(req)).await?.into_inner();
-                    Ok(rsp.sst_ids)
-                } else {
-                    Err(Error::Other("no valid exhuaster".to_string()))
-                }
-            };
-            futures.push(future);
-        }
-        let results = future::join_all(futures).await;
-
-        let mut new_l1_ssts = Vec::with_capacity(100);
-        for result in results {
-            match result {
-                Ok(mut sst_ids) => new_l1_ssts.append(&mut sst_ids),
-                Err(e) => {
-                    // println!("compaction error: {}", e);
-                    warn!("compaction error: {}", e);
-                }
+            if let Err(e) = sub_ctx.meta_store.unpin_sstables(&old_ssts.to_vec()).await {
+                error!("failed to unpin sstables, will be resolved by timeout");
+                println!("failed to unpin sstables, will be resolved by timeout");
+                return Err(e);
             }
-        }
-
-        // FIX ME: Consistency broken when time drifts. Check ttl in version manager?
-        if now.elapsed().unwrap() > compaction_pin_ttl {
-            println!("compaction time out, skip updating version");
-            warn!("compaction time out, skip updating version");
-            return Err(Error::Other("compaction timeout".to_string()));
-        }
-
-        let sstable_diffs = old_node_ssts
-            .into_iter()
-            .flat_map(|(_node_id, (l0_ssts, l1_ssts))| {
-                l0_ssts
-                    .into_iter()
-                    .map(|sst_id| SsTableDiff {
-                        id: sst_id,
-                        level: 0,
-                        op: SsTableOp::Delete.into(),
-                    })
-                    .chain(l1_ssts.into_iter().map(|sst_id| SsTableDiff {
-                        id: sst_id,
-                        level: 1,
-                        op: SsTableOp::Delete.into(),
-                    }))
-            })
-            .chain(new_l1_ssts.into_iter().map(|sst_id| SsTableDiff {
-                id: sst_id,
-                level: 1,
-                op: SsTableOp::Insert.into(),
-            }))
-            .collect_vec();
-
-        let version_diff = VersionDiff {
-            id: 0,
-            sstable_diffs,
+            Ok(())
         };
-        Self::unpin_on_err(
-            meta_store.clone(),
-            version_manager
-                .update(version_diff, false)
-                .await
-                .map_err(Error::StorageError),
-            &old_ssts,
-        )
-        .await?;
-        if let Err(ue) = meta_store.unpin_sstables(&old_ssts).await {
-            error!("fail to unpin sstables [sstables: {:?}] : {}", old_ssts, ue);
-        }
-        Ok(())
+        futures.push(future);
     }
 
-    async fn unpin_on_err<T>(
-        meta_store: MetaStoreRef,
-        result: Result<T>,
-        sst_ids: &[u64],
-    ) -> Result<T> {
-        if result.is_err() {
-            if let Err(e) = meta_store.unpin_sstables(sst_ids).await {
-                error!("fail to unpin sstables [sstables: {:?}] : {}", sst_ids, e);
-            }
-        }
-        result
+    let results = future::join_all(futures).await;
+    let errs = results.into_iter().filter(|r| r.is_err()).collect_vec();
+    if !errs.is_empty() {
+        return Err(Error::Other(format!("compaction error: {:?}", errs)));
     }
+    Ok(())
+}
+
+// TODO: Pin sstable before `sub_compaction` and unpin after it.
+async fn sub_compaction(
+    ctx: &CompactionContext,
+    old_ssts: TwoLevelSstables,
+    partition_points: Vec<PartitionPoint>,
+    now: SystemTime,
+) -> Result<()> {
+    let watermark = ctx.version_manager.watermark().await;
+
+    let req = CompactionRequest {
+        sst_ids: old_ssts.to_vec(),
+        watermark,
+        sstable_capacity: ctx.sstable_capacity as u64,
+        block_capacity: ctx.block_capacity as u64,
+        restart_interval: ctx.restart_interval as u64,
+        bloom_false_positive: ctx.bloom_false_positive,
+        compression_algorithm: ctx
+            .levels_options
+            .get(ctx.level as usize + 1)
+            .unwrap_or_else(|| panic!("no config for {}", ctx.level as usize + 1))
+            .compression_algorithm
+            .into(),
+        remove_tombstone: ctx.level as usize + 1 == ctx.levels_options.len() - 1,
+        partition_points: partition_points.clone(),
+    };
+
+    let exhauster = ctx.meta_store.pick_exhauster(ctx.health_timeout).await?;
+    if exhauster.is_none() {
+        warn!("no live exhauster, skip compaction");
+        return Ok(());
+    }
+    let exhauster = exhauster.unwrap();
+
+    let mut client =
+        ExhausterServiceClient::connect(format!("http://{}:{}", exhauster.host, exhauster.port))
+            .await?;
+    let rsp = client.compaction(Request::new(req)).await?.into_inner();
+
+    if now.elapsed().unwrap() > ctx.compaction_pin_ttl {
+        warn!("compaction timeout, skip version updates");
+        return Ok(());
+    }
+
+    let new_ssts = rsp.sst_ids;
+
+    let mut sstable_diffs =
+        Vec::with_capacity(old_ssts.first.len() + old_ssts.second.len() + new_ssts.len());
+
+    for sst_id in old_ssts.first.iter() {
+        sstable_diffs.push(SsTableDiff {
+            id: *sst_id,
+            level: ctx.level,
+            op: SsTableOp::Delete.into(),
+        });
+    }
+    for sst_id in old_ssts.second.iter() {
+        sstable_diffs.push(SsTableDiff {
+            id: *sst_id,
+            level: ctx.level + 1,
+            op: SsTableOp::Delete.into(),
+        });
+    }
+    for sst_id in new_ssts.iter() {
+        sstable_diffs.push(SsTableDiff {
+            id: *sst_id,
+            level: ctx.level + 1,
+            op: SsTableOp::Insert.into(),
+        });
+    }
+
+    let version_diff = VersionDiff {
+        id: 0,
+        sstable_diffs,
+    };
+    ctx.version_manager.update(version_diff, false).await?;
+
+    Ok(())
+}
+
+async fn pick_ssts(
+    ctx: &CompactionContext,
+    node_ranges: BTreeMap<u64, Vec<KeyRange>>,
+    now: SystemTime,
+) -> Result<BTreeMap<u64, TwoLevelSstables>> {
+    let mut old_node_ssts = BTreeMap::default();
+
+    for (node_id, ranges) in node_ranges {
+        let mut base_level_ssts: BTreeSet<u64> = BTreeSet::default();
+        let mut next_level_ssts: BTreeSet<u64> = BTreeSet::default();
+
+        // TODO: Check ranges in random order.
+        for range in ranges {
+            let base_range_ssts = ctx
+                .version_manager
+                .pick_overlap_ssts(
+                    ctx.level as usize..ctx.level as usize + 1,
+                    &range.start_key..=&range.end_key,
+                )
+                .await?;
+            assert_eq!(base_range_ssts.len(), 1);
+            base_level_ssts.extend(base_range_ssts[0].iter());
+            // TODO: Stop picking if there is already too many.
+        }
+        if ctx.level == 0 && base_level_ssts.len() < ctx.trigger_l0_compaction_ssts {
+            continue;
+        }
+        for base_sst in base_level_ssts.iter() {
+            let next_ssts = ctx
+                .version_manager
+                .pick_overlap_ssts_by_sst_id(
+                    ctx.level as usize + 1..ctx.level as usize + 2,
+                    *base_sst,
+                )
+                .await?;
+            assert_eq!(next_ssts.len(), 1);
+            next_level_ssts.extend(next_ssts[0].iter());
+        }
+        let base_level_ssts = base_level_ssts.into_iter().collect_vec();
+        let next_level_ssts = next_level_ssts.into_iter().collect_vec();
+
+        if ctx
+            .meta_store
+            .is_sstables_pinned(&base_level_ssts, now)
+            .await?
+            .iter()
+            .chain(
+                ctx.meta_store
+                    .is_sstables_pinned(&next_level_ssts, now)
+                    .await?
+                    .iter(),
+            )
+            .any(|pinned| *pinned)
+        {
+            continue;
+        }
+
+        old_node_ssts.insert(
+            node_id,
+            TwoLevelSstables {
+                first: base_level_ssts,
+                second: next_level_ssts,
+            },
+        );
+    }
+    Ok(old_node_ssts)
 }
 
 fn verify_no_duplication(mut iter: core::slice::Iter<u64>) -> bool {
     let mut unique = HashSet::new();
     iter.all(|v| unique.insert(*v))
-}
-
-#[async_trait]
-impl Worker for Compactor {
-    async fn run(&mut self) -> anyhow::Result<()> {
-        // TODO: Gracefully kill.
-        loop {
-            match self.run_inner().await {
-                Ok(_) => {}
-                Err(e) => {
-                    println!("error occur when compactor running: {}", e);
-                    warn!("error occur when compactor running: {}", e);
-                }
-            }
-        }
-    }
 }
