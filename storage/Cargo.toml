@@ -24,6 +24,7 @@ lz4 = "1.23.1"
 moka = { version = "0.7", features = ["future"] }
 parking_lot = "0.12"
 rand = "0.8.5"
+runkv-common = { path = "../common" }
 runkv-proto = { path = "../proto" }
 serde = "1.0"
 serde_derive = "1.0"

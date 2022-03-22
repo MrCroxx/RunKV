@@ -1,9 +1,6 @@
 use std::{cmp, ptr};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use serde::Deserialize;
-
-use crate::error::{Error, Result};
 
 const MASK: u32 = 128;
 
@@ -111,63 +108,6 @@ pub fn crc32check(data: &[u8], crc32sum: u32) -> bool {
     let mut hasher = crc32fast::Hasher::new();
     hasher.update(data);
     hasher.finalize() == crc32sum
-}
-
-#[derive(Deserialize, Clone, Copy, Debug)]
-pub enum CompressionAlgorithm {
-    None,
-    Lz4,
-}
-
-impl CompressionAlgorithm {
-    pub fn encode(&self, buf: &mut impl BufMut) {
-        let v = match self {
-            Self::None => 0,
-            Self::Lz4 => 1,
-        };
-        buf.put_u8(v);
-    }
-
-    pub fn decode(buf: &mut impl Buf) -> Result<Self> {
-        match buf.get_u8() {
-            0 => Ok(Self::None),
-            1 => Ok(Self::Lz4),
-            _ => Err(Error::DecodeError(
-                "not valid compression algorithm".to_string(),
-            )),
-        }
-    }
-}
-
-impl From<CompressionAlgorithm> for u8 {
-    fn from(ca: CompressionAlgorithm) -> Self {
-        match ca {
-            CompressionAlgorithm::None => 0,
-            CompressionAlgorithm::Lz4 => 1,
-        }
-    }
-}
-
-impl From<CompressionAlgorithm> for u64 {
-    fn from(ca: CompressionAlgorithm) -> Self {
-        match ca {
-            CompressionAlgorithm::None => 0,
-            CompressionAlgorithm::Lz4 => 1,
-        }
-    }
-}
-
-impl TryFrom<u8> for CompressionAlgorithm {
-    type Error = Error;
-    fn try_from(v: u8) -> core::result::Result<Self, Self::Error> {
-        match v {
-            0 => Ok(Self::None),
-            1 => Ok(Self::Lz4),
-            _ => Err(Error::DecodeError(
-                "not valid compression algorithm".to_string(),
-            )),
-        }
-    }
 }
 
 /// Key categories:

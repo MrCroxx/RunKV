@@ -22,37 +22,3 @@ write_buffer_capacity = "64 KiB"
 [cache]
 block_cache_capacity = "64 KiB"
 meta_cache_capacity = "1 KiB"
-
-[lsm_tree]
-sstable_capacity = "64 KiB"
-block_capacity = "4 KiB"
-restart_interval = 2
-bloom_false_positive = 0.1
-
-[[lsm_tree.levels_options]]
-compaction_strategy = "Overlap"
-compression_algorithm = "None"
-
-[[lsm_tree.levels_options]]
-compaction_strategy = "NonOverlap"
-compression_algorithm = "None"
-
-[[lsm_tree.levels_options]]
-compaction_strategy = "NonOverlap"
-compression_algorithm = "None"
-
-[[lsm_tree.levels_options]]
-compaction_strategy = "NonOverlap"
-compression_algorithm = "None"
-
-[[lsm_tree.levels_options]]
-compaction_strategy = "NonOverlap"
-compression_algorithm = "Lz4"
-
-[[lsm_tree.levels_options]]
-compaction_strategy = "NonOverlap"
-compression_algorithm = "Lz4"
-
-[[lsm_tree.levels_options]]
-compaction_strategy = "NonOverlap"
-compression_algorithm = "Lz4"

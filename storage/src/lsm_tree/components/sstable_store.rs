@@ -143,9 +143,10 @@ pub type SstableStoreRef = Arc<SstableStore>;
 #[cfg(test)]
 mod tests {
 
+    use runkv_common::coding::CompressionAlgorithm;
+
     use super::*;
     use crate::components::{SstableBuilder, SstableBuilderOptions};
-    use crate::lsm_tree::utils::CompressionAlgorithm;
     use crate::lsm_tree::TEST_DEFAULT_RESTART_INTERVAL;
     use crate::MemObjectStore;
 

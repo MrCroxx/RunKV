@@ -4,10 +4,9 @@ use std::ops::{Range, RangeBounds};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use lz4::Decoder;
+use runkv_common::coding::CompressionAlgorithm;
 
-use crate::lsm_tree::utils::{
-    crc32check, crc32sum, key_diff, var_u32_len, BufExt, BufMutExt, CompressionAlgorithm,
-};
+use crate::lsm_tree::utils::{crc32check, crc32sum, key_diff, var_u32_len, BufExt, BufMutExt};
 use crate::lsm_tree::{
     DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, TEST_DEFAULT_RESTART_INTERVAL,
 };
@@ -29,7 +28,8 @@ impl Block {
         }
 
         // Decompress.
-        let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 5..buf.len() - 4])?;
+        let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 5..buf.len() - 4])
+            .map_err(Error::decode_error)?;
         let buf = match compression {
             CompressionAlgorithm::None => buf.slice(..buf.len() - 5),
             CompressionAlgorithm::Lz4 => {
