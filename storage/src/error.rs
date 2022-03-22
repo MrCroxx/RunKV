@@ -16,12 +16,12 @@ pub enum Error {
 }
 
 impl Error {
-    pub fn encode_error(e: impl std::error::Error) -> Self {
-        Self::EncodeError(e.to_string())
+    pub fn encode_error(e: impl Into<Box<dyn std::error::Error>>) -> Self {
+        Self::EncodeError(e.into().to_string())
     }
 
-    pub fn decode_error(e: impl std::error::Error) -> Self {
-        Self::DecodeError(e.to_string())
+    pub fn decode_error(e: impl Into<Box<dyn std::error::Error>>) -> Self {
+        Self::DecodeError(e.into().to_string())
     }
 }
 

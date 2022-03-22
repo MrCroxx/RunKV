@@ -2,11 +2,10 @@ use std::ops::{Range, RangeInclusive};
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use runkv_common::coding::CompressionAlgorithm;
 
 use super::{BlockBuilder, BlockBuilderOptions};
-use crate::lsm_tree::utils::{
-    crc32check, crc32sum, full_key, raw_value, Bloom, CompressionAlgorithm,
-};
+use crate::lsm_tree::utils::{crc32check, crc32sum, full_key, raw_value, Bloom};
 use crate::lsm_tree::{
     DEFAULT_BLOCK_SIZE, DEFAULT_BLOOM_FALSE_POSITIVE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL,
     DEFAULT_SSTABLE_META_SIZE, DEFAULT_SSTABLE_SIZE, TEST_DEFAULT_RESTART_INTERVAL,

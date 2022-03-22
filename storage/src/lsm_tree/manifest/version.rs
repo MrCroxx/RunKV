@@ -2,27 +2,15 @@ use std::collections::VecDeque;
 use std::ops::{Range, RangeInclusive};
 use std::sync::Arc;
 
+use runkv_common::coding::CompressionAlgorithm;
+use runkv_common::config::{LevelCompactionStrategy, LevelOptions};
 use runkv_proto::manifest::{SsTableOp, VersionDiff};
-use serde::Deserialize;
 use tokio::sync::RwLock;
 use tracing::trace;
 
 use super::ManifestError;
 use crate::components::SstableStoreRef;
-use crate::lsm_tree::utils::CompressionAlgorithm;
 use crate::Result;
-
-#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
-pub enum LevelCompactionStrategy {
-    Overlap,
-    NonOverlap,
-}
-
-#[derive(Deserialize, Clone, Debug)]
-pub struct LevelOptions {
-    pub compaction_strategy: LevelCompactionStrategy,
-    pub compression_algorithm: CompressionAlgorithm,
-}
 
 pub struct VersionManagerOptions {
     /// Level compaction and compression strategies for each level.

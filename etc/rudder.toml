@@ -12,6 +12,7 @@ url = 'minio://minioadmin:minioadmin@127.0.0.1:9000/runkv'
 bucket = "runkv"
 
 [cache]
+block_cache_capacity = "0 B"
 meta_cache_capacity = "256 MiB"
 
 [lsm_tree]

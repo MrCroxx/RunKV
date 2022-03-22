@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use runkv_common::coding::CompressionAlgorithm;
 use runkv_common::Worker;
 use runkv_proto::rudder::rudder_service_client::RudderServiceClient;
 use runkv_proto::rudder::InsertL0Request;
@@ -10,7 +11,7 @@ use runkv_storage::components::{
     CachePolicy, Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef,
 };
 use runkv_storage::manifest::{ManifestError, VersionManager};
-use runkv_storage::utils::{timestamp, user_key, value, CompressionAlgorithm};
+use runkv_storage::utils::{timestamp, user_key, value};
 use tonic::transport::Channel;
 use tonic::Request;
 use tracing::{debug, warn};

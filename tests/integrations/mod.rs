@@ -20,13 +20,14 @@ use tonic::Request;
 const RUDDER_CONFIG_PATH: &str = "etc/rudder.toml";
 const WHEEL_CONFIG_PATH: &str = "etc/wheel.toml";
 const EXHAUSTER_CONFIG_PATH: &str = "etc/exhauster.toml";
+const LSM_TREE_CONFIG_PATH: &str = "etc/lsm_tree.toml";
 
 #[tokio::test]
 async fn test_concurrent_put_get() {
     let object_store = Arc::new(MemObjectStore::default());
 
     let rudder_config: RudderConfig =
-        toml::from_str(&read_to_string(RUDDER_CONFIG_PATH).unwrap()).unwrap();
+        toml::from_str(&concat_toml(RUDDER_CONFIG_PATH, LSM_TREE_CONFIG_PATH)).unwrap();
     let (rudder, rudder_workers) =
         build_rudder_with_object_store(&rudder_config, object_store.clone())
             .await
@@ -35,12 +36,13 @@ async fn test_concurrent_put_get() {
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     let wheel_config: WheelConfig =
-        toml::from_str(&read_to_string(WHEEL_CONFIG_PATH).unwrap()).unwrap();
+        toml::from_str(&concat_toml(WHEEL_CONFIG_PATH, LSM_TREE_CONFIG_PATH)).unwrap();
     let (wheel, lsmtree, wheel_workers) =
         build_wheel_with_object_store(&wheel_config, object_store.clone())
             .await
             .unwrap();
-    tokio::spawn(async move { bootstrap_wheel(&wheel_config, wheel, wheel_workers).await });
+    let wheel_config_clone = wheel_config.clone();
+    tokio::spawn(async move { bootstrap_wheel(&wheel_config_clone, wheel, wheel_workers).await });
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     let exhauster_config: ExhausterConfig =
@@ -55,8 +57,6 @@ async fn test_concurrent_put_get() {
     });
     tokio::time::sleep(Duration::from_secs(3)).await;
 
-    let wheel_config: WheelConfig =
-        toml::from_str(&read_to_string(WHEEL_CONFIG_PATH).unwrap()).unwrap();
     // TODO: Refine me.
     let mut wheel_client = WheelServiceClient::connect(format!(
         "http://{}:{}",
@@ -116,4 +116,12 @@ fn key(i: u64) -> Bytes {
 
 fn value(i: u64) -> Bytes {
     Bytes::from(format!("v{:064}", i))
+}
+
+fn concat_toml(path1: &str, path2: &str) -> String {
+    let mut s = String::default();
+    s.push_str(&read_to_string(path1).unwrap());
+    s.push('\n');
+    s.push_str(&read_to_string(path2).unwrap());
+    s
 }

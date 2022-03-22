@@ -221,13 +221,14 @@ mod tests {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use runkv_common::coding::CompressionAlgorithm;
 
     use super::*;
     use crate::components::{
         BlockCache, SstableBuilder, SstableBuilderOptions, SstableMeta, SstableStore,
         SstableStoreOptions,
     };
-    use crate::lsm_tree::utils::{full_key, CompressionAlgorithm};
+    use crate::lsm_tree::utils::full_key;
     use crate::lsm_tree::TEST_DEFAULT_RESTART_INTERVAL;
     use crate::MemObjectStore;
 

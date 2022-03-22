@@ -4,12 +4,13 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use futures::future;
 use itertools::Itertools;
+use runkv_common::config::LevelOptions;
 use runkv_common::Worker;
 use runkv_proto::exhauster::exhauster_service_client::ExhausterServiceClient;
 use runkv_proto::exhauster::CompactionRequest;
 use runkv_proto::manifest::{SsTableDiff, SsTableOp, VersionDiff};
 use runkv_proto::meta::KeyRange;
-use runkv_storage::manifest::{LevelOptions, VersionManager};
+use runkv_storage::manifest::VersionManager;
 use tonic::Request;
 use tracing::{error, trace, warn};
 

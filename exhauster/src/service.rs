@@ -4,13 +4,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 use itertools::Itertools;
+use runkv_common::coding::CompressionAlgorithm;
 use runkv_proto::exhauster::exhauster_service_server::ExhausterService;
 use runkv_proto::exhauster::{CompactionRequest, CompactionResponse};
 use runkv_storage::components::{
     CachePolicy, Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef,
 };
 use runkv_storage::iterator::{BoxedIterator, Iterator, MergeIterator, Seek, SstableIterator};
-use runkv_storage::utils::{timestamp, user_key, value, CompressionAlgorithm};
+use runkv_storage::utils::{timestamp, user_key, value};
 use tonic::{Request, Response, Status};
 use tracing::debug;
 
