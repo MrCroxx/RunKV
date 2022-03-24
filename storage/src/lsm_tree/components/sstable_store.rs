@@ -195,7 +195,7 @@ mod tests {
                 .await
                 .unwrap();
             let origin_block = Block::decode(data.slice(block_meta.data_range())).unwrap();
-            assert_eq!(origin_block.raw(), block.raw());
+            assert_eq!(origin_block.data(), block.data());
         }
         // Test fetch from object store.
         for (block_idx, block_meta) in sst.block_metas_iter().enumerate() {
@@ -204,7 +204,7 @@ mod tests {
                 .await
                 .unwrap();
             let origin_block = Block::decode(data.slice(block_meta.data_range())).unwrap();
-            assert_eq!(origin_block.raw(), block.raw());
+            assert_eq!(origin_block.data(), block.data());
         }
     }
 }

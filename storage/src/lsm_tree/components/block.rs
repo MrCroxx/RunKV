@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::io::{Read, Write};
-use std::ops::{Range, RangeBounds};
+use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use lz4::Decoder;
@@ -94,13 +94,13 @@ impl Block {
             .unwrap_or_else(|x| x.saturating_sub(1))
     }
 
-    pub fn slice(&self, range: impl RangeBounds<usize>) -> Bytes {
-        self.data.slice(range)
+    pub fn slice(&self, range: Range<usize>) -> &[u8] {
+        &self.data[range]
     }
 
     #[cfg(test)]
-    pub fn raw(&self) -> Bytes {
-        self.data.clone()
+    pub fn data(&self) -> &Bytes {
+        &self.data
     }
 }
 
@@ -158,6 +158,10 @@ impl KeyPrefix {
     /// Get entry len.
     pub fn entry_len(&self) -> usize {
         self.len() + self.diff + self.value
+    }
+
+    pub fn max_len() -> usize {
+        12
     }
 }
 
