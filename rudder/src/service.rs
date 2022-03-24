@@ -86,12 +86,13 @@ impl RudderService for Rudder {
         let diff = VersionDiff {
             id: 0,
             sstable_diffs: req
-                .sst_ids
+                .sst_infos
                 .iter()
-                .map(|&sst_id| SsTableDiff {
-                    id: sst_id,
+                .map(|sst_info| SsTableDiff {
+                    id: sst_info.id,
                     level: 0,
                     op: SsTableOp::Insert.into(),
+                    data_size: sst_info.data_size,
                 })
                 .collect_vec(),
         };

@@ -429,6 +429,8 @@ unsafe impl<T: AsRef<Skiplist<C>> + Send, C> Sync for IterRef<T, C> {}
 #[cfg(test)]
 mod tests {
 
+    use test_log::test;
+
     use super::*;
     use crate::lsm_tree::utils::FixedLengthSuffixComparator;
 

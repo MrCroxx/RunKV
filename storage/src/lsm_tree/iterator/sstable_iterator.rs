@@ -223,6 +223,7 @@ mod tests {
 
     use bytes::Bytes;
     use runkv_common::coding::CompressionAlgorithm;
+    use test_log::test;
 
     use super::*;
     use crate::components::{
@@ -272,21 +273,21 @@ mod tests {
         SstableIterator::new(sstable_store, sstable, CachePolicy::Fill)
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_seek_first() {
         let mut it = build_iterator_for_test().await;
         it.seek(Seek::First).await.unwrap();
         assert_eq!(&full_key(b"k01", 1)[..], it.key());
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_seek_last() {
         let mut it = build_iterator_for_test().await;
         it.seek(Seek::Last).await.unwrap();
         assert_eq!(&full_key(b"k08", 8)[..], it.key());
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_seek_none_front() {
         let mut it = build_iterator_for_test().await;
         it.seek(Seek::RandomForward(&full_key(b"k00", 0)[..]))
@@ -301,7 +302,7 @@ mod tests {
         assert!(!it.is_valid());
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_seek_none_back() {
         let mut it = build_iterator_for_test().await;
         it.seek(Seek::RandomForward(&full_key(b"k09", 9)[..]))
@@ -316,7 +317,7 @@ mod tests {
         assert_eq!(&full_key(b"k08", 8)[..], it.key());
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn bi_direction_seek() {
         let mut it = build_iterator_for_test().await;
         it.seek(Seek::RandomForward(&full_key(b"k03", 3)[..]))
@@ -330,7 +331,7 @@ mod tests {
         assert_eq!(&full_key(b"k02", 2)[..], it.key());
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_forward_iterate() {
         let mut it = build_iterator_for_test().await;
 
@@ -345,7 +346,7 @@ mod tests {
         assert!(!it.is_valid())
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_backward_iterate() {
         let mut it = build_iterator_for_test().await;
 
@@ -360,7 +361,7 @@ mod tests {
         assert!(!it.is_valid())
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_seek_forward_backward_iterate() {
         let mut it = build_iterator_for_test().await;
 

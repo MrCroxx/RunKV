@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package exhauster;
 
+import "manifest.proto";
+
 message CompactionRequest {
   repeated uint64 sst_ids = 1;
   uint64 watermark = 2;
@@ -15,7 +17,8 @@ message CompactionRequest {
 }
 
 message CompactionResponse {
-  repeated uint64 sst_ids = 1;
+  repeated manifest.SSTableInfo old_sst_infos = 1;
+  repeated manifest.SSTableInfo new_sst_infos = 2;
 }
 
 service ExhausterService {

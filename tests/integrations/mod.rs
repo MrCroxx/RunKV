@@ -15,14 +15,16 @@ use runkv_rudder::{bootstrap_rudder, build_rudder_with_object_store};
 use runkv_storage::{LsmTree, MemObjectStore};
 use runkv_wheel::config::WheelConfig;
 use runkv_wheel::{bootstrap_wheel, build_wheel_with_object_store};
+use test_log::test;
 use tonic::Request;
+use tracing::trace;
 
 const RUDDER_CONFIG_PATH: &str = "etc/rudder.toml";
 const WHEEL_CONFIG_PATH: &str = "etc/wheel.toml";
 const EXHAUSTER_CONFIG_PATH: &str = "etc/exhauster.toml";
 const LSM_TREE_CONFIG_PATH: &str = "etc/lsm_tree.toml";
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn test_concurrent_put_get() {
     let object_store = Arc::new(MemObjectStore::default());
 
@@ -82,21 +84,21 @@ async fn test_concurrent_put_get() {
                 let mut rng = thread_rng();
                 tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
                 lsmtree_clone.put(&key(i), &value(i), 1).await.unwrap();
-                // println!("put {:?} at {}", key(i), 1);
+                trace!("put {:?} at {}", key(i), 1);
                 tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
-                // println!("get {:?} at {}", key(i), 3);
+                trace!("get {:?} at {}", key(i), 3);
                 assert_eq!(lsmtree_clone.get(&key(i), 3).await.unwrap(), Some(value(i)));
                 tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
                 lsmtree_clone.delete(&key(i), 5).await.unwrap();
-                // println!("delete {:?} at {}", key(i), 5);
+                trace!("delete {:?} at {}", key(i), 5);
                 tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
-                // println!("get {:?} at {}", key(i), 7);
+                trace!("get {:?} at {}", key(i), 7);
                 assert_eq!(lsmtree_clone.get(&key(i), 7).await.unwrap(), None);
                 tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
                 lsmtree_clone.put(&key(i), &value(i), 9).await.unwrap();
-                // println!("put {:?} at {}", key(i), 9);
+                trace!("put {:?} at {}", key(i), 9);
                 tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
-                // println!("get {:?} at {}", key(i), 11);
+                trace!("get {:?} at {}", key(i), 11);
                 assert_eq!(
                     lsmtree_clone.get(&key(i), 11).await.unwrap(),
                     Some(value(i))

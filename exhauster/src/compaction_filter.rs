@@ -42,6 +42,8 @@ impl CompactionFilter for DefaultCompactionFilter {
 #[cfg(test)]
 mod tests {
 
+    use test_log::test;
+
     use super::*;
 
     #[test]

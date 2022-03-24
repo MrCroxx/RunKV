@@ -164,6 +164,8 @@ impl Iterator for MemtableIterator {
 #[cfg(test)]
 mod tests {
 
+    use test_log::test;
+
     use super::*;
     use crate::lsm_tree::DEFAULT_MEMTABLE_SIZE;
 
@@ -204,7 +206,7 @@ mod tests {
         MemtableIterator::new(&memtable, timestamp)
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_seek_first() {
         let mut it = build_iterator_for_test(u64::MAX);
         assert!(it.seek(Seek::First).await.unwrap());
@@ -227,7 +229,7 @@ mod tests {
         assert!(!it.is_valid());
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_seek_last() {
         let mut it = build_iterator_for_test(u64::MAX);
         assert!(it.seek(Seek::Last).await.unwrap());
@@ -250,7 +252,7 @@ mod tests {
         assert!(!it.is_valid());
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_bi_direction_seek() {
         // Forward.
 
@@ -338,7 +340,7 @@ mod tests {
         assert_eq!(b"v05-01", it.value());
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_seek_none_front() {
         let mut it = build_iterator_for_test(u64::MAX);
         it.seek(Seek::RandomForward(b"k01")).await.unwrap();
@@ -349,7 +351,7 @@ mod tests {
         assert!(!it.is_valid());
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_seek_none_back() {
         let mut it = build_iterator_for_test(u64::MAX);
         it.seek(Seek::RandomForward(b"k12")).await.unwrap();
@@ -360,7 +362,7 @@ mod tests {
         assert_eq!(b"v11-04", it.value());
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_forward_iterate() {
         let mut it = build_iterator_for_test(3);
         it.seek(Seek::First).await.unwrap();
@@ -429,7 +431,7 @@ mod tests {
         assert!(!it.is_valid());
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_backward_iterate() {
         let mut it = build_iterator_for_test(3);
         it.seek(Seek::Last).await.unwrap();
@@ -498,7 +500,7 @@ mod tests {
         assert!(!it.is_valid());
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_seek_forward_backward_iterate() {
         let mut it = build_iterator_for_test(3);
 

@@ -39,7 +39,7 @@ message HeartbeatResponse {
 
 message InsertL0Request {
   uint64 node_id = 1;
-  repeated uint64 sst_ids = 2;
+  repeated manifest.SSTableInfo sst_infos = 2;
   uint64 next_version_id = 3;
 }
 

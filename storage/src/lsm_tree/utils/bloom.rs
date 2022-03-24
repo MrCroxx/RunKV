@@ -110,6 +110,8 @@ impl<'a> Bloom<'a> {
 
 #[cfg(test)]
 mod tests {
+    use test_log::test;
+
     use super::*;
 
     #[test]

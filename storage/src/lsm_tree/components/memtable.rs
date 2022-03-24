@@ -57,11 +57,13 @@ impl Memtable {
 
 #[cfg(test)]
 mod tests {
+
     use std::time::Duration;
 
     use futures::future;
     use itertools::Itertools;
     use rand::{thread_rng, Rng};
+    use test_log::test;
 
     use super::*;
     use crate::lsm_tree::iterator::{Iterator, MemtableIterator, Seek};
@@ -74,7 +76,7 @@ mod tests {
         is_send_sync::<Memtable>()
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_concurrent_put() {
         // Insert multiple kvs out of order concurrently.
         // Then iterate from start to end to check if memtable is complete and ordered.
@@ -128,7 +130,7 @@ mod tests {
         future::join(put_future, get_future).await;
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_concurrent_iter() {
         // Insert multiple kvs and create an iterator on the newest timestamp.
         // Then iterate from start to end and check results while inserting kvs concurrently.
