@@ -7,6 +7,7 @@ use itertools::Itertools;
 use runkv_common::coding::CompressionAlgorithm;
 use runkv_proto::exhauster::exhauster_service_server::ExhausterService;
 use runkv_proto::exhauster::{CompactionRequest, CompactionResponse};
+use runkv_proto::manifest::SsTableInfo;
 use runkv_storage::components::{
     CachePolicy, Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef,
 };
@@ -52,6 +53,7 @@ impl ExhausterService for Exhauster {
         request: Request<CompactionRequest>,
     ) -> core::result::Result<Response<CompactionResponse>, Status> {
         let req = request.into_inner();
+        let mut old_sst_infos = Vec::with_capacity(req.sst_ids.len());
         let mut iters: Vec<BoxedIterator> = Vec::with_capacity(req.sst_ids.len());
         for sst_id in &req.sst_ids {
             let sst = self
@@ -59,6 +61,10 @@ impl ExhausterService for Exhauster {
                 .sstable(*sst_id)
                 .await
                 .map_err(internal)?;
+            old_sst_infos.push(SsTableInfo {
+                id: *sst_id,
+                data_size: sst.data_size() as u64,
+            });
             let iter = SstableIterator::new(self.sstable_store.clone(), sst, CachePolicy::Fill);
             iters.push(Box::new(iter));
         }
@@ -86,7 +92,7 @@ impl ExhausterService for Exhauster {
         } else {
             Box::new(DefaultPartitioner::new(partition_points))
         };
-        let mut sst_ids = Vec::with_capacity(req.sst_ids.len());
+        let mut new_sst_infos = Vec::with_capacity(req.sst_ids.len());
         // Filter key value pairs.
         while iter.is_valid() {
             let uk = user_key(iter.key());
@@ -103,10 +109,11 @@ impl ExhausterService for Exhauster {
                     || partitioner.partition(uk, v, ts))
             {
                 let builder = sstable_builder.take().unwrap();
-                self.build_and_upload_sst(sst_id, builder)
+                let sst_info = self
+                    .build_and_upload_sst(sst_id, builder)
                     .await
                     .map_err(internal)?;
-                sst_ids.push(sst_id);
+                new_sst_infos.push(sst_info);
                 continue;
             }
             let builder = sstable_builder.as_mut().unwrap();
@@ -117,12 +124,16 @@ impl ExhausterService for Exhauster {
             iter.next().await.map_err(internal)?;
         }
         if let Some(builder) = sstable_builder.take() {
-            self.build_and_upload_sst(sst_id, builder)
+            let sst_info = self
+                .build_and_upload_sst(sst_id, builder)
                 .await
                 .map_err(internal)?;
-            sst_ids.push(sst_id);
+            new_sst_infos.push(sst_info);
         }
-        let rsp = CompactionResponse { sst_ids };
+        let rsp = CompactionResponse {
+            old_sst_infos,
+            new_sst_infos,
+        };
         Ok(Response::new(rsp))
     }
 }
@@ -134,14 +145,22 @@ impl Exhauster {
         (node_id << 32) | sequential_id
     }
 
-    async fn build_and_upload_sst(&self, sst_id: u64, builder: SstableBuilder) -> Result<()> {
+    async fn build_and_upload_sst(
+        &self,
+        sst_id: u64,
+        builder: SstableBuilder,
+    ) -> Result<SsTableInfo> {
         // TODO: Async upload.
         let (meta, data) = builder.build()?;
+        let data_size = meta.data_size as u64;
         let sst = Sstable::new(sst_id, Arc::new(meta));
         self.sstable_store
             .put(&sst, data, CachePolicy::Fill)
             .await?;
         debug!("sst {} uploaded", sst_id);
-        Ok(())
+        Ok(SsTableInfo {
+            id: sst_id,
+            data_size,
+        })
     }
 }

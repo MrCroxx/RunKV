@@ -66,6 +66,8 @@ pub struct RudderServiceConfig {
 #[cfg(test)]
 mod tests {
 
+    use test_log::test;
+
     use super::*;
 
     #[test]

@@ -37,6 +37,8 @@ pub struct VersionManagerCore {
     /// If the compaction strategy is `NonOverlap`, the sstable ids of the level are guaranteed
     /// sorted in ASC order.
     levels: Vec<Vec<u64>>,
+    /// SSTable data files size of each level.
+    levels_data_size: Vec<usize>,
     /// List of history version diffs. Used for syncing with other nodes.
     ///
     /// TODO: Restore diff from `MetaStore`.
@@ -52,6 +54,7 @@ impl VersionManagerCore {
         assert_eq!(options.levels.len(), options.levels_options.len());
         Self {
             level_options: options.levels_options,
+            levels_data_size: vec![0; options.levels.len()],
             levels: options.levels,
             diffs: VecDeque::default(),
             sstable_store: options.sstable_store,
@@ -61,6 +64,10 @@ impl VersionManagerCore {
 
     fn levels(&self) -> usize {
         self.levels.len()
+    }
+
+    fn level_data_size(&self, level_idx: usize) -> usize {
+        self.levels_data_size[level_idx]
     }
 
     fn watermark(&self) -> u64 {
@@ -115,6 +122,7 @@ impl VersionManagerCore {
                         idx += 1;
                     }
                     self.levels[level].insert(idx, sstable_diff.id);
+                    self.levels_data_size[level] += sstable_diff.data_size as usize;
                     if compaction_strategy == LevelCompactionStrategy::NonOverlap {
                         // Check overlap.
                         if idx > 0 {
@@ -143,6 +151,7 @@ impl VersionManagerCore {
                         .position(|&sst_id| sst_id == sstable_diff.id)
                     {
                         self.levels[level].remove(idx);
+                        self.levels_data_size[level] -= sstable_diff.data_size as usize;
                     } else {
                         return Err(ManifestError::InvalidVersionDiff(format!(
                             "sst L{}-{} not exists",
@@ -156,8 +165,8 @@ impl VersionManagerCore {
 
         self.diffs.push_back(diff);
         if !sync {
-            // println!("updated levels: {:?}", self.levels);
             trace!("updated levels: {:?}", self.levels);
+            trace!("updated levels: {:#?}", self.levels_data_size);
         }
         Ok(())
     }
@@ -258,8 +267,6 @@ impl VersionManagerCore {
         levels: Range<usize>,
         key: &[u8],
     ) -> Result<Vec<Vec<u64>>> {
-        // println!("pick: {:?}", Bytes::copy_from_slice(key));
-        // println!("levels: {:?}", self.levels);
         let mut result = vec![vec![]; levels.end - levels.start];
         let level_start = levels.start;
         for level in levels {
@@ -270,7 +277,7 @@ impl VersionManagerCore {
                     ManifestError::InvalidVersionDiff(format!("invalid level idx: {}", level))
                 })?
                 .compaction_strategy;
-            // println!("{:?} level", compaction_strategy);
+
             for sst_id in &self.levels[level] {
                 let sst = self.sstable_store.sstable(*sst_id).await?;
                 if sst.may_contain_key(key) && sst.is_overlap_with_user_key_range(key..=key) {
@@ -332,6 +339,10 @@ impl VersionManager {
 
     pub async fn levels(&self) -> usize {
         self.inner.read().await.levels()
+    }
+
+    pub async fn level_data_size(&self, level_idx: usize) -> usize {
+        self.inner.read().await.level_data_size(level_idx)
     }
 
     pub async fn watermark(&self) -> u64 {
@@ -445,6 +456,7 @@ mod tests {
     use bytes::Bytes;
     use itertools::Itertools;
     use runkv_proto::manifest::SsTableDiff;
+    use test_log::test;
 
     use super::*;
     use crate::lsm_tree::components::{
@@ -454,7 +466,7 @@ mod tests {
     use crate::utils::full_key;
     use crate::MemObjectStore;
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_update_squash_version_diffs() {
         let sstable_store = build_sstable_store_for_test();
         let mut version_manager = build_version_manager_for_test(sstable_store.clone());
@@ -475,6 +487,7 @@ mod tests {
                     id: 8,
                     level: 1,
                     op: SsTableOp::Insert.into(),
+                    data_size: 0,
                 }],
             },
             VersionDiff {
@@ -483,6 +496,7 @@ mod tests {
                     id: 9,
                     level: 2,
                     op: SsTableOp::Insert.into(),
+                    data_size: 0,
                 }],
             },
         ];
@@ -511,6 +525,7 @@ mod tests {
                     id: 2,
                     level: 1,
                     op: SsTableOp::Delete.into(),
+                    data_size: 0,
                 }],
             },
             VersionDiff {
@@ -519,6 +534,7 @@ mod tests {
                     id: 3,
                     level: 2,
                     op: SsTableOp::Delete.into(),
+                    data_size: 0,
                 }],
             },
         ];
@@ -562,6 +578,7 @@ mod tests {
                         id: 10,
                         level: 1,
                         op: SsTableOp::Insert.into(),
+                        data_size: 0,
                     }],
                 },
                 false
@@ -593,6 +610,7 @@ mod tests {
                             id: 4,
                             level: 1,
                             op: SsTableOp::Insert.into(),
+                            data_size: 0,
                         }],
                     },
                     false
@@ -604,7 +622,7 @@ mod tests {
         )
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_pick_overlap_ssts() {
         let sstable_store = build_sstable_store_for_test();
         let mut version_manager = build_version_manager_for_test(sstable_store.clone());
@@ -633,7 +651,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_pick_overlap_ssts_by_key() {
         let sstable_store = build_sstable_store_for_test();
         let mut version_manager = build_version_manager_for_test(sstable_store.clone());
@@ -698,7 +716,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_verify_non_overlap() {
         let sstable_store = build_sstable_store_for_test();
         let mut version_manager = build_version_manager_for_test(sstable_store.clone());
@@ -783,6 +801,7 @@ mod tests {
                             last_key,
                         }],
                         bloom_filter_bytes: vec![],
+                        data_size: 0,
                     }),
                 ),
                 Bytes::default(),

@@ -144,6 +144,7 @@ pub type SstableStoreRef = Arc<SstableStore>;
 mod tests {
 
     use runkv_common::coding::CompressionAlgorithm;
+    use test_log::test;
 
     use super::*;
     use crate::components::{SstableBuilder, SstableBuilderOptions};
@@ -166,7 +167,7 @@ mod tests {
         builder.build().unwrap()
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_sstable_store() {
         let object_store = Arc::new(MemObjectStore::default());
         let block_cache = BlockCache::new(65536);

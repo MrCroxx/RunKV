@@ -312,13 +312,16 @@ impl BlockBuilder {
 
 #[cfg(test)]
 mod tests {
+
     use std::sync::Arc;
+
+    use test_log::test;
 
     use super::*;
     use crate::lsm_tree::iterator::{BlockIterator, Iterator, Seek};
     use crate::lsm_tree::utils::full_key;
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_block_enc_dec() {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
@@ -354,7 +357,7 @@ mod tests {
         assert!(!bi.is_valid());
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_compressed_block_enc_dec() {
         let options = BlockBuilderOptions {
             compression_algorithm: CompressionAlgorithm::Lz4,
@@ -393,7 +396,7 @@ mod tests {
         assert!(!bi.is_valid());
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_asc() {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);

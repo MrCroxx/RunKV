@@ -45,13 +45,15 @@ impl ObjectMetaStore {
 
 #[cfg(test)]
 mod tests {
+
     use std::sync::Arc;
 
     use runkv_storage::MemObjectStore;
+    use test_log::test;
 
     use super::*;
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_crud() {
         let object_store = Arc::new(MemObjectStore::default());
         let store = ObjectMetaStore::new(object_store, "meta-test".to_string());

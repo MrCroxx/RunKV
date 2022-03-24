@@ -183,6 +183,7 @@ impl KeyComparator for FullKeyComparator {
 #[cfg(test)]
 mod tests {
     use bytes::BytesMut;
+    use test_log::test;
 
     use super::*;
 

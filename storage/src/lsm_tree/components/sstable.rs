@@ -77,6 +77,10 @@ impl Sstable {
         self.id
     }
 
+    pub fn data_size(&self) -> usize {
+        self.meta.data_size
+    }
+
     pub fn first_key(&self) -> &Bytes {
         &self.meta.block_metas.first().as_ref().unwrap().first_key
     }
@@ -122,8 +126,12 @@ impl Sstable {
 /// [`SstableMeta`] contains sstable metadata.
 #[derive(PartialEq, Eq, Debug)]
 pub struct SstableMeta {
+    /// Metadata of each blocks.
     pub block_metas: Vec<BlockMeta>,
+    /// Bloom filter bytes data.
     pub bloom_filter_bytes: Vec<u8>,
+    /// Data file size.
+    pub data_size: usize,
 }
 
 impl SstableMeta {
@@ -131,7 +139,7 @@ impl SstableMeta {
     ///
     /// ```plain
     /// | checksum (4B) | N (4B) | block meta 0 | ... | block meta N-1 |
-    /// | bloom filter len (4B) | bloom filter |
+    /// | bloom filter len (4B) | bloom filter | data size (8B) |
     /// ```
     pub fn encode(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(DEFAULT_SSTABLE_META_SIZE);
@@ -142,6 +150,7 @@ impl SstableMeta {
         }
         buf.put_u32_le(self.bloom_filter_bytes.len() as u32);
         buf.put_slice(&self.bloom_filter_bytes);
+        buf.put_u64_le(self.data_size as u64);
         let checksum = crc32sum(&buf[4..]);
         (&mut buf[..4]).put_u32_le(checksum);
         buf.freeze()
@@ -157,9 +166,12 @@ impl SstableMeta {
         }
         let bloom_filter_len = buf.get_u32_le() as usize;
         let bloom_filter_bytes = buf.copy_to_bytes(bloom_filter_len).to_vec();
+        let data_size = buf.get_u64_le() as usize;
+        debug_assert!(buf.is_empty());
         Self {
             block_metas,
             bloom_filter_bytes,
+            data_size,
         }
     }
 
@@ -326,6 +338,7 @@ impl SstableBuilder {
             } else {
                 vec![]
             },
+            data_size: self.buf.len(),
         };
 
         Ok((meta, self.buf.freeze()))
@@ -362,11 +375,13 @@ mod tests {
 
     use std::sync::Arc;
 
+    use test_log::test;
+
     use super::*;
     use crate::components::Block;
     use crate::iterator::{BlockIterator, Iterator, Seek};
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_sstable_enc_dec() {
         let options = SstableBuilderOptions {
             capacity: 1024,
@@ -416,7 +431,7 @@ mod tests {
         assert!(!bi.is_valid());
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_compressed_sstable_enc_dec() {
         let options = SstableBuilderOptions {
             capacity: 1024,

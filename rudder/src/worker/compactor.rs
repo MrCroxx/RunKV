@@ -92,7 +92,6 @@ impl Worker for Compactor {
             match self.run_inner().await {
                 Ok(_) => {}
                 Err(e) => {
-                    println!("error occur when compactor running: {}", e);
                     warn!("error occur when compactor running: {}", e);
                 }
             }
@@ -148,7 +147,6 @@ impl Compactor {
                         async move {
                             if let Err(e) = trigger(ctx).await {
                                 error!("trigger compaction l0 error: {}", e);
-                                println!("trigger compaction l0 error: {}", e);
                             }
                         }
                     );
@@ -190,7 +188,6 @@ async fn trigger(ctx: CompactionContext) -> Result<()> {
                 .await?
             {
                 warn!("some sstable has been pinned, skip compaction");
-                println!("some sstable has been pinned, skip compaction");
                 return Ok(());
             }
 
@@ -198,7 +195,6 @@ async fn trigger(ctx: CompactionContext) -> Result<()> {
 
             if let Err(e) = sub_ctx.meta_store.unpin_sstables(&old_ssts.to_vec()).await {
                 error!("failed to unpin sstables, will be resolved by timeout");
-                println!("failed to unpin sstables, will be resolved by timeout");
                 return Err(e);
             }
             Ok(())
@@ -257,16 +253,22 @@ async fn sub_compaction(
         return Ok(());
     }
 
-    let new_ssts = rsp.sst_ids;
+    let new_sst_infos = rsp.new_sst_infos;
+    let old_sst_sizes = rsp
+        .old_sst_infos
+        .iter()
+        .map(|sst_info| (sst_info.id, sst_info.data_size))
+        .collect::<BTreeMap<u64, u64>>();
 
     let mut sstable_diffs =
-        Vec::with_capacity(old_ssts.first.len() + old_ssts.second.len() + new_ssts.len());
+        Vec::with_capacity(old_ssts.first.len() + old_ssts.second.len() + new_sst_infos.len());
 
     for sst_id in old_ssts.first.iter() {
         sstable_diffs.push(SsTableDiff {
             id: *sst_id,
             level: ctx.level,
             op: SsTableOp::Delete.into(),
+            data_size: *old_sst_sizes.get(sst_id).expect("old sst size not found"),
         });
     }
     for sst_id in old_ssts.second.iter() {
@@ -274,13 +276,15 @@ async fn sub_compaction(
             id: *sst_id,
             level: ctx.level + 1,
             op: SsTableOp::Delete.into(),
+            data_size: *old_sst_sizes.get(sst_id).expect("old sst size not found"),
         });
     }
-    for sst_id in new_ssts.iter() {
+    for sst_info in new_sst_infos.iter() {
         sstable_diffs.push(SsTableDiff {
-            id: *sst_id,
+            id: sst_info.id,
             level: ctx.level + 1,
             op: SsTableOp::Insert.into(),
+            data_size: sst_info.data_size,
         });
     }
 
@@ -310,7 +314,7 @@ async fn pick_ssts(
                 .version_manager
                 .pick_overlap_ssts(
                     ctx.level as usize..ctx.level as usize + 1,
-                    &range.start_key..=&range.end_key,
+                    &range.start_key[..]..=&range.end_key[..],
                 )
                 .await?;
             assert_eq!(base_range_ssts.len(), 1);

@@ -11,9 +11,15 @@ message SSTableDiff {
   uint64 id = 1;
   uint64 level = 2;
   SSTableOP op = 3;
+  uint64 data_size = 4;
 }
 
 message VersionDiff {
   uint64 id = 1;
   repeated SSTableDiff sstable_diffs = 2;
+}
+
+message SSTableInfo {
+  uint64 id = 1;
+  uint64 data_size = 2;
 }

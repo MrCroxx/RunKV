@@ -5,6 +5,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use runkv_common::coding::CompressionAlgorithm;
 use runkv_common::Worker;
+use runkv_proto::manifest::SsTableInfo;
 use runkv_proto::rudder::rudder_service_client::RudderServiceClient;
 use runkv_proto::rudder::InsertL0Request;
 use runkv_storage::components::{
@@ -52,7 +53,6 @@ impl Worker for SstableUploader {
             match self.run_inner().await {
                 Ok(_) => {}
                 Err(e) => {
-                    println!("error occur when uploader running: {}", e);
                     warn!("error occur when uploader running: {}", e);
                 }
             }
@@ -75,7 +75,7 @@ impl SstableUploader {
 
     async fn run_inner(&mut self) -> Result<()> {
         if let Some(memtable) = self.lsm_tree.get_oldest_immutable_memtable() {
-            let mut sst_ids =
+            let mut sst_infos =
                 Vec::with_capacity(memtable.mem_size() / self.options.sstable_capacity + 1);
             if !memtable.is_empty() {
                 let sstable_builder_options = SstableBuilderOptions {
@@ -105,8 +105,8 @@ impl SstableUploader {
                             >= self.options.sstable_capacity
                     {
                         let builder = sstable_builder.take().unwrap();
-                        self.build_and_upload_sst(sst_id, builder).await?;
-                        sst_ids.push(sst_id);
+                        let sst_info = self.build_and_upload_sst(sst_id, builder).await?;
+                        sst_infos.push(sst_info);
                         continue;
                     }
 
@@ -120,10 +120,10 @@ impl SstableUploader {
                     iter.next();
                 }
                 if let Some(builder) = sstable_builder.take() {
-                    self.build_and_upload_sst(sst_id, builder).await?;
-                    sst_ids.push(sst_id);
+                    let sst_info = self.build_and_upload_sst(sst_id, builder).await?;
+                    sst_infos.push(sst_info);
                 }
-                self.notify_update_version(sst_ids).await?;
+                self.notify_update_version(sst_infos).await?;
             }
 
             // TODO: After local version manager awared the diff, can drop immutable table.
@@ -134,9 +134,10 @@ impl SstableUploader {
         Ok(())
     }
 
-    async fn build_and_upload_sst(&self, id: u64, builder: SstableBuilder) -> Result<()> {
+    async fn build_and_upload_sst(&self, id: u64, builder: SstableBuilder) -> Result<SsTableInfo> {
         // TODO: Async upload.
         let (meta, data) = builder.build()?;
+        let data_size = meta.data_size as u64;
         let sst = Sstable::new(id, Arc::new(meta));
 
         self.sstable_store
@@ -144,14 +145,14 @@ impl SstableUploader {
             .await?;
         // println!("sst {} uploaded", id);
         debug!("sst {} uploaded", id);
-        Ok(())
+        Ok(SsTableInfo { id, data_size })
     }
 
-    async fn notify_update_version(&mut self, sst_ids: Vec<u64>) -> Result<()> {
+    async fn notify_update_version(&mut self, sst_infos: Vec<SsTableInfo>) -> Result<()> {
         // println!("notify update version");
         let request = Request::new(InsertL0Request {
             node_id: self.node_id,
-            sst_ids,
+            sst_infos,
             next_version_id: self.version_manager.latest_version_id().await + 1,
         });
         let rsp = self.rudder_client.insert_l0(request).await?.into_inner();
