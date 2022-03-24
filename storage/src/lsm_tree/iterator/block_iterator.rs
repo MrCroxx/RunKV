@@ -6,6 +6,7 @@ use bytes::{Bytes, BytesMut};
 
 use super::{Iterator, Seek};
 use crate::components::{Block, KeyPrefix};
+use crate::utils::compare_full_key;
 use crate::Result;
 
 /// [`BlockIterator`] is used to read kv pairs in a block.
@@ -70,14 +71,14 @@ impl BlockIterator {
 
     /// Move forward until reach the first that equals or larger than the given `key`.
     fn next_until_key(&mut self, key: &[u8]) {
-        while self.is_valid() && (&self.key[..]).cmp(key) == Ordering::Less {
+        while self.is_valid() && compare_full_key(&self.key[..], key) == Ordering::Less {
             self.next_inner();
         }
     }
 
     /// Move backward until reach the first key that equals or smaller than the given `key`.
     fn prev_until_key(&mut self, key: &[u8]) {
-        while self.is_valid() && (&self.key[..]).cmp(key) == Ordering::Greater {
+        while self.is_valid() && compare_full_key(&self.key[..], key) == Ordering::Greater {
             self.prev_inner();
         }
     }
@@ -116,7 +117,7 @@ impl BlockIterator {
         self.block.search_restart_point_by(|probe| {
             let prefix = self.decode_prefix_at(*probe as usize);
             let probe_key = self.block.slice(prefix.diff_key_range());
-            (&probe_key[..]).cmp(key)
+            compare_full_key(&probe_key[..], key)
         })
     }
 

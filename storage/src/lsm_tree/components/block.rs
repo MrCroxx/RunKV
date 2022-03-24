@@ -10,6 +10,7 @@ use crate::lsm_tree::utils::{crc32check, crc32sum, key_diff, var_u32_len, BufExt
 use crate::lsm_tree::{
     DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, TEST_DEFAULT_RESTART_INTERVAL,
 };
+use crate::utils::compare_full_key;
 use crate::{Error, Result};
 
 pub struct Block {
@@ -230,13 +231,13 @@ impl BlockBuilder {
         if self.entry_count > 0 {
             // TODO: Remove me.
             // if self.last_key >= key {
-            //     println!(
-            //         "last key: {:?}\n     key: {:?}",
-            //         Bytes::from(self.last_key.clone()),
-            //         Bytes::copy_from_slice(key)
-            //     );
+            // println!(
+            //     "last key: {:?}\n     key: {:?}",
+            //     Bytes::from(self.last_key.clone()),
+            //     Bytes::copy_from_slice(key)
+            // );
             // }
-            assert!(self.last_key < key);
+            debug_assert_eq!(compare_full_key(&self.last_key, key), Ordering::Less);
         }
         // Update restart point if needed and calculate diff key.
         let diff_key = if self.entry_count % self.restart_count == 0 {
@@ -387,6 +388,42 @@ mod tests {
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k4", 4)[..], bi.key());
         assert_eq!(b"v04", bi.value());
+
+        bi.next().await.unwrap();
+        assert!(!bi.is_valid());
+    }
+
+    #[tokio::test]
+    async fn test_asc() {
+        let options = BlockBuilderOptions::default();
+        let mut builder = BlockBuilder::new(options);
+        builder.add(&full_key(b"k1", u64::MAX / 2), b"v11");
+        builder.add(&full_key(b"k1", u64::MAX / 2 - 1), b"v12");
+        builder.add(&full_key(b"k2", u64::MAX / 2), b"v21");
+        builder.add(&full_key(b"k20000", u64::MAX), b"v22");
+        let buf = builder.build();
+        let block = Arc::new(Block::decode(buf).unwrap());
+        let mut bi = BlockIterator::new(block);
+
+        bi.seek(Seek::First).await.unwrap();
+        assert!(bi.is_valid());
+        assert_eq!(&full_key(b"k1", u64::MAX / 2)[..], bi.key());
+        assert_eq!(b"v11", bi.value());
+
+        bi.next().await.unwrap();
+        assert!(bi.is_valid());
+        assert_eq!(&full_key(b"k1", u64::MAX / 2 - 1)[..], bi.key());
+        assert_eq!(b"v12", bi.value());
+
+        bi.next().await.unwrap();
+        assert!(bi.is_valid());
+        assert_eq!(&full_key(b"k2", u64::MAX / 2)[..], bi.key());
+        assert_eq!(b"v21", bi.value());
+
+        bi.next().await.unwrap();
+        assert!(bi.is_valid());
+        assert_eq!(&full_key(b"k20000", u64::MAX)[..], bi.key());
+        assert_eq!(b"v22", bi.value());
 
         bi.next().await.unwrap();
         assert!(!bi.is_valid());

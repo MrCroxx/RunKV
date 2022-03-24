@@ -18,6 +18,8 @@ pub struct LevelOptions {
 
 #[derive(Deserialize, Clone, Default, Debug)]
 pub struct LsmTreeConfig {
+    pub l1_capacity: String,
+    pub level_multiplier: usize,
     pub trigger_l0_compaction_ssts: usize,
     pub trigger_l0_compaction_interval: String,
     pub trigger_compaction_interval: String,

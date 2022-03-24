@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use async_trait::async_trait;
 
 use super::{BoxedIterator, Iterator, Seek};
+use crate::utils::compare_full_key;
 use crate::Result;
 
 pub struct ConcatIterator {
@@ -70,7 +71,7 @@ impl ConcatIterator {
 
     /// Move backward until reach the first key that equals or smaller than the given `key`.
     async fn prev_until_key(&mut self, key: &[u8]) -> Result<()> {
-        while self.is_valid() && self.key().cmp(key) == Ordering::Greater {
+        while self.is_valid() && compare_full_key(self.key(), key) == Ordering::Greater {
             self.prev_inner().await?;
         }
         Ok(())
@@ -108,7 +109,7 @@ impl ConcatIterator {
             let iter = &mut self.iters[mid];
             iter.seek(Seek::RandomForward(key)).await?;
             let cmp = if iter.is_valid() {
-                iter.key().cmp(key)
+                compare_full_key(iter.key(), key)
             } else {
                 Less
             };

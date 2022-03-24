@@ -2,14 +2,16 @@ use async_trait::async_trait;
 use bytes::Bytes;
 
 use super::{Iterator, Seek};
-use crate::components::{Comparator, Memtable};
+use crate::components::Memtable;
 use crate::lsm_tree::utils::{full_key, timestamp, user_key, value, IterRef, Skiplist};
+use crate::utils::FullKeyComparator;
 use crate::Result;
+
 pub struct MemtableIterator {
     /// Inner skiiplist iterator.
     ///
     /// Note: `iter` is always valid when [`MemtableIterator`] is valid.
-    iter: IterRef<Skiplist<Comparator>, Comparator>,
+    iter: IterRef<Skiplist<FullKeyComparator>, FullKeyComparator>,
     // TODO: Should replaced with a `Snapshot` handler with epoch inside to pin the sst?
     /// Timestamp for snapshot read.
     timestamp: u64,

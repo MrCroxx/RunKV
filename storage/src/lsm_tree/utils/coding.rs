@@ -2,6 +2,8 @@ use std::{cmp, ptr};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
+use super::KeyComparator;
+
 const MASK: u32 = 128;
 
 pub fn var_u32_len(n: u32) -> usize {
@@ -153,6 +155,28 @@ pub fn value(raw: &[u8]) -> Option<&[u8]> {
         0 => None,
         1 => Some(&raw[1..]),
         _ => unreachable!(),
+    }
+}
+
+#[inline]
+pub fn compare_full_key(lhs: &[u8], rhs: &[u8]) -> std::cmp::Ordering {
+    let lkey = &lhs[..lhs.len() - 8];
+    let rkey = &rhs[..rhs.len() - 8];
+    let lts = &lhs[lhs.len() - 8..];
+    let rts = &rhs[rhs.len() - 8..];
+    lkey.cmp(rkey).then_with(|| lts.cmp(rts))
+}
+
+#[derive(Clone)]
+pub struct FullKeyComparator;
+
+impl KeyComparator for FullKeyComparator {
+    fn compare_key(&self, lhs: &[u8], rhs: &[u8]) -> std::cmp::Ordering {
+        compare_full_key(lhs, rhs)
+    }
+
+    fn same_key(&self, lhs: &[u8], rhs: &[u8]) -> bool {
+        lhs.len() == rhs.len() && lhs[..lhs.len() - 8] == rhs[..rhs.len() - 8]
     }
 }
 

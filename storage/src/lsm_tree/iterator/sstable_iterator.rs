@@ -4,6 +4,7 @@ use async_trait::async_trait;
 
 use super::{BlockIterator, Iterator, Seek};
 use crate::components::{CachePolicy, Sstable, SstableStoreRef};
+use crate::utils::compare_full_key;
 use crate::Result;
 
 pub struct SstableIterator {
@@ -82,7 +83,7 @@ impl SstableIterator {
 
     /// Move backward until the position that the given `key` can be inserted in DESC order or EOF.
     async fn prev_until_key(&mut self, key: &[u8]) -> Result<()> {
-        while self.is_valid() && self.key().cmp(key) == Ordering::Greater {
+        while self.is_valid() && compare_full_key(self.key(), key) == Ordering::Greater {
             self.prev_inner().await?;
         }
         Ok(())
@@ -102,7 +103,7 @@ impl SstableIterator {
             let mut iter = BlockIterator::new(block);
             iter.seek(Seek::RandomForward(key)).await?;
             let cmp = if iter.is_valid() {
-                iter.key().cmp(key)
+                compare_full_key(iter.key(), key)
             } else {
                 Less
             };
