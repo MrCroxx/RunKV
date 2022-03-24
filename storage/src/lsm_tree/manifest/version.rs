@@ -10,6 +10,7 @@ use tracing::trace;
 
 use super::ManifestError;
 use crate::components::SstableStoreRef;
+use crate::utils::user_key;
 use crate::Result;
 
 pub struct VersionManagerOptions {
@@ -238,7 +239,7 @@ impl VersionManagerCore {
                     result[level - level_start].push(*sst_id);
                 }
                 if compaction_strategy == LevelCompactionStrategy::NonOverlap
-                    && sst.first_key() > range.end()
+                    && &user_key(sst.first_key()) > range.end()
                 {
                     break;
                 }
@@ -276,7 +277,7 @@ impl VersionManagerCore {
                     result[level - level_start].push(*sst_id);
                 }
                 if compaction_strategy == LevelCompactionStrategy::NonOverlap
-                    && sst.first_key() > key
+                    && user_key(sst.first_key()) > key
                 {
                     break;
                 }
@@ -291,7 +292,7 @@ impl VersionManagerCore {
         sst_id: u64,
     ) -> Result<Vec<Vec<u64>>> {
         let sst = self.sstable_store.sstable(sst_id).await?;
-        self.pick_overlap_ssts(levels, sst.first_key()..=sst.last_key())
+        self.pick_overlap_ssts(levels, user_key(sst.first_key())..=user_key(sst.last_key()))
             .await
     }
 
@@ -625,7 +626,7 @@ mod tests {
         ingest_meta(&sstable_store, 7, fkey(b"eee"), fkey(b"fff")).await;
         assert_eq!(
             version_manager
-                .pick_overlap_ssts(0..7, &fkey(b"eee")..=&fkey(b"fff"))
+                .pick_overlap_ssts(0..7, &fkey(b"eee")[..]..=&fkey(b"fff")[..])
                 .await
                 .unwrap(),
             vec![vec![1, 2], vec![4], vec![], vec![], vec![7], vec![], vec![]]

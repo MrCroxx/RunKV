@@ -13,6 +13,7 @@ pub use merge_iterator::*;
 pub use sstable_iterator::*;
 pub use user_key_iterator::*;
 
+use crate::utils::compare_full_key;
 use crate::Result;
 
 pub enum Seek<'s> {
@@ -126,6 +127,7 @@ impl PartialOrd for BoxedIterator {
 
 impl Ord for BoxedIterator {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.key().cmp(other.key())
+        // Should not be used on `UserKeyIterator`
+        compare_full_key(self.key(), other.key())
     }
 }

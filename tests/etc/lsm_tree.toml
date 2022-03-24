@@ -1,4 +1,7 @@
 [lsm_tree]
+l1_capacity = "1 MiB"
+level_multiplier = 10
+
 trigger_l0_compaction_ssts = 4
 trigger_l0_compaction_interval = "500 ms"
 trigger_compaction_interval = "5 s"

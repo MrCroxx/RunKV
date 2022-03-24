@@ -1,30 +1,18 @@
 use bytes::Bytes;
 
-use crate::lsm_tree::utils::{full_key, raw_value, value, IterRef, KeyComparator, Skiplist};
-
-#[derive(Clone)]
-pub struct Comparator;
-
-impl KeyComparator for Comparator {
-    fn compare_key(&self, lhs: &[u8], rhs: &[u8]) -> std::cmp::Ordering {
-        lhs.cmp(rhs)
-    }
-
-    fn same_key(&self, lhs: &[u8], rhs: &[u8]) -> bool {
-        lhs.len() == rhs.len() && lhs[..lhs.len() - 8] == rhs[..rhs.len() - 8]
-    }
-}
+use crate::lsm_tree::utils::{full_key, raw_value, value, IterRef, Skiplist};
+use crate::utils::FullKeyComparator;
 
 #[derive(Clone)]
 pub struct Memtable {
-    inner: Skiplist<Comparator>,
+    inner: Skiplist<FullKeyComparator>,
     capacity: usize,
 }
 
 impl Memtable {
     pub fn new(capacity: usize) -> Self {
         Self {
-            inner: Skiplist::with_capacity(Comparator, capacity as u32),
+            inner: Skiplist::with_capacity(FullKeyComparator, capacity as u32),
             capacity,
         }
     }
@@ -52,7 +40,9 @@ impl Memtable {
         self.inner.mem_size() as usize
     }
 
-    pub(in crate::lsm_tree) fn iter(&self) -> IterRef<Skiplist<Comparator>, Comparator> {
+    pub(in crate::lsm_tree) fn iter(
+        &self,
+    ) -> IterRef<Skiplist<FullKeyComparator>, FullKeyComparator> {
         self.inner.iter()
     }
 
@@ -60,7 +50,7 @@ impl Memtable {
         self.inner.is_empty()
     }
 
-    pub fn unwrap(self) -> Skiplist<Comparator> {
+    pub fn unwrap(self) -> Skiplist<FullKeyComparator> {
         self.inner
     }
 }
