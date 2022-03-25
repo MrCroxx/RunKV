@@ -1,13 +1,9 @@
 use async_trait::async_trait;
 use itertools::Itertools;
 use runkv_proto::common::Endpoint as PbEndpoint;
-use runkv_proto::manifest::{SsTableDiff, SsTableOp, VersionDiff};
+use runkv_proto::manifest::{SstableDiff, SstableOp, VersionDiff};
 use runkv_proto::rudder::rudder_service_server::RudderService;
-use runkv_proto::rudder::{
-    heartbeat_request, heartbeat_response, ExhausterHeartbeatRequest, ExhausterHeartbeatResponse,
-    HeartbeatRequest, HeartbeatResponse, InsertL0Request, InsertL0Response, WheelHeartbeatRequest,
-    WheelHeartbeatResponse,
-};
+use runkv_proto::rudder::*;
 use runkv_storage::components::SstableStoreRef;
 use runkv_storage::manifest::VersionManager;
 use tonic::{Request, Response, Status};
@@ -88,10 +84,10 @@ impl RudderService for Rudder {
             sstable_diffs: req
                 .sst_infos
                 .iter()
-                .map(|sst_info| SsTableDiff {
+                .map(|sst_info| SstableDiff {
                     id: sst_info.id,
                     level: 0,
-                    op: SsTableOp::Insert.into(),
+                    op: SstableOp::Insert.into(),
                     data_size: sst_info.data_size,
                 })
                 .collect_vec(),
@@ -106,6 +102,21 @@ impl RudderService for Rudder {
             .await
             .map_err(internal)?;
         let rsp = InsertL0Response { version_diffs };
+        Ok(Response::new(rsp))
+    }
+
+    async fn tso(
+        &self,
+        _request: Request<TsoRequest>,
+    ) -> core::result::Result<Response<TsoResponse>, Status> {
+        let current_ts = self
+            .meta_store
+            .timestamp_fetch_add(1)
+            .await
+            .map_err(internal)?;
+        let rsp = TsoResponse {
+            timestamp: current_ts + 1,
+        };
         Ok(Response::new(rsp))
     }
 }

@@ -5,7 +5,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use runkv_common::coding::CompressionAlgorithm;
 use runkv_common::Worker;
-use runkv_proto::manifest::SsTableInfo;
+use runkv_proto::manifest::SstableInfo;
 use runkv_proto::rudder::rudder_service_client::RudderServiceClient;
 use runkv_proto::rudder::InsertL0Request;
 use runkv_storage::components::{
@@ -134,7 +134,7 @@ impl SstableUploader {
         Ok(())
     }
 
-    async fn build_and_upload_sst(&self, id: u64, builder: SstableBuilder) -> Result<SsTableInfo> {
+    async fn build_and_upload_sst(&self, id: u64, builder: SstableBuilder) -> Result<SstableInfo> {
         // TODO: Async upload.
         let (meta, data) = builder.build()?;
         let data_size = meta.data_size as u64;
@@ -145,10 +145,10 @@ impl SstableUploader {
             .await?;
         // println!("sst {} uploaded", id);
         debug!("sst {} uploaded", id);
-        Ok(SsTableInfo { id, data_size })
+        Ok(SstableInfo { id, data_size })
     }
 
-    async fn notify_update_version(&mut self, sst_infos: Vec<SsTableInfo>) -> Result<()> {
+    async fn notify_update_version(&mut self, sst_infos: Vec<SstableInfo>) -> Result<()> {
         // println!("notify update version");
         let request = Request::new(InsertL0Request {
             node_id: self.node_id,

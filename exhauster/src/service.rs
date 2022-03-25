@@ -7,7 +7,7 @@ use itertools::Itertools;
 use runkv_common::coding::CompressionAlgorithm;
 use runkv_proto::exhauster::exhauster_service_server::ExhausterService;
 use runkv_proto::exhauster::{CompactionRequest, CompactionResponse};
-use runkv_proto::manifest::SsTableInfo;
+use runkv_proto::manifest::SstableInfo;
 use runkv_storage::components::{
     CachePolicy, Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef,
 };
@@ -61,7 +61,7 @@ impl ExhausterService for Exhauster {
                 .sstable(*sst_id)
                 .await
                 .map_err(internal)?;
-            old_sst_infos.push(SsTableInfo {
+            old_sst_infos.push(SstableInfo {
                 id: *sst_id,
                 data_size: sst.data_size() as u64,
             });
@@ -149,7 +149,7 @@ impl Exhauster {
         &self,
         sst_id: u64,
         builder: SstableBuilder,
-    ) -> Result<SsTableInfo> {
+    ) -> Result<SstableInfo> {
         // TODO: Async upload.
         let (meta, data) = builder.build()?;
         let data_size = meta.data_size as u64;
@@ -158,7 +158,7 @@ impl Exhauster {
             .put(&sst, data, CachePolicy::Fill)
             .await?;
         debug!("sst {} uploaded", sst_id);
-        Ok(SsTableInfo {
+        Ok(SstableInfo {
             id: sst_id,
             data_size,
         })

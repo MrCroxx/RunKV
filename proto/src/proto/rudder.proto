@@ -39,7 +39,7 @@ message HeartbeatResponse {
 
 message InsertL0Request {
   uint64 node_id = 1;
-  repeated manifest.SSTableInfo sst_infos = 2;
+  repeated manifest.SstableInfo sst_infos = 2;
   uint64 next_version_id = 3;
 }
 
@@ -47,7 +47,14 @@ message InsertL0Response {
   repeated manifest.VersionDiff version_diffs = 1;
 }
 
+message TsoRequest {}
+
+message TsoResponse {
+  uint32 timestamp = 1;
+}
+
 service RudderService {
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
   rpc InsertL0(InsertL0Request) returns (InsertL0Response);
+  rpc Tso(TsoRequest) returns (TsoResponse);
 }

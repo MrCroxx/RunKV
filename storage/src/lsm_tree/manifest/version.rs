@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use runkv_common::coding::CompressionAlgorithm;
 use runkv_common::config::{LevelCompactionStrategy, LevelOptions};
-use runkv_proto::manifest::{SsTableOp, VersionDiff};
+use runkv_proto::manifest::{SstableOp, VersionDiff};
 use tokio::sync::RwLock;
 use tracing::trace;
 
@@ -107,7 +107,7 @@ impl VersionManagerCore {
                 })?
                 .compaction_strategy;
             match sstable_diff.op() {
-                SsTableOp::Insert => {
+                SstableOp::Insert => {
                     // TODO: Should check duplicated sst id globally.
 
                     // TODO: Preform async binary search.
@@ -145,7 +145,7 @@ impl VersionManagerCore {
                         }
                     }
                 }
-                SsTableOp::Delete => {
+                SstableOp::Delete => {
                     if let Some(idx) = self.levels[level]
                         .iter()
                         .position(|&sst_id| sst_id == sstable_diff.id)
@@ -455,7 +455,7 @@ mod tests {
 
     use bytes::Bytes;
     use itertools::Itertools;
-    use runkv_proto::manifest::SsTableDiff;
+    use runkv_proto::manifest::SstableDiff;
     use test_log::test;
 
     use super::*;
@@ -483,19 +483,19 @@ mod tests {
         let insert_diffs = vec![
             VersionDiff {
                 id: 1,
-                sstable_diffs: vec![SsTableDiff {
+                sstable_diffs: vec![SstableDiff {
                     id: 8,
                     level: 1,
-                    op: SsTableOp::Insert.into(),
+                    op: SstableOp::Insert.into(),
                     data_size: 0,
                 }],
             },
             VersionDiff {
                 id: 2,
-                sstable_diffs: vec![SsTableDiff {
+                sstable_diffs: vec![SstableDiff {
                     id: 9,
                     level: 2,
-                    op: SsTableOp::Insert.into(),
+                    op: SstableOp::Insert.into(),
                     data_size: 0,
                 }],
             },
@@ -521,19 +521,19 @@ mod tests {
         let delete_diffs = vec![
             VersionDiff {
                 id: 3,
-                sstable_diffs: vec![SsTableDiff {
+                sstable_diffs: vec![SstableDiff {
                     id: 2,
                     level: 1,
-                    op: SsTableOp::Delete.into(),
+                    op: SstableOp::Delete.into(),
                     data_size: 0,
                 }],
             },
             VersionDiff {
                 id: 4,
-                sstable_diffs: vec![SsTableDiff {
+                sstable_diffs: vec![SstableDiff {
                     id: 3,
                     level: 2,
-                    op: SsTableOp::Delete.into(),
+                    op: SstableOp::Delete.into(),
                     data_size: 0,
                 }],
             },
@@ -574,10 +574,10 @@ mod tests {
             .update(
                 VersionDiff {
                     id: 10,
-                    sstable_diffs: vec![SsTableDiff {
+                    sstable_diffs: vec![SstableDiff {
                         id: 10,
                         level: 1,
-                        op: SsTableOp::Insert.into(),
+                        op: SstableOp::Insert.into(),
                         data_size: 0,
                     }],
                 },
@@ -606,10 +606,10 @@ mod tests {
                 .update(
                     VersionDiff {
                         id: 1,
-                        sstable_diffs: vec![SsTableDiff {
+                        sstable_diffs: vec![SstableDiff {
                             id: 4,
                             level: 1,
-                            op: SsTableOp::Insert.into(),
+                            op: SstableOp::Insert.into(),
                             data_size: 0,
                         }],
                     },

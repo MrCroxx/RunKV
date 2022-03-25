@@ -2,24 +2,24 @@ syntax = "proto3";
 
 package manifest;
 
-enum SSTableOP {
+enum SstableOp {
   INSERT = 0;
   DELETE = 1;
 }
 
-message SSTableDiff {
+message SstableDiff {
   uint64 id = 1;
   uint64 level = 2;
-  SSTableOP op = 3;
+  SstableOp op = 3;
   uint64 data_size = 4;
 }
 
 message VersionDiff {
   uint64 id = 1;
-  repeated SSTableDiff sstable_diffs = 2;
+  repeated SstableDiff sstable_diffs = 2;
 }
 
-message SSTableInfo {
+message SstableInfo {
   uint64 id = 1;
   uint64 data_size = 2;
 }
