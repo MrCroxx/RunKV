@@ -1,3 +1,4 @@
+pub mod atomic;
 pub mod coding;
 pub mod config;
 
