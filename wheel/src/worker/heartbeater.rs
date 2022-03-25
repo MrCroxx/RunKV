@@ -14,11 +14,13 @@ use tracing::warn;
 
 use crate::error::Result;
 use crate::meta::MetaStoreRef;
+use crate::storage::transaction_manager::TransactionManagerRef;
 
 pub struct HeartbeaterOptions {
     pub node_id: u64,
     pub meta_store: MetaStoreRef,
     pub version_manager: VersionManager,
+    pub transaction_manager: TransactionManagerRef,
     pub client: RudderServiceClient<Channel>,
     pub heartbeat_interval: Duration,
     pub endpoint: Endpoint,
@@ -29,6 +31,7 @@ pub struct Heartbeater {
     options: HeartbeaterOptions,
     meta_store: MetaStoreRef,
     version_manager: VersionManager,
+    transaction_manager: TransactionManagerRef,
     client: RudderServiceClient<Channel>,
 }
 
@@ -50,6 +53,7 @@ impl Heartbeater {
         Self {
             version_manager: options.version_manager.clone(),
             meta_store: options.meta_store.clone(),
+            transaction_manager: options.transaction_manager.clone(),
             client: options.client.clone(),
             options,
         }
@@ -61,7 +65,7 @@ impl Heartbeater {
             endpoint: Some(self.options.endpoint.clone()),
             heartbeat_message: Some(heartbeat_request::HeartbeatMessage::WheelHeartbeat(
                 WheelHeartbeatRequest {
-                    watermark: self.version_manager.watermark().await,
+                    watermark: self.transaction_manager.watermark(),
                     next_version_id: self.version_manager.latest_version_id().await + 1,
                     key_ranges: self.meta_store.key_ranges().await?,
                 },

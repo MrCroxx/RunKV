@@ -1,3 +1,6 @@
+#![feature(let_chains)]
+#![feature(map_first_last)]
+
 pub mod config;
 pub mod error;
 pub mod meta;
@@ -19,6 +22,7 @@ use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions, S
 use runkv_storage::manifest::{VersionManager, VersionManagerOptions};
 use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
 use service::{Wheel, WheelOptions};
+use storage::transaction_manager::{TransactionManager, TransactionManagerRef};
 use tonic::transport::{Channel, Server};
 use tracing::info;
 use worker::heartbeater::{Heartbeater, HeartbeaterOptions};
@@ -60,7 +64,16 @@ pub async fn build_wheel_with_object_store(
 
     let version_manager = build_version_manager(config, sstable_store.clone())?;
 
-    let lsm_tree = build_lsm_tree(config, sstable_store.clone(), version_manager.clone())?;
+    let meta_store = build_meta_store()?;
+
+    let transaction_manager = build_transaction_manager();
+
+    let lsm_tree = build_lsm_tree(
+        config,
+        sstable_store.clone(),
+        version_manager.clone(),
+        transaction_manager.clone(),
+    )?;
 
     let rudder_client = RudderServiceClient::connect(format!(
         "http://{}:{}",
@@ -76,10 +89,13 @@ pub async fn build_wheel_with_object_store(
         rudder_client.clone(),
     )?;
 
-    let meta_store = build_meta_store()?;
-
-    let version_syncer =
-        build_version_syncer(config, version_manager, meta_store.clone(), rudder_client)?;
+    let version_syncer = build_version_syncer(
+        config,
+        version_manager,
+        meta_store.clone(),
+        rudder_client,
+        transaction_manager.clone(),
+    )?;
 
     let options = WheelOptions {
         lsm_tree: lsm_tree.clone(),
@@ -152,6 +168,7 @@ fn build_lsm_tree(
     config: &WheelConfig,
     sstable_store: SstableStoreRef,
     version_manager: VersionManager,
+    transaction_manager: TransactionManagerRef,
 ) -> Result<ObjectStoreLsmTree> {
     let lsm_tree_options = ObjectStoreLsmTreeOptions {
         sstable_store,
@@ -162,6 +179,7 @@ fn build_lsm_tree(
             .map_err(config_err)?
             .0 as usize,
         version_manager,
+        transaction_manager,
     };
     Ok(ObjectStoreLsmTree::new(lsm_tree_options))
 }
@@ -213,6 +231,7 @@ fn build_version_syncer(
     version_manager: VersionManager,
     meta_store: MetaStoreRef,
     rudder_client: RudderServiceClient<Channel>,
+    transaction_manager: TransactionManagerRef,
 ) -> Result<Heartbeater> {
     let wheel_version_manager_options = HeartbeaterOptions {
         node_id: config.id,
@@ -228,6 +247,7 @@ fn build_version_syncer(
             host: config.host.clone(),
             port: config.port as u32,
         },
+        transaction_manager,
     };
     Ok(Heartbeater::new(wheel_version_manager_options))
 }
@@ -235,4 +255,9 @@ fn build_version_syncer(
 fn build_meta_store() -> Result<MetaStoreRef> {
     let meta_store = MemoryMetaStore::default();
     Ok(Arc::new(meta_store))
+}
+
+fn build_transaction_manager() -> TransactionManagerRef {
+    // TODO: Restore `txn` from rudder.
+    Arc::new(TransactionManager::new(0))
 }

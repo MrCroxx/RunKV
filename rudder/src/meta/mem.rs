@@ -1,5 +1,5 @@
 use std::collections::btree_map::BTreeMap;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
@@ -28,7 +28,8 @@ pub struct MemoryMetaStoreCore {
 
 pub struct MemoryMetaStore {
     core: RwLock<MemoryMetaStoreCore>,
-    timestamp: AtomicU32,
+    txn: AtomicU32,
+    watermark: AtomicU64,
 }
 
 impl MemoryMetaStore {
@@ -38,7 +39,8 @@ impl MemoryMetaStore {
                 sstable_pin_ttl,
                 ..Default::default()
             }),
-            timestamp: AtomicU32::new(1),
+            txn: AtomicU32::new(1),
+            watermark: AtomicU64::new(1 << 32),
         }
     }
 }
@@ -137,13 +139,20 @@ impl MetaStore for MemoryMetaStore {
         Ok(pinned)
     }
 
-    /// Get the current timestamp.
-    async fn timestamp(&self) -> Result<u32> {
-        Ok(self.timestamp.load(Ordering::SeqCst))
+    async fn txn(&self) -> Result<u32> {
+        Ok(self.txn.load(Ordering::SeqCst))
     }
 
-    /// Fetch the current timestamp and advance it by `val`.
-    async fn timestamp_fetch_add(&self, val: u32) -> Result<u32> {
-        Ok(self.timestamp.fetch_add(val, Ordering::SeqCst))
+    async fn txn_fetch_add(&self, val: u32) -> Result<u32> {
+        Ok(self.txn.fetch_add(val, Ordering::SeqCst))
+    }
+
+    async fn watermark(&self) -> Result<u64> {
+        Ok(self.watermark.load(Ordering::Acquire))
+    }
+
+    async fn update_watermark(&self, watermark: u64) -> Result<()> {
+        self.watermark.store(watermark, Ordering::Release);
+        Ok(())
     }
 }

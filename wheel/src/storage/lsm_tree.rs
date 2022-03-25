@@ -15,6 +15,8 @@ use runkv_storage::manifest::VersionManager;
 use runkv_storage::utils::{value, SKIPLIST_NODE_TOWER_MAX_HEIGHT};
 use runkv_storage::{LsmTree, Result};
 
+use super::transaction_manager::TransactionManagerRef;
+
 #[derive(Clone)]
 pub struct ObjectStoreLsmTreeOptions {
     /// Reference of sstable store.
@@ -23,6 +25,8 @@ pub struct ObjectStoreLsmTreeOptions {
     pub write_buffer_capacity: usize,
     /// Local version manager.
     pub version_manager: VersionManager,
+    /// Transaction Manager.
+    pub transaction_manager: TransactionManagerRef,
 }
 
 pub struct ObjectStoreLsmTreeCore {
@@ -36,6 +40,7 @@ pub struct ObjectStoreLsmTreeCore {
     sstable_store: SstableStoreRef,
     /// Use a external lock to tighten the critical section.
     rwlock: RwLock<PhantomData<Memtable>>,
+    _transaction_manager: TransactionManagerRef,
 }
 
 impl ObjectStoreLsmTreeCore {
@@ -48,6 +53,7 @@ impl ObjectStoreLsmTreeCore {
             version_manager: options.version_manager.clone(),
             sstable_store: options.sstable_store.clone(),
             rwlock: RwLock::new(PhantomData),
+            _transaction_manager: options.transaction_manager.clone(),
             options,
         }
     }

@@ -40,11 +40,15 @@ pub trait MetaStore: Send + Sync + 'static {
     /// Check if sstables are pinned. Return a vector of pinned status.
     async fn is_sstables_pinned(&self, sst_ids: &[u64], time: SystemTime) -> Result<Vec<bool>>;
 
-    /// Get the current timestamp.
-    async fn timestamp(&self) -> Result<u32>;
+    /// Get the current transaction id.
+    async fn txn(&self) -> Result<u32>;
 
-    /// Fetch the current timestamp and advance it by `add`.
-    async fn timestamp_fetch_add(&self, add: u32) -> Result<u32>;
+    /// Fetch the current transaction id and advance it by `add`.
+    async fn txn_fetch_add(&self, add: u32) -> Result<u32>;
+
+    async fn watermark(&self) -> Result<u64>;
+
+    async fn update_watermark(&self, watermark: u64) -> Result<()>;
 }
 
 pub type MetaStoreRef = Arc<dyn MetaStore>;

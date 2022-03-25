@@ -109,11 +109,7 @@ impl RudderService for Rudder {
         &self,
         _request: Request<TsoRequest>,
     ) -> core::result::Result<Response<TsoResponse>, Status> {
-        let current_ts = self
-            .meta_store
-            .timestamp_fetch_add(1)
-            .await
-            .map_err(internal)?;
+        let current_ts = self.meta_store.txn_fetch_add(1).await.map_err(internal)?;
         let rsp = TsoResponse {
             timestamp: current_ts + 1,
         };

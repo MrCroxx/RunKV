@@ -217,7 +217,7 @@ async fn sub_compaction(
     partition_points: Vec<PartitionPoint>,
     now: SystemTime,
 ) -> Result<()> {
-    let watermark = ctx.version_manager.watermark().await;
+    let watermark = ctx.meta_store.watermark().await?;
 
     let req = CompactionRequest {
         sst_ids: old_ssts.to_vec(),

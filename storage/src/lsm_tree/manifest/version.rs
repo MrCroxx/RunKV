@@ -45,8 +45,6 @@ pub struct VersionManagerCore {
     diffs: VecDeque<VersionDiff>,
     /// `sstable_store` is used to fetch sstable meta.
     sstable_store: SstableStoreRef,
-    /// Minimum accessable timestamp.
-    watermark: u64,
 }
 
 impl VersionManagerCore {
@@ -58,7 +56,6 @@ impl VersionManagerCore {
             levels: options.levels,
             diffs: VecDeque::default(),
             sstable_store: options.sstable_store,
-            watermark: 0,
         }
     }
 
@@ -68,18 +65,6 @@ impl VersionManagerCore {
 
     fn level_data_size(&self, level_idx: usize) -> usize {
         self.levels_data_size[level_idx]
-    }
-
-    fn watermark(&self) -> u64 {
-        self.watermark
-    }
-
-    fn advance(&mut self, watermark: u64) -> Result<()> {
-        if watermark < self.watermark {
-            return Err(ManifestError::InvalidWatermark(self.watermark, watermark).into());
-        }
-        self.watermark = watermark;
-        Ok(())
     }
 
     fn latest_version_id(&self) -> u64 {
@@ -343,14 +328,6 @@ impl VersionManager {
 
     pub async fn level_data_size(&self, level_idx: usize) -> usize {
         self.inner.read().await.level_data_size(level_idx)
-    }
-
-    pub async fn watermark(&self) -> u64 {
-        self.inner.read().await.watermark()
-    }
-
-    pub async fn advance(&self, watermark: u64) -> Result<()> {
-        self.inner.write().await.advance(watermark)
     }
 
     pub async fn latest_version_id(&self) -> u64 {
