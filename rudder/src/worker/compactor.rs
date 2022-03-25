@@ -8,7 +8,7 @@ use runkv_common::config::LevelOptions;
 use runkv_common::Worker;
 use runkv_proto::exhauster::exhauster_service_client::ExhausterServiceClient;
 use runkv_proto::exhauster::CompactionRequest;
-use runkv_proto::manifest::{SsTableDiff, SsTableOp, VersionDiff};
+use runkv_proto::manifest::{SstableDiff, SstableOp, VersionDiff};
 use runkv_proto::meta::KeyRange;
 use runkv_storage::manifest::VersionManager;
 use tonic::Request;
@@ -264,26 +264,26 @@ async fn sub_compaction(
         Vec::with_capacity(old_ssts.first.len() + old_ssts.second.len() + new_sst_infos.len());
 
     for sst_id in old_ssts.first.iter() {
-        sstable_diffs.push(SsTableDiff {
+        sstable_diffs.push(SstableDiff {
             id: *sst_id,
             level: ctx.level,
-            op: SsTableOp::Delete.into(),
+            op: SstableOp::Delete.into(),
             data_size: *old_sst_sizes.get(sst_id).expect("old sst size not found"),
         });
     }
     for sst_id in old_ssts.second.iter() {
-        sstable_diffs.push(SsTableDiff {
+        sstable_diffs.push(SstableDiff {
             id: *sst_id,
             level: ctx.level + 1,
-            op: SsTableOp::Delete.into(),
+            op: SstableOp::Delete.into(),
             data_size: *old_sst_sizes.get(sst_id).expect("old sst size not found"),
         });
     }
     for sst_info in new_sst_infos.iter() {
-        sstable_diffs.push(SsTableDiff {
+        sstable_diffs.push(SstableDiff {
             id: sst_info.id,
             level: ctx.level + 1,
-            op: SsTableOp::Insert.into(),
+            op: SstableOp::Insert.into(),
             data_size: sst_info.data_size,
         });
     }

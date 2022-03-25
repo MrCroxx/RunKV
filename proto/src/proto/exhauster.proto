@@ -17,8 +17,8 @@ message CompactionRequest {
 }
 
 message CompactionResponse {
-  repeated manifest.SSTableInfo old_sst_infos = 1;
-  repeated manifest.SSTableInfo new_sst_infos = 2;
+  repeated manifest.SstableInfo old_sst_infos = 1;
+  repeated manifest.SstableInfo new_sst_infos = 2;
 }
 
 service ExhausterService {

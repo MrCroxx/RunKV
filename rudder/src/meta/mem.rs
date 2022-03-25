@@ -1,4 +1,5 @@
 use std::collections::btree_map::BTreeMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
@@ -26,16 +27,18 @@ pub struct MemoryMetaStoreCore {
 }
 
 pub struct MemoryMetaStore {
-    inner: RwLock<MemoryMetaStoreCore>,
+    core: RwLock<MemoryMetaStoreCore>,
+    timestamp: AtomicU32,
 }
 
 impl MemoryMetaStore {
     pub fn new(sstable_pin_ttl: Duration) -> Self {
         Self {
-            inner: RwLock::new(MemoryMetaStoreCore {
+            core: RwLock::new(MemoryMetaStoreCore {
                 sstable_pin_ttl,
                 ..Default::default()
             }),
+            timestamp: AtomicU32::new(1),
         }
     }
 }
@@ -44,7 +47,7 @@ impl MemoryMetaStore {
 impl MetaStore for MemoryMetaStore {
     async fn update_exhauster(&self, node_id: u64, endpoint: PbEndpoint) -> Result<()> {
         let heartbeat = SystemTime::now();
-        self.inner.write().exhausters.insert(
+        self.core.write().exhausters.insert(
             node_id,
             ExhausterInfo {
                 endpoint,
@@ -55,7 +58,7 @@ impl MetaStore for MemoryMetaStore {
     }
 
     async fn pick_exhauster(&self, live: Duration) -> Result<Option<PbEndpoint>> {
-        let guard = self.inner.read();
+        let guard = self.core.read();
         let mut exhauster_ids = guard.exhausters.keys().collect_vec();
         exhauster_ids.shuffle(&mut thread_rng());
         for exhauster_id in exhauster_ids {
@@ -72,19 +75,19 @@ impl MetaStore for MemoryMetaStore {
     }
 
     async fn update_node_ranges(&self, node_id: u64, ranges: Vec<KeyRange>) -> Result<()> {
-        let mut guard = self.inner.write();
+        let mut guard = self.core.write();
         guard.node_ranges.insert(node_id, ranges);
         Ok(())
     }
 
     async fn all_node_ranges(&self) -> Result<BTreeMap<u64, Vec<KeyRange>>> {
-        let guard = self.inner.read();
+        let guard = self.core.read();
         let node_ranges = guard.node_ranges.clone();
         Ok(node_ranges)
     }
 
     async fn all_ranges(&self) -> Result<Vec<KeyRange>> {
-        let guard = self.inner.read();
+        let guard = self.core.read();
         let ranges = guard
             .node_ranges
             .iter()
@@ -94,7 +97,7 @@ impl MetaStore for MemoryMetaStore {
     }
 
     async fn pin_sstables(&self, sst_ids: &[u64], time: SystemTime) -> Result<bool> {
-        let mut guard = self.inner.write();
+        let mut guard = self.core.write();
         let mut pin = true;
         for sst_id in sst_ids.iter() {
             if guard.pinned_sstables.get(sst_id).map_or_else(
@@ -115,7 +118,7 @@ impl MetaStore for MemoryMetaStore {
     }
 
     async fn unpin_sstables(&self, sst_ids: &[u64]) -> Result<()> {
-        let mut guard = self.inner.write();
+        let mut guard = self.core.write();
         for sst_id in sst_ids.iter() {
             guard.pinned_sstables.remove(sst_id);
         }
@@ -124,7 +127,7 @@ impl MetaStore for MemoryMetaStore {
 
     async fn is_sstables_pinned(&self, sst_ids: &[u64], time: SystemTime) -> Result<Vec<bool>> {
         let mut pinned = Vec::with_capacity(sst_ids.len());
-        let guard = self.inner.read();
+        let guard = self.core.read();
         for sst_id in sst_ids {
             pinned.push(guard.pinned_sstables.get(sst_id).map_or_else(
                 || false,
@@ -132,5 +135,15 @@ impl MetaStore for MemoryMetaStore {
             ));
         }
         Ok(pinned)
+    }
+
+    /// Get the current timestamp.
+    async fn timestamp(&self) -> Result<u32> {
+        Ok(self.timestamp.load(Ordering::SeqCst))
+    }
+
+    /// Fetch the current timestamp and advance it by `val`.
+    async fn timestamp_fetch_add(&self, val: u32) -> Result<u32> {
+        Ok(self.timestamp.fetch_add(val, Ordering::SeqCst))
     }
 }
