@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
+use bytesize::ByteSize;
 use futures::future;
 use itertools::Itertools;
 use runkv_common::config::LevelOptions;
@@ -17,20 +18,77 @@ use tracing::{error, trace, warn};
 use crate::error::{Error, Result};
 use crate::meta::MetaStoreRef;
 
-pub struct CompactorOptions {
-    pub meta_store: MetaStoreRef,
-    pub version_manager: VersionManager,
-
+#[derive(Clone, Debug)]
+pub struct LsmTreeConfig {
     pub trigger_l0_compaction_ssts: usize,
     pub trigger_l0_compaction_interval: Duration,
     pub trigger_compaction_interval: Duration,
+
+    pub l1_capacity: usize,
+    pub level_multiplier: usize,
+
     pub sstable_capacity: usize,
     pub block_capacity: usize,
     pub restart_interval: usize,
     pub bloom_false_positive: f64,
-    pub levels_options: Vec<LevelOptions>,
 
     pub compaction_pin_ttl: Duration,
+
+    pub levels_options: Vec<LevelOptions>,
+}
+
+impl TryFrom<runkv_common::config::LsmTreeConfig> for LsmTreeConfig {
+    type Error = Error;
+
+    fn try_from(
+        cfg: runkv_common::config::LsmTreeConfig,
+    ) -> core::result::Result<Self, Self::Error> {
+        Ok(Self {
+            trigger_l0_compaction_ssts: cfg.trigger_l0_compaction_ssts,
+            trigger_l0_compaction_interval: cfg
+                .trigger_l0_compaction_interval
+                .parse::<humantime::Duration>()
+                .map_err(Error::config_err)?
+                .into(),
+            trigger_compaction_interval: cfg
+                .trigger_compaction_interval
+                .parse::<humantime::Duration>()
+                .map_err(Error::config_err)?
+                .into(),
+            l1_capacity: cfg
+                .l1_capacity
+                .parse::<ByteSize>()
+                .map_err(Error::config_err)?
+                .0 as usize,
+            level_multiplier: cfg.level_multiplier,
+            sstable_capacity: cfg
+                .sstable_capacity
+                .parse::<ByteSize>()
+                .map_err(Error::config_err)?
+                .0 as usize,
+            block_capacity: cfg
+                .block_capacity
+                .parse::<ByteSize>()
+                .map_err(Error::config_err)?
+                .0 as usize,
+            restart_interval: cfg.restart_interval,
+            bloom_false_positive: cfg.bloom_false_positive,
+            compaction_pin_ttl: cfg
+                .compaction_pin_ttl
+                .parse::<humantime::Duration>()
+                .map_err(Error::config_err)?
+                .into(),
+            levels_options: cfg.levels_options,
+        })
+    }
+}
+
+pub struct CompactionDetectorOptions {
+    pub meta_store: MetaStoreRef,
+    pub version_manager: VersionManager,
+
+    pub lsm_tree_config: LsmTreeConfig,
+
     pub health_timeout: Duration,
 }
 
@@ -39,13 +97,7 @@ struct CompactionContext {
     level: u64,
     meta_store: MetaStoreRef,
     version_manager: VersionManager,
-    trigger_l0_compaction_ssts: usize,
-    sstable_capacity: usize,
-    block_capacity: usize,
-    restart_interval: usize,
-    bloom_false_positive: f64,
-    levels_options: Vec<LevelOptions>,
-    compaction_pin_ttl: Duration,
+    lsm_tree_config: LsmTreeConfig,
     health_timeout: Duration,
 }
 
@@ -67,25 +119,17 @@ impl TwoLevelSstables {
 
 type PartitionPoint = Vec<u8>;
 
-pub struct Compactor {
+pub struct CompactionDetector {
     meta_store: MetaStoreRef,
     version_manager: VersionManager,
 
-    trigger_l0_compaction_ssts: usize,
-    trigger_l0_compaction_interval: Duration,
-    _trigger_compaction_interval: Duration,
-    sstable_capacity: usize,
-    block_capacity: usize,
-    restart_interval: usize,
-    bloom_false_positive: f64,
-    levels_options: Vec<LevelOptions>,
+    lsm_tree_config: LsmTreeConfig,
 
-    compaction_pin_ttl: Duration,
     health_timeout: Duration,
 }
 
 #[async_trait]
-impl Worker for Compactor {
+impl Worker for CompactionDetector {
     async fn run(&mut self) -> anyhow::Result<()> {
         // TODO: Gracefully kill.
         loop {
@@ -99,22 +143,14 @@ impl Worker for Compactor {
     }
 }
 
-impl Compactor {
-    pub fn new(options: CompactorOptions) -> Self {
+impl CompactionDetector {
+    pub fn new(options: CompactionDetectorOptions) -> Self {
         Self {
             version_manager: options.version_manager,
             meta_store: options.meta_store,
 
-            trigger_l0_compaction_ssts: options.trigger_l0_compaction_ssts,
-            trigger_l0_compaction_interval: options.trigger_l0_compaction_interval,
-            _trigger_compaction_interval: options.trigger_compaction_interval,
-            sstable_capacity: options.sstable_capacity,
-            block_capacity: options.block_capacity,
-            restart_interval: options.restart_interval,
-            bloom_false_positive: options.bloom_false_positive,
-            levels_options: options.levels_options,
+            lsm_tree_config: options.lsm_tree_config,
 
-            compaction_pin_ttl: options.compaction_pin_ttl,
             health_timeout: options.health_timeout,
         }
     }
@@ -124,39 +160,60 @@ impl Compactor {
             level,
             meta_store: self.meta_store.clone(),
             version_manager: self.version_manager.clone(),
-            trigger_l0_compaction_ssts: self.trigger_l0_compaction_ssts,
-            sstable_capacity: self.sstable_capacity,
-            block_capacity: self.block_capacity,
-            restart_interval: self.restart_interval,
-            bloom_false_positive: self.bloom_false_positive,
-            levels_options: self.levels_options.clone(),
-            compaction_pin_ttl: self.compaction_pin_ttl,
+            lsm_tree_config: self.lsm_tree_config.clone(),
             health_timeout: self.health_timeout,
         }
     }
 
     async fn run_inner(&mut self) -> Result<()> {
-        let mut trigger_l0_ticker = tokio::time::interval(self.trigger_l0_compaction_interval);
+        let mut trigger_l0_ticker =
+            tokio::time::interval(self.lsm_tree_config.trigger_l0_compaction_interval);
+        let mut trigger_ticker =
+            tokio::time::interval(self.lsm_tree_config.trigger_compaction_interval);
 
         loop {
             tokio::select! {
                 _ = trigger_l0_ticker.tick() => {
-                    trace!("tick l0 compaction [interval: {:?}]", self.trigger_l0_compaction_interval);
+                    trace!("tick l0 compaction [interval: {:?}]", self.lsm_tree_config.trigger_l0_compaction_interval);
                     let ctx = self.create_context(0);
                     tokio::spawn(
                         async move {
-                            if let Err(e) = trigger(ctx).await {
+                            if let Err(e) = trigger_compaction(ctx).await {
                                 error!("trigger compaction l0 error: {}", e);
                             }
                         }
                     );
+                }
+                _ = trigger_ticker.tick() => {
+                    trace!("tick compaction [interval: {:?}]", self.lsm_tree_config.trigger_compaction_interval);
+
                 }
             }
         }
     }
 }
 
-async fn trigger(ctx: CompactionContext) -> Result<()> {
+/// Check if there is level whose size overstep the level size limit and returns the level indices.
+///
+/// Note: L0 will always be false.
+async fn _check_levels_size(
+    version_manager: VersionManager,
+    l1_capacity: usize,
+    level_multiplier: usize,
+) -> Result<Vec<bool>> {
+    let levels = version_manager.levels().await;
+    let mut overstep = Vec::with_capacity(levels);
+    overstep.push(false);
+    let mut limit = l1_capacity;
+    for level_idx in 1..levels {
+        overstep.push(version_manager.level_data_size(level_idx).await > limit);
+        limit *= level_multiplier;
+    }
+    Ok(overstep)
+}
+
+/// Trigger compaction job based on input [`CompactionContext`].
+async fn trigger_compaction(ctx: CompactionContext) -> Result<()> {
     let now = SystemTime::now();
 
     let node_ranges = ctx.meta_store.all_node_ranges().await?;
@@ -222,17 +279,18 @@ async fn sub_compaction(
     let req = CompactionRequest {
         sst_ids: old_ssts.to_vec(),
         watermark,
-        sstable_capacity: ctx.sstable_capacity as u64,
-        block_capacity: ctx.block_capacity as u64,
-        restart_interval: ctx.restart_interval as u64,
-        bloom_false_positive: ctx.bloom_false_positive,
+        sstable_capacity: ctx.lsm_tree_config.sstable_capacity as u64,
+        block_capacity: ctx.lsm_tree_config.block_capacity as u64,
+        restart_interval: ctx.lsm_tree_config.restart_interval as u64,
+        bloom_false_positive: ctx.lsm_tree_config.bloom_false_positive,
         compression_algorithm: ctx
+            .lsm_tree_config
             .levels_options
             .get(ctx.level as usize + 1)
             .unwrap_or_else(|| panic!("no config for {}", ctx.level as usize + 1))
             .compression_algorithm
             .into(),
-        remove_tombstone: ctx.level as usize + 1 == ctx.levels_options.len() - 1,
+        remove_tombstone: ctx.level as usize + 1 == ctx.lsm_tree_config.levels_options.len() - 1,
         partition_points: partition_points.clone(),
     };
 
@@ -248,7 +306,7 @@ async fn sub_compaction(
             .await?;
     let rsp = client.compaction(Request::new(req)).await?.into_inner();
 
-    if now.elapsed().unwrap() > ctx.compaction_pin_ttl {
+    if now.elapsed().unwrap() > ctx.lsm_tree_config.compaction_pin_ttl {
         warn!("compaction timeout, skip version updates");
         return Ok(());
     }
@@ -321,7 +379,8 @@ async fn pick_ssts(
             base_level_ssts.extend(base_range_ssts[0].iter());
             // TODO: Stop picking if there is already too many.
         }
-        if ctx.level == 0 && base_level_ssts.len() < ctx.trigger_l0_compaction_ssts {
+        if ctx.level == 0 && base_level_ssts.len() < ctx.lsm_tree_config.trigger_l0_compaction_ssts
+        {
             continue;
         }
         for base_sst in base_level_ssts.iter() {

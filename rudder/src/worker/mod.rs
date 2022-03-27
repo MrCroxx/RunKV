@@ -1,1 +1,1 @@
-pub mod compactor;
+pub mod compaction_detector;

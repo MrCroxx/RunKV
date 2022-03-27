@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use bytesize::ByteSize;
 use config::RudderConfig;
-use error::{config_err, err, Result};
+use error::{Error, Result};
 use meta::mem::MemoryMetaStore;
 use meta::MetaStoreRef;
 use runkv_common::BoxedWorker;
@@ -19,7 +19,7 @@ use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
 use service::{Rudder, RudderOptions};
 use tonic::transport::Server;
 use tracing::info;
-use worker::compactor::{Compactor, CompactorOptions};
+use worker::compaction_detector::{CompactionDetector, CompactionDetectorOptions};
 
 pub async fn bootstrap_rudder(
     config: &RudderConfig,
@@ -34,9 +34,9 @@ pub async fn bootstrap_rudder(
 
     Server::builder()
         .add_service(RudderServiceServer::new(rudder))
-        .serve(addr_str.parse().map_err(err)?)
+        .serve(addr_str.parse().map_err(Error::err)?)
         .await
-        .map_err(err)
+        .map_err(Error::err)
 }
 
 pub async fn build_rudder(config: &RudderConfig) -> Result<(Rudder, Vec<BoxedWorker>)> {
@@ -54,7 +54,8 @@ pub async fn build_rudder_with_object_store(
 
     let meta_store = build_meta_store(config)?;
 
-    let compactor = build_compactor(config, meta_store.clone(), version_manager.clone())?;
+    let compaction_detector =
+        build_compaction_detector(config, meta_store.clone(), version_manager.clone())?;
 
     let options = RudderOptions {
         version_manager,
@@ -64,7 +65,7 @@ pub async fn build_rudder_with_object_store(
 
     let rudder = Rudder::new(options);
 
-    Ok((rudder, vec![compactor]))
+    Ok((rudder, vec![compaction_detector]))
 }
 
 async fn build_object_store(config: &RudderConfig) -> ObjectStoreRef {
@@ -93,7 +94,7 @@ fn build_sstable_store(
             .cache
             .meta_cache_capacity
             .parse::<ByteSize>()
-            .map_err(config_err)?
+            .map_err(Error::config_err)?
             .0 as usize,
     };
     let sstable_store = SstableStore::new(sstable_store_options);
@@ -120,60 +121,27 @@ fn build_meta_store(config: &RudderConfig) -> Result<MetaStoreRef> {
             .lsm_tree
             .compaction_pin_ttl
             .parse::<humantime::Duration>()
-            .map_err(config_err)?
+            .map_err(Error::config_err)?
             .into(),
     );
     Ok(Arc::new(meta_store))
 }
 
-fn build_compactor(
+fn build_compaction_detector(
     config: &RudderConfig,
     meta_store: MetaStoreRef,
     version_manager: VersionManager,
 ) -> Result<BoxedWorker> {
-    let compactor_options = CompactorOptions {
+    let compactor_options = CompactionDetectorOptions {
         meta_store,
         version_manager,
-        trigger_l0_compaction_ssts: config.lsm_tree.trigger_l0_compaction_ssts,
-        trigger_l0_compaction_interval: config
-            .lsm_tree
-            .trigger_l0_compaction_interval
-            .parse::<humantime::Duration>()
-            .map_err(config_err)?
-            .into(),
-        trigger_compaction_interval: config
-            .lsm_tree
-            .trigger_compaction_interval
-            .parse::<humantime::Duration>()
-            .map_err(config_err)?
-            .into(),
-        sstable_capacity: config
-            .lsm_tree
-            .sstable_capacity
-            .parse::<ByteSize>()
-            .map_err(config_err)?
-            .0 as usize,
-        block_capacity: config
-            .lsm_tree
-            .block_capacity
-            .parse::<ByteSize>()
-            .map_err(config_err)?
-            .0 as usize,
-        restart_interval: config.lsm_tree.restart_interval,
-        bloom_false_positive: config.lsm_tree.bloom_false_positive,
-        levels_options: config.lsm_tree.levels_options.clone(),
-        compaction_pin_ttl: config
-            .lsm_tree
-            .compaction_pin_ttl
-            .parse::<humantime::Duration>()
-            .map_err(config_err)?
-            .into(),
+        lsm_tree_config: config.lsm_tree.clone().try_into()?,
         health_timeout: config
             .health_timeout
             .parse::<humantime::Duration>()
-            .map_err(config_err)?
+            .map_err(Error::config_err)?
             .into(),
     };
 
-    Ok(Box::new(Compactor::new(compactor_options)))
+    Ok(Box::new(CompactionDetector::new(compactor_options)))
 }
