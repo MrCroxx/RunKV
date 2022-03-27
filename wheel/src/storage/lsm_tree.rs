@@ -14,6 +14,7 @@ use runkv_storage::iterator::{
 use runkv_storage::manifest::VersionManager;
 use runkv_storage::utils::{value, SKIPLIST_NODE_TOWER_MAX_HEIGHT};
 use runkv_storage::{LsmTree, Result};
+use tracing::trace;
 
 #[derive(Clone)]
 pub struct ObjectStoreLsmTreeOptions {
@@ -73,8 +74,8 @@ impl ObjectStoreLsmTreeCore {
         };
 
         // Seek from memtables.
-        for memtable in memtables.iter() {
-            // println!("find key {:?} in memtable {}", key, i);
+        for (i, memtable) in memtables.iter().enumerate() {
+            trace!("find key {:?} in memtable {}", key, i);
             if let Some(raw) = memtable.get_raw(key, timestamp) {
                 return Ok(value(&raw).map(Bytes::copy_from_slice));
             }
@@ -90,7 +91,7 @@ impl ObjectStoreLsmTreeCore {
             levels
         };
 
-        // println!("find key {:?} in ssts:\n{:?}", key, levels);
+        trace!("find key {:?} in ssts:\n{:?}", key, levels);
 
         // Seek from ssts.
         for (level_idx, level) in levels.into_iter().enumerate() {

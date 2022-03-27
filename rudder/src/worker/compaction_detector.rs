@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use bytesize::ByteSize;
 use futures::future;
 use itertools::Itertools;
-use runkv_common::config::LevelOptions;
+use runkv_common::config::{LevelCompactionStrategy, LevelOptions};
 use runkv_common::Worker;
 use runkv_proto::exhauster::exhauster_service_client::ExhausterServiceClient;
 use runkv_proto::exhauster::CompactionRequest;
@@ -22,6 +22,7 @@ use crate::meta::MetaStoreRef;
 pub struct LsmTreeConfig {
     pub trigger_l0_compaction_ssts: usize,
     pub trigger_l0_compaction_interval: Duration,
+    pub trigger_lmax_compaction_interval: Duration,
     pub trigger_compaction_interval: Duration,
 
     pub l1_capacity: usize,
@@ -47,6 +48,11 @@ impl TryFrom<runkv_common::config::LsmTreeConfig> for LsmTreeConfig {
             trigger_l0_compaction_ssts: cfg.trigger_l0_compaction_ssts,
             trigger_l0_compaction_interval: cfg
                 .trigger_l0_compaction_interval
+                .parse::<humantime::Duration>()
+                .map_err(Error::config_err)?
+                .into(),
+            trigger_lmax_compaction_interval: cfg
+                .trigger_lmax_compaction_interval
                 .parse::<humantime::Duration>()
                 .map_err(Error::config_err)?
                 .into(),
@@ -101,7 +107,7 @@ struct CompactionContext {
     health_timeout: Duration,
 }
 
-#[derive(Clone)]
+#[derive(Default, Clone)]
 struct TwoLevelSstables {
     first: Vec<u64>,
     second: Vec<u64>,
@@ -168,8 +174,11 @@ impl CompactionDetector {
     async fn run_inner(&mut self) -> Result<()> {
         let mut trigger_l0_ticker =
             tokio::time::interval(self.lsm_tree_config.trigger_l0_compaction_interval);
+        let mut trigger_lmax_ticker =
+            tokio::time::interval(self.lsm_tree_config.trigger_lmax_compaction_interval);
         let mut trigger_ticker =
             tokio::time::interval(self.lsm_tree_config.trigger_compaction_interval);
+        let lmax = self.lsm_tree_config.levels_options.len() as u64 - 1;
 
         loop {
             tokio::select! {
@@ -184,9 +193,43 @@ impl CompactionDetector {
                         }
                     );
                 }
+                _ = trigger_lmax_ticker.tick() => {
+                    trace!("tick lmax compaction [interval: {:?}]", self.lsm_tree_config.trigger_lmax_compaction_interval);
+                    let ctx = self.create_context(lmax);
+                    tokio::spawn(
+                        async move {
+                            if let Err(e) = trigger_compaction(ctx).await {
+                                error!("trigger compaction lmax error: {}", e);
+                            }
+                        }
+                    );
+                }
                 _ = trigger_ticker.tick() => {
                     trace!("tick compaction [interval: {:?}]", self.lsm_tree_config.trigger_compaction_interval);
-
+                    match check_levels_size(
+                        self.version_manager.clone(),
+                        self.lsm_tree_config.l1_capacity,
+                        self.lsm_tree_config.level_multiplier,
+                    ).await {
+                        Ok(levels) => {
+                            for (level_idx, overstep) in levels.into_iter().enumerate() {
+                                if !overstep {
+                                    continue;
+                                }
+                                let ctx = self.create_context(level_idx as u64);
+                                tokio::spawn(
+                                    async move {
+                                        if let Err(e) = trigger_compaction(ctx).await {
+                                            error!("trigger compaction l{} error: {}", level_idx, e);
+                                        }
+                                    }
+                                );
+                            }
+                        },
+                        Err(e) => {
+                            error!("check levels size error: {}", e);
+                        }
+                    }
                 }
             }
         }
@@ -195,8 +238,8 @@ impl CompactionDetector {
 
 /// Check if there is level whose size overstep the level size limit and returns the level indices.
 ///
-/// Note: L0 will always be false.
-async fn _check_levels_size(
+/// Note: L0 and Lmax will always be false.
+async fn check_levels_size(
     version_manager: VersionManager,
     l1_capacity: usize,
     level_multiplier: usize,
@@ -205,10 +248,11 @@ async fn _check_levels_size(
     let mut overstep = Vec::with_capacity(levels);
     overstep.push(false);
     let mut limit = l1_capacity;
-    for level_idx in 1..levels {
+    for level_idx in 1..levels - 1 {
         overstep.push(version_manager.level_data_size(level_idx).await > limit);
         limit *= level_multiplier;
     }
+    overstep.push(false);
     Ok(overstep)
 }
 
@@ -216,24 +260,27 @@ async fn _check_levels_size(
 async fn trigger_compaction(ctx: CompactionContext) -> Result<()> {
     let now = SystemTime::now();
 
+    // Calculate partition points based on node ranges.
     let node_ranges = ctx.meta_store.all_node_ranges().await?;
     let partition_points = node_ranges
         .iter()
         .flat_map(|(_node_id, ranges)| ranges.iter().map(|range| range.start_key.clone()))
         .collect_vec();
 
+    // Pick sstables to compact, grouped by node.
     let old_node_ssts = pick_ssts(&ctx, node_ranges, now).await?;
 
+    // All sstables to compact.
     let old_ssts = old_node_ssts
         .iter()
         .flat_map(|(_node_id, old_ssts)| old_ssts.to_vec())
         .collect_vec();
-
     if old_ssts.is_empty() {
         return Ok(());
     }
     assert!(verify_no_duplication(old_ssts.iter()));
 
+    // Collect sub compaction jobs to exhausters.
     let mut futures = Vec::with_capacity(old_node_ssts.len());
     for (_node_id, old_ssts) in old_node_ssts.clone() {
         let sub_ctx = ctx.clone();
@@ -259,6 +306,7 @@ async fn trigger_compaction(ctx: CompactionContext) -> Result<()> {
         futures.push(future);
     }
 
+    // Distribute sub compaction jobs to exhausters and collect results.
     let results = future::join_all(futures).await;
     let errs = results.into_iter().filter(|r| r.is_err()).collect_vec();
     if !errs.is_empty() {
@@ -267,7 +315,11 @@ async fn trigger_compaction(ctx: CompactionContext) -> Result<()> {
     Ok(())
 }
 
-// TODO: Pin sstable before `sub_compaction` and unpin after it.
+/// Build compaction request, collect response, update version manager.
+///
+/// # Safety
+///
+/// Pin sstable before `sub_compaction` and unpin after it.
 async fn sub_compaction(
     ctx: &CompactionContext,
     old_ssts: TwoLevelSstables,
@@ -275,6 +327,12 @@ async fn sub_compaction(
     now: SystemTime,
 ) -> Result<()> {
     let watermark = ctx.version_manager.watermark().await;
+
+    let target_level = if ctx.level as usize + 1 == ctx.lsm_tree_config.levels_options.len() {
+        ctx.level
+    } else {
+        ctx.level + 1
+    };
 
     let req = CompactionRequest {
         sst_ids: old_ssts.to_vec(),
@@ -286,11 +344,11 @@ async fn sub_compaction(
         compression_algorithm: ctx
             .lsm_tree_config
             .levels_options
-            .get(ctx.level as usize + 1)
+            .get(target_level as usize)
             .unwrap_or_else(|| panic!("no config for {}", ctx.level as usize + 1))
             .compression_algorithm
             .into(),
-        remove_tombstone: ctx.level as usize + 1 == ctx.lsm_tree_config.levels_options.len() - 1,
+        remove_tombstone: target_level as usize == ctx.lsm_tree_config.levels_options.len() - 1,
         partition_points: partition_points.clone(),
     };
 
@@ -340,7 +398,7 @@ async fn sub_compaction(
     for sst_info in new_sst_infos.iter() {
         sstable_diffs.push(SstableDiff {
             id: sst_info.id,
-            level: ctx.level + 1,
+            level: target_level,
             op: SstableOp::Insert.into(),
             data_size: sst_info.data_size,
         });
@@ -355,6 +413,7 @@ async fn sub_compaction(
     Ok(())
 }
 
+/// Pick sstables to compact.
 async fn pick_ssts(
     ctx: &CompactionContext,
     node_ranges: BTreeMap<u64, Vec<KeyRange>>,
@@ -376,23 +435,45 @@ async fn pick_ssts(
                 )
                 .await?;
             assert_eq!(base_range_ssts.len(), 1);
-            base_level_ssts.extend(base_range_ssts[0].iter());
+            if ctx.level == 0 {
+                // L0 compaction always involves all L0 sstables of a node.
+                base_level_ssts.extend(base_range_ssts[0].iter());
+                continue;
+            }
+            match ctx.lsm_tree_config.levels_options[ctx.level as usize].compaction_strategy {
+                LevelCompactionStrategy::Overlap => {
+                    // TODO: Better strategy.
+                    base_level_ssts.extend(base_range_ssts[0].iter());
+                }
+                LevelCompactionStrategy::NonOverlap => {
+                    // TODO: Better strategy.
+                    base_level_ssts.extend(base_range_ssts[0].iter());
+                }
+            }
             // TODO: Stop picking if there is already too many.
         }
         if ctx.level == 0 && base_level_ssts.len() < ctx.lsm_tree_config.trigger_l0_compaction_ssts
         {
+            // Skip if not enough sstable involved for L0 compaction.
             continue;
         }
-        for base_sst in base_level_ssts.iter() {
-            let next_ssts = ctx
-                .version_manager
-                .pick_overlap_ssts_by_sst_id(
-                    ctx.level as usize + 1..ctx.level as usize + 2,
-                    *base_sst,
-                )
-                .await?;
-            assert_eq!(next_ssts.len(), 1);
-            next_level_ssts.extend(next_ssts[0].iter());
+        // Pick overlapping sstable in `level + 1` iff compaction strategy of `level + 1` is
+        // `NonOverlap`.
+        if ctx.level as usize + 1 < ctx.lsm_tree_config.levels_options.len()
+            && ctx.lsm_tree_config.levels_options[ctx.level as usize + 1].compaction_strategy
+                == LevelCompactionStrategy::NonOverlap
+        {
+            for base_sst in base_level_ssts.iter() {
+                let next_ssts = ctx
+                    .version_manager
+                    .pick_overlap_ssts_by_sst_id(
+                        ctx.level as usize + 1..ctx.level as usize + 2,
+                        *base_sst,
+                    )
+                    .await?;
+                assert_eq!(next_ssts.len(), 1);
+                next_level_ssts.extend(next_ssts[0].iter());
+            }
         }
         let base_level_ssts = base_level_ssts.into_iter().collect_vec();
         let next_level_ssts = next_level_ssts.into_iter().collect_vec();
