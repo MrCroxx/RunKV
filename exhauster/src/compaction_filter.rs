@@ -8,7 +8,7 @@ pub trait CompactionFilter {
 pub struct DefaultCompactionFilter {
     last_key: Bytes,
     watermark: u64,
-    remove_tombstone: bool,
+    _remove_tombstone: bool,
 }
 
 impl DefaultCompactionFilter {
@@ -16,23 +16,18 @@ impl DefaultCompactionFilter {
         Self {
             last_key: Bytes::default(),
             watermark,
-            remove_tombstone,
+            _remove_tombstone: remove_tombstone,
         }
     }
 }
 
 impl CompactionFilter for DefaultCompactionFilter {
     #[allow(clippy::collapsible_else_if)]
-    fn filter(&mut self, key: &[u8], value: Option<&[u8]>, timestamp: u64) -> bool {
+    fn filter(&mut self, key: &[u8], _value: Option<&[u8]>, timestamp: u64) -> bool {
         let mut retain = true;
-        if key != self.last_key {
-            if value.is_none() && self.remove_tombstone {
-                retain = false;
-            }
-        } else {
-            if timestamp < self.watermark {
-                retain = false;
-            }
+        // TODO: Handle `remove_tombstone`.
+        if key == self.last_key && timestamp < self.watermark {
+            retain = false;
         }
         self.last_key = Bytes::copy_from_slice(key);
         retain

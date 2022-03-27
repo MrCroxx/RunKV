@@ -7,6 +7,9 @@ fmt:
 fmt_check:
 	cargo sort -c -w && cargo fmt --all -- --check && cargo clippy --all-targets --locked -- -D warnings
 
+check:
+	cargo check --tests
+
 test:
 	cargo nextest run
 

@@ -22,6 +22,7 @@ pub struct LsmTreeConfig {
     pub level_multiplier: usize,
     pub trigger_l0_compaction_ssts: usize,
     pub trigger_l0_compaction_interval: String,
+    pub trigger_lmax_compaction_interval: String,
     pub trigger_compaction_interval: String,
     pub sstable_capacity: String,
     pub block_capacity: String,
@@ -78,6 +79,7 @@ mod tests {
         
         trigger_l0_compaction_ssts = 4
         trigger_l0_compaction_interval = "1 s"
+        trigger_lmax_compaction_interval = "10 s"
         trigger_compaction_interval = "5 s"
         
         sstable_capacity = "64 KiB"
