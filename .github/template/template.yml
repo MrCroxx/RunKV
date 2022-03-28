@@ -5,7 +5,7 @@ on:
 env:
   RUST_TOOLCHAIN: nightly-2022-03-09
   CARGO_TERM_COLOR: always
-  CACHE_KEY_SUFFIX: 20220324
+  CACHE_KEY_SUFFIX: 20220328
 
 jobs:
   misc-check:
@@ -71,11 +71,10 @@ jobs:
         run: |
           # If new CI checks are added, the one with `--locked` must be run first.
           cargo clippy --all-targets --locked -- -D warnings
-      - name: Install required tools for test with coverage
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          cargo install cargo-llvm-cov
-          cargo install cargo-nextest
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: taiki-e/install-action@nextest
       - name: Run rust test with coverage
         run: |
           cargo llvm-cov nextest --lcov --output-path lcov.info
