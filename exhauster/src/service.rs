@@ -93,6 +93,7 @@ impl ExhausterService for Exhauster {
             Box::new(DefaultPartitioner::new(partition_points))
         };
         let mut new_sst_infos = Vec::with_capacity(req.sst_ids.len());
+        let mut last_user_key = vec![];
         // Filter key value pairs.
         while iter.is_valid() {
             let uk = user_key(iter.key());
@@ -104,6 +105,8 @@ impl ExhausterService for Exhauster {
                 sstable_builder = Some(SstableBuilder::new(sstable_builder_options.clone()));
             }
             if !sstable_builder.as_ref().unwrap().is_empty()
+            // Pervent multi versions of one user key being split in multi ssts.
+                && uk != last_user_key
                 && (sstable_builder.as_ref().unwrap().approximate_len()
                     >= sstable_builder_options.capacity
                     || partitioner.partition(uk, v, ts))
@@ -120,6 +123,7 @@ impl ExhausterService for Exhauster {
 
             if compaction_filter.filter(uk, v, ts) {
                 builder.add(uk, ts, v).map_err(internal)?;
+                last_user_key = uk.to_vec();
             }
             iter.next().await.map_err(internal)?;
         }
