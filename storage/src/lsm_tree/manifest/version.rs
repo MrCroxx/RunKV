@@ -166,7 +166,7 @@ impl VersionManagerCore {
         self.diffs.push_back(diff);
         if !sync {
             trace!("updated levels: {:?}", self.levels);
-            trace!("updated levels: {:#?}", self.levels_data_size);
+            trace!("updated levels size: {:#?}", self.levels_data_size);
         }
         Ok(())
     }

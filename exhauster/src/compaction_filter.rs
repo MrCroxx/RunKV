@@ -22,7 +22,6 @@ impl DefaultCompactionFilter {
 }
 
 impl CompactionFilter for DefaultCompactionFilter {
-    #[allow(clippy::collapsible_else_if)]
     fn filter(&mut self, key: &[u8], _value: Option<&[u8]>, timestamp: u64) -> bool {
         let mut retain = true;
         // TODO: Handle `remove_tombstone`.

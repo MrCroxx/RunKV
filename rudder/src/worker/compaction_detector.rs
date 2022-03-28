@@ -5,6 +5,8 @@ use async_trait::async_trait;
 use bytesize::ByteSize;
 use futures::future;
 use itertools::Itertools;
+use rand::prelude::SliceRandom;
+use rand::{thread_rng, Rng};
 use runkv_common::config::{LevelCompactionStrategy, LevelOptions};
 use runkv_common::Worker;
 use runkv_proto::exhauster::exhauster_service_client::ExhausterServiceClient;
@@ -249,7 +251,14 @@ async fn check_levels_size(
     overstep.push(false);
     let mut limit = l1_capacity;
     for level_idx in 1..levels - 1 {
-        overstep.push(version_manager.level_data_size(level_idx).await > limit);
+        let level_data_size = version_manager.level_data_size(level_idx).await;
+        trace!(
+            "check level size: [level idx: {}] [size: {}] [capacity: {}]",
+            level_idx,
+            level_data_size,
+            limit
+        );
+        overstep.push(level_data_size > limit);
         limit *= level_multiplier;
     }
     overstep.push(false);
@@ -435,19 +444,49 @@ async fn pick_ssts(
                 )
                 .await?;
             assert_eq!(base_range_ssts.len(), 1);
+            if base_range_ssts[0].is_empty() {
+                // Skip if there is no sst to compact.
+                continue;
+            }
             if ctx.level == 0 {
                 // L0 compaction always involves all L0 sstables of a node.
                 base_level_ssts.extend(base_range_ssts[0].iter());
                 continue;
             }
             match ctx.lsm_tree_config.levels_options[ctx.level as usize].compaction_strategy {
-                LevelCompactionStrategy::Overlap => {
-                    // TODO: Better strategy.
-                    base_level_ssts.extend(base_range_ssts[0].iter());
-                }
                 LevelCompactionStrategy::NonOverlap => {
                     // TODO: Better strategy.
-                    base_level_ssts.extend(base_range_ssts[0].iter());
+                    // TODO: Make the ratio configurable.
+                    // Involve at most 10% sstables.
+                    let base_range_sst_count = base_range_ssts[0].len();
+                    let involves = std::cmp::max(base_range_sst_count / 10, 1);
+                    let first_idx = thread_rng().gen_range(0..=base_range_sst_count - involves);
+                    base_level_ssts
+                        .extend(base_range_ssts[0][first_idx..first_idx + involves].iter());
+                }
+                LevelCompactionStrategy::Overlap => {
+                    // TODO: Better strategy.
+                    // Random pick 1% sstables and overlap sstables with them.
+                    let base_range_sst_count = base_range_ssts[0].len();
+                    let involves = std::cmp::max(base_range_sst_count / 100, 1);
+                    let mut base_level_ssts_set: BTreeSet<u64> = BTreeSet::default();
+                    let ssts = base_range_ssts[0]
+                        .choose_multiple(&mut thread_rng(), involves)
+                        .copied()
+                        .collect_vec();
+                    base_level_ssts_set.extend(ssts.iter());
+                    for sst in ssts {
+                        let overlaps = ctx
+                            .version_manager
+                            .pick_overlap_ssts_by_sst_id(
+                                ctx.level as usize..ctx.level as usize + 1,
+                                sst,
+                            )
+                            .await?;
+                        assert_eq!(overlaps.len(), 1);
+                        base_level_ssts_set.extend(overlaps[0].iter());
+                    }
+                    base_level_ssts.extend(base_level_ssts_set.iter());
                 }
             }
             // TODO: Stop picking if there is already too many.
