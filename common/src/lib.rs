@@ -1,4 +1,5 @@
 pub mod atomic;
+pub mod channel_pool;
 pub mod coding;
 pub mod config;
 

@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
+use runkv_common::channel_pool::ChannelPool;
 use runkv_common::Worker;
 use runkv_proto::common::Endpoint;
 use runkv_proto::rudder::rudder_service_client::RudderServiceClient;
@@ -8,18 +9,18 @@ use runkv_proto::rudder::{
     heartbeat_request, heartbeat_response, HeartbeatRequest, WheelHeartbeatRequest,
 };
 use runkv_storage::manifest::{ManifestError, VersionManager};
-use tonic::transport::Channel;
 use tonic::Request;
 use tracing::warn;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::meta::MetaStoreRef;
 
 pub struct HeartbeaterOptions {
     pub node_id: u64,
     pub meta_store: MetaStoreRef,
     pub version_manager: VersionManager,
-    pub client: RudderServiceClient<Channel>,
+    pub channel_pool: ChannelPool,
+    pub rudder_node_id: u64,
     pub heartbeat_interval: Duration,
     pub endpoint: Endpoint,
 }
@@ -29,7 +30,8 @@ pub struct Heartbeater {
     options: HeartbeaterOptions,
     meta_store: MetaStoreRef,
     version_manager: VersionManager,
-    client: RudderServiceClient<Channel>,
+    channel_pool: ChannelPool,
+    rudder_node_id: u64,
 }
 
 #[async_trait]
@@ -50,7 +52,8 @@ impl Heartbeater {
         Self {
             version_manager: options.version_manager.clone(),
             meta_store: options.meta_store.clone(),
-            client: options.client.clone(),
+            channel_pool: options.channel_pool.clone(),
+            rudder_node_id: options.rudder_node_id,
             options,
         }
     }
@@ -67,8 +70,13 @@ impl Heartbeater {
                 },
             )),
         });
-
-        let rsp = self.client.heartbeat(request).await?.into_inner();
+        let mut client = RudderServiceClient::new(
+            self.channel_pool
+                .get(self.rudder_node_id)
+                .await
+                .map_err(Error::err)?,
+        );
+        let rsp = client.heartbeat(request).await?.into_inner();
 
         let hb = match rsp.heartbeat_message.unwrap() {
             heartbeat_response::HeartbeatMessage::WheelHeartbeat(hb) => hb,

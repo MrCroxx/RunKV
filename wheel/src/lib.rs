@@ -8,18 +8,18 @@ pub mod worker;
 use std::sync::Arc;
 
 use bytesize::ByteSize;
-use error::{config_err, err, Error, Result};
+use error::{Error, Result};
 use meta::mem::MemoryMetaStore;
 use meta::MetaStoreRef;
+use runkv_common::channel_pool::ChannelPool;
 use runkv_common::BoxedWorker;
 use runkv_proto::common::Endpoint as PbEndpoint;
-use runkv_proto::rudder::rudder_service_client::RudderServiceClient;
 use runkv_proto::wheel::wheel_service_server::WheelServiceServer;
 use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions, SstableStoreRef};
 use runkv_storage::manifest::{VersionManager, VersionManagerOptions};
 use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
 use service::{Wheel, WheelOptions};
-use tonic::transport::{Channel, Server};
+use tonic::transport::Server;
 use tracing::info;
 use worker::heartbeater::{Heartbeater, HeartbeaterOptions};
 use worker::sstable_uploader::{SstableUploader, SstableUploaderOptions};
@@ -40,9 +40,9 @@ pub async fn bootstrap_wheel(
 
     Server::builder()
         .add_service(WheelServiceServer::new(wheel))
-        .serve(addr_str.parse().map_err(err)?)
+        .serve(addr_str.parse().map_err(Error::err)?)
         .await
-        .map_err(err)
+        .map_err(Error::err)
 }
 
 pub async fn build_wheel(
@@ -62,24 +62,20 @@ pub async fn build_wheel_with_object_store(
 
     let lsm_tree = build_lsm_tree(config, sstable_store.clone(), version_manager.clone())?;
 
-    let rudder_client = RudderServiceClient::connect(format!(
-        "http://{}:{}",
-        config.rudder.host, config.rudder.port
-    ))
-    .await?;
+    let channel_pool = build_channel_pool(config);
 
     let sstable_uploader = build_sstable_uploader(
         config,
         lsm_tree.clone(),
         sstable_store,
         version_manager.clone(),
-        rudder_client.clone(),
+        channel_pool.clone(),
     )?;
 
     let meta_store = build_meta_store()?;
 
     let version_syncer =
-        build_version_syncer(config, version_manager, meta_store.clone(), rudder_client)?;
+        build_heartbeater(config, version_manager, meta_store.clone(), channel_pool)?;
 
     let options = WheelOptions {
         lsm_tree: lsm_tree.clone(),
@@ -117,7 +113,7 @@ fn build_sstable_store(
             .cache
             .block_cache_capacity
             .parse::<ByteSize>()
-            .map_err(config_err)?
+            .map_err(Error::config_err)?
             .0 as usize,
     );
     let sstable_store_options = SstableStoreOptions {
@@ -128,7 +124,7 @@ fn build_sstable_store(
             .cache
             .meta_cache_capacity
             .parse::<ByteSize>()
-            .map_err(config_err)?
+            .map_err(Error::config_err)?
             .0 as usize,
     };
     let sstable_store = SstableStore::new(sstable_store_options);
@@ -159,7 +155,7 @@ fn build_lsm_tree(
             .buffer
             .write_buffer_capacity
             .parse::<ByteSize>()
-            .map_err(config_err)?
+            .map_err(Error::config_err)?
             .0 as usize,
         version_manager,
     };
@@ -171,7 +167,7 @@ fn build_sstable_uploader(
     lsm_tree: ObjectStoreLsmTree,
     sstable_store: SstableStoreRef,
     version_manager: VersionManager,
-    rudder_client: RudderServiceClient<Channel>,
+    channel_pool: ChannelPool,
 ) -> Result<SstableUploader> {
     let sstable_uploader = SstableUploaderOptions {
         node_id: config.id,
@@ -182,13 +178,13 @@ fn build_sstable_uploader(
             .lsm_tree
             .sstable_capacity
             .parse::<ByteSize>()
-            .map_err(config_err)?
+            .map_err(Error::config_err)?
             .0 as usize,
         block_capacity: config
             .lsm_tree
             .block_capacity
             .parse::<ByteSize>()
-            .map_err(config_err)?
+            .map_err(Error::config_err)?
             .0 as usize,
         restart_interval: config.lsm_tree.restart_interval,
         bloom_false_positive: config.lsm_tree.bloom_false_positive,
@@ -201,28 +197,30 @@ fn build_sstable_uploader(
         poll_interval: config
             .poll_interval
             .parse::<humantime::Duration>()
-            .map_err(config_err)?
+            .map_err(Error::config_err)?
             .into(),
-        rudder_client,
+        channel_pool,
+        rudder_node_id: config.rudder.id,
     };
     Ok(SstableUploader::new(sstable_uploader))
 }
 
-fn build_version_syncer(
+fn build_heartbeater(
     config: &WheelConfig,
     version_manager: VersionManager,
     meta_store: MetaStoreRef,
-    rudder_client: RudderServiceClient<Channel>,
+    channel_pool: ChannelPool,
 ) -> Result<Heartbeater> {
     let wheel_version_manager_options = HeartbeaterOptions {
         node_id: config.id,
         version_manager,
         meta_store,
-        client: rudder_client,
+        channel_pool,
+        rudder_node_id: config.rudder.id,
         heartbeat_interval: config
             .heartbeat_interval
             .parse::<humantime::Duration>()
-            .map_err(config_err)?
+            .map_err(Error::config_err)?
             .into(),
         endpoint: PbEndpoint {
             host: config.host.clone(),
@@ -235,4 +233,8 @@ fn build_version_syncer(
 fn build_meta_store() -> Result<MetaStoreRef> {
     let meta_store = MemoryMetaStore::default();
     Ok(Arc::new(meta_store))
+}
+
+fn build_channel_pool(config: &WheelConfig) -> ChannelPool {
+    ChannelPool::with_nodes(vec![config.rudder.clone()])
 }

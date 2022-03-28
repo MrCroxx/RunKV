@@ -1628,7 +1628,9 @@ dependencies = [
  "serde",
  "serde_derive",
  "test-log",
+ "tokio",
  "toml",
+ "tonic",
 ]
 
 [[package]]

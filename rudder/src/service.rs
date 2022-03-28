@@ -1,5 +1,7 @@
 use async_trait::async_trait;
 use itertools::Itertools;
+use runkv_common::channel_pool::ChannelPool;
+use runkv_common::config::Node;
 use runkv_proto::common::Endpoint as PbEndpoint;
 use runkv_proto::manifest::{SstableDiff, SstableOp, VersionDiff};
 use runkv_proto::rudder::rudder_service_server::RudderService;
@@ -21,11 +23,13 @@ pub struct RudderOptions {
     pub version_manager: VersionManager,
     pub sstable_store: SstableStoreRef,
     pub meta_store: MetaStoreRef,
+    pub channel_pool: ChannelPool,
 }
 
 pub struct Rudder {
     /// Manifest of sstables.
     version_manager: VersionManager,
+    channel_pool: ChannelPool,
     /// The smallest pinned timestamp. Any data whose timestamp is smaller than `watermark` can be
     /// safely delete.
     ///
@@ -40,6 +44,7 @@ impl Rudder {
     pub fn new(options: RudderOptions) -> Self {
         Self {
             version_manager: options.version_manager,
+            channel_pool: options.channel_pool,
             // TODO: Restore from meta store.
             _watermark: 0,
             _sstable_store: options.sstable_store,
@@ -147,9 +152,14 @@ impl Rudder {
         endpoint: &PbEndpoint,
         _hb: ExhausterHeartbeatRequest,
     ) -> Result<heartbeat_response::HeartbeatMessage> {
-        self.meta_store
-            .update_exhauster(node_id, endpoint.clone())
-            .await?;
+        self.channel_pool
+            .put_node(Node {
+                id: node_id,
+                host: endpoint.host.clone(),
+                port: endpoint.port as u16,
+            })
+            .await;
+        self.meta_store.update_exhauster(node_id).await?;
         let rsp =
             heartbeat_response::HeartbeatMessage::ExhausterHeartbeat(ExhausterHeartbeatResponse {});
         Ok(rsp)

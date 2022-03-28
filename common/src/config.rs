@@ -59,7 +59,8 @@ pub struct CacheConfig {
 }
 
 #[derive(Deserialize, Clone, Debug)]
-pub struct RudderServiceConfig {
+pub struct Node {
+    pub id: u64,
     pub host: String,
     pub port: u16,
 }

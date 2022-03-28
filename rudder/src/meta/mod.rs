@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
-use runkv_proto::common::Endpoint as PbEndpoint;
 use runkv_proto::meta::KeyRange;
 
 use crate::error::Result;
@@ -15,10 +14,10 @@ pub mod object;
 #[async_trait]
 pub trait MetaStore: Send + Sync + 'static {
     /// Update exhauster meta.
-    async fn update_exhauster(&self, node_id: u64, endpoint: PbEndpoint) -> Result<()>;
+    async fn update_exhauster(&self, node_id: u64) -> Result<()>;
 
     /// Random pick a available exhauster.
-    async fn pick_exhauster(&self, live: Duration) -> Result<Option<PbEndpoint>>;
+    async fn pick_exhauster(&self, live: Duration) -> Result<Option<u64>>;
 
     /// Update responsable key ranges of wheel node.
     async fn update_node_ranges(&self, node_id: u64, ranges: Vec<KeyRange>) -> Result<()>;
