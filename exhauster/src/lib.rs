@@ -10,10 +10,10 @@ use std::sync::Arc;
 use bytesize::ByteSize;
 use config::ExhausterConfig;
 use error::{config_err, err, Result};
+use runkv_common::channel_pool::ChannelPool;
 use runkv_common::BoxedWorker;
 use runkv_proto::common::Endpoint as PbEndpoint;
 use runkv_proto::exhauster::exhauster_service_server::ExhausterServiceServer;
-use runkv_proto::rudder::rudder_service_client::RudderServiceClient;
 use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions, SstableStoreRef};
 use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
 use service::{Exhauster, ExhausterOptions};
@@ -57,17 +57,16 @@ pub async fn build_exhauster_with_object_store(
         sstable_sequential_id: 1,
     };
 
+    let channel_pool = build_channel_pool(config);
+
     let heartbeater_options = HeartbeaterOptions {
         node_id: config.id,
         endpoint: PbEndpoint {
             host: config.host.clone(),
             port: config.port as u32,
         },
-        client: RudderServiceClient::connect(format!(
-            "http://{}:{}",
-            config.rudder.host, config.rudder.port
-        ))
-        .await?,
+        channel_pool,
+        rudder_node_id: config.rudder.id,
         heartbeat_interval: config
             .heartbeat_interval
             .parse::<humantime::Duration>()?
@@ -111,4 +110,8 @@ fn build_sstable_store(
     };
     let sstable_store = SstableStore::new(sstable_store_options);
     Ok(Arc::new(sstable_store))
+}
+
+fn build_channel_pool(config: &ExhausterConfig) -> ChannelPool {
+    ChannelPool::with_nodes(vec![config.rudder.clone()])
 }

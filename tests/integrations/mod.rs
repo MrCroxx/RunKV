@@ -34,8 +34,6 @@ async fn test_concurrent_put_get() {
         build_rudder_with_object_store(&rudder_config, object_store.clone())
             .await
             .unwrap();
-    tokio::spawn(async move { bootstrap_rudder(&rudder_config, rudder, rudder_workers).await });
-    tokio::time::sleep(Duration::from_secs(3)).await;
 
     let wheel_config: WheelConfig =
         toml::from_str(&concat_toml(WHEEL_CONFIG_PATH, LSM_TREE_CONFIG_PATH)).unwrap();
@@ -43,9 +41,6 @@ async fn test_concurrent_put_get() {
         build_wheel_with_object_store(&wheel_config, object_store.clone())
             .await
             .unwrap();
-    let wheel_config_clone = wheel_config.clone();
-    tokio::spawn(async move { bootstrap_wheel(&wheel_config_clone, wheel, wheel_workers).await });
-    tokio::time::sleep(Duration::from_secs(3)).await;
 
     let exhauster_config: ExhausterConfig =
         toml::from_str(&read_to_string(EXHAUSTER_CONFIG_PATH).unwrap()).unwrap();
@@ -54,10 +49,17 @@ async fn test_concurrent_put_get() {
             .await
             .unwrap();
 
+    tokio::spawn(async move { bootstrap_rudder(&rudder_config, rudder, rudder_workers).await });
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
     tokio::spawn(async move {
         bootstrap_exhauster(&exhauster_config, exhuaster, exhauster_workers).await
     });
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let wheel_config_clone = wheel_config.clone();
+    tokio::spawn(async move { bootstrap_wheel(&wheel_config_clone, wheel, wheel_workers).await });
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     // TODO: Refine me.
     let mut wheel_client = WheelServiceClient::connect(format!(

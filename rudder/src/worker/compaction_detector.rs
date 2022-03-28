@@ -7,6 +7,7 @@ use futures::future;
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::{thread_rng, Rng};
+use runkv_common::channel_pool::ChannelPool;
 use runkv_common::config::{LevelCompactionStrategy, LevelOptions};
 use runkv_common::Worker;
 use runkv_proto::exhauster::exhauster_service_client::ExhausterServiceClient;
@@ -94,6 +95,7 @@ impl TryFrom<runkv_common::config::LsmTreeConfig> for LsmTreeConfig {
 pub struct CompactionDetectorOptions {
     pub meta_store: MetaStoreRef,
     pub version_manager: VersionManager,
+    pub channel_pool: ChannelPool,
 
     pub lsm_tree_config: LsmTreeConfig,
 
@@ -105,6 +107,7 @@ struct CompactionContext {
     level: u64,
     meta_store: MetaStoreRef,
     version_manager: VersionManager,
+    channel_pool: ChannelPool,
     lsm_tree_config: LsmTreeConfig,
     health_timeout: Duration,
 }
@@ -130,6 +133,7 @@ type PartitionPoint = Vec<u8>;
 pub struct CompactionDetector {
     meta_store: MetaStoreRef,
     version_manager: VersionManager,
+    channel_pool: ChannelPool,
 
     lsm_tree_config: LsmTreeConfig,
 
@@ -156,6 +160,7 @@ impl CompactionDetector {
         Self {
             version_manager: options.version_manager,
             meta_store: options.meta_store,
+            channel_pool: options.channel_pool,
 
             lsm_tree_config: options.lsm_tree_config,
 
@@ -168,6 +173,7 @@ impl CompactionDetector {
             level,
             meta_store: self.meta_store.clone(),
             version_manager: self.version_manager.clone(),
+            channel_pool: self.channel_pool.clone(),
             lsm_tree_config: self.lsm_tree_config.clone(),
             health_timeout: self.health_timeout,
         }
@@ -369,8 +375,7 @@ async fn sub_compaction(
     let exhauster = exhauster.unwrap();
 
     let mut client =
-        ExhausterServiceClient::connect(format!("http://{}:{}", exhauster.host, exhauster.port))
-            .await?;
+        ExhausterServiceClient::new(ctx.channel_pool.get(exhauster).await.map_err(Error::err)?);
     let rsp = client.compaction(Request::new(req)).await?.into_inner();
 
     if now.elapsed().unwrap() > ctx.lsm_tree_config.compaction_pin_ttl {

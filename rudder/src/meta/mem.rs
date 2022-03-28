@@ -7,14 +7,13 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
-use runkv_proto::common::Endpoint as PbEndpoint;
 use runkv_proto::meta::KeyRange;
 
 use super::MetaStore;
 use crate::error::Result;
 
 struct ExhausterInfo {
-    endpoint: PbEndpoint,
+    // TODO: Track pressure.
     heartbeat: SystemTime,
 }
 
@@ -45,19 +44,16 @@ impl MemoryMetaStore {
 
 #[async_trait]
 impl MetaStore for MemoryMetaStore {
-    async fn update_exhauster(&self, node_id: u64, endpoint: PbEndpoint) -> Result<()> {
+    async fn update_exhauster(&self, node_id: u64) -> Result<()> {
         let heartbeat = SystemTime::now();
-        self.core.write().exhausters.insert(
-            node_id,
-            ExhausterInfo {
-                endpoint,
-                heartbeat,
-            },
-        );
+        self.core
+            .write()
+            .exhausters
+            .insert(node_id, ExhausterInfo { heartbeat });
         Ok(())
     }
 
-    async fn pick_exhauster(&self, live: Duration) -> Result<Option<PbEndpoint>> {
+    async fn pick_exhauster(&self, live: Duration) -> Result<Option<u64>> {
         let guard = self.core.read();
         let mut exhauster_ids = guard.exhausters.keys().collect_vec();
         exhauster_ids.shuffle(&mut thread_rng());
@@ -68,7 +64,7 @@ impl MetaStore for MemoryMetaStore {
                 .elapsed()
                 .expect("last heartbeat time must be earilier than now");
             if duration <= live {
-                return Ok(Some(info.endpoint.clone()));
+                return Ok(Some(*exhauster_id));
             }
         }
         Ok(None)

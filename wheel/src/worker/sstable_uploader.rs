@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use runkv_common::channel_pool::ChannelPool;
 use runkv_common::coding::CompressionAlgorithm;
 use runkv_common::Worker;
 use runkv_proto::manifest::SstableInfo;
@@ -13,11 +14,10 @@ use runkv_storage::components::{
 };
 use runkv_storage::manifest::{ManifestError, VersionManager};
 use runkv_storage::utils::{timestamp, user_key, value};
-use tonic::transport::Channel;
 use tonic::Request;
 use tracing::{debug, warn};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::storage::lsm_tree::ObjectStoreLsmTree;
 
 pub struct SstableUploaderOptions {
@@ -31,7 +31,8 @@ pub struct SstableUploaderOptions {
     pub bloom_false_positive: f64,
     pub compression_algorithm: CompressionAlgorithm,
     pub poll_interval: Duration,
-    pub rudder_client: RudderServiceClient<Channel>,
+    pub channel_pool: ChannelPool,
+    pub rudder_node_id: u64,
 }
 
 pub struct SstableUploader {
@@ -40,8 +41,8 @@ pub struct SstableUploader {
     lsm_tree: ObjectStoreLsmTree,
     sstable_store: SstableStoreRef,
     version_manager: VersionManager,
-    pub rudder_client: RudderServiceClient<Channel>,
-    // TODO: Get a global unique sst id from rudder.
+    channel_pool: ChannelPool,
+    rudder_node_id: u64,
     sstable_sequential_id: AtomicU64,
 }
 
@@ -67,7 +68,8 @@ impl SstableUploader {
             lsm_tree: options.lsm_tree.clone(),
             sstable_store: options.sstable_store.clone(),
             version_manager: options.version_manager.clone(),
-            rudder_client: options.rudder_client.clone(),
+            channel_pool: options.channel_pool.clone(),
+            rudder_node_id: options.rudder_node_id,
             options,
             sstable_sequential_id: AtomicU64::new(1),
         }
@@ -155,7 +157,13 @@ impl SstableUploader {
             sst_infos,
             next_version_id: self.version_manager.latest_version_id().await + 1,
         });
-        let rsp = self.rudder_client.insert_l0(request).await?.into_inner();
+        let mut client = RudderServiceClient::new(
+            self.channel_pool
+                .get(self.rudder_node_id)
+                .await
+                .map_err(Error::err)?,
+        );
+        let rsp = client.insert_l0(request).await?.into_inner();
         let version_diffs = rsp.version_diffs;
         for version_diff in version_diffs {
             if let Err(runkv_storage::Error::ManifestError(ManifestError::VersionDiffIdNotMatch(

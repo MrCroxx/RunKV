@@ -6,6 +6,7 @@ meta_path = "meta"
 heartbeat_interval = "1 s"
 
 [rudder]
+id = 1
 host = "127.0.0.1"
 port = 12300
 
