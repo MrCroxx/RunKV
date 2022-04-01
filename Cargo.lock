@@ -21,6 +21,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyerror"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3fcdccf28e08d90b98adc330fde2c08bdc5bca625b3611fd755e03c90bfe9ca"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -430,6 +439,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4a45a46ab1f2412e53d3a0ade76ffad2025804294569aae387231a0cd6e0899"
 
 [[package]]
+name = "byte-unit"
+version = "4.0.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95ebf10dda65f19ff0f42ea15572a359ed60d7fc74fdc984d90310937be0014b"
+dependencies = [
+ "utf8-width",
+]
+
+[[package]]
 name = "bytecount"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -567,6 +585,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "convert_case"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
+
+[[package]]
 name = "core-foundation"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -644,6 +668,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1a816186fa68d9e426e3cb4ae4dff1fcd8e4a2c34b781bf7a822574a0d0aac8"
 dependencies = [
  "sct",
+]
+
+[[package]]
+name = "derive_more"
+version = "0.99.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fb810d30a7c1953f91334de7244731fc3f3c10d7fe163338a35b9f640960321"
+dependencies = [
+ "convert_case",
+ "proc-macro2",
+ "quote",
+ "rustc_version",
+ "syn",
 ]
 
 [[package]]
@@ -1047,9 +1084,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.119"
+version = "0.2.121"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bf2e165bb3457c8e098ea76f3e3bc9db55f87aa90d52d0e6be741470916aaa4"
+checksum = "efaa7b300f3b5fe8eb6bf21ce3895e1751d9665086af2d64b42f19701015ff4f"
 
 [[package]]
 name = "lock_api"
@@ -1097,6 +1134,12 @@ checksum = "b823e83b2affd8f40a9ee8c29dbc56404c1e34cd2710921f2801e2cf29527afa"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "maplit"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
 
 [[package]]
 name = "matchers"
@@ -1255,6 +1298,27 @@ name = "once_cell"
 version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "87f3e037eac156d1775da914196f0f37741a274155e34a0b7e427c35d2a2ecb9"
+
+[[package]]
+name = "openraft"
+version = "0.6.4"
+source = "git+https://github.com/datafuselabs/openraft?branch=main#13dd3d07508cfbfb91a1595f95a7efb84ecdaa41"
+dependencies = [
+ "anyerror",
+ "async-trait",
+ "byte-unit",
+ "bytes",
+ "clap",
+ "derive_more",
+ "futures",
+ "maplit",
+ "rand",
+ "serde",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-futures",
+]
 
 [[package]]
 name = "openssl-probe"
@@ -1725,6 +1789,7 @@ dependencies = [
  "farmhash",
  "futures",
  "itertools",
+ "libc",
  "lz4",
  "moka",
  "parking_lot 0.12.0",
@@ -1733,6 +1798,7 @@ dependencies = [
  "runkv-proto",
  "serde",
  "serde_derive",
+ "tempfile",
  "test-log",
  "thiserror",
  "tokio",
@@ -1752,6 +1818,7 @@ dependencies = [
  "humantime",
  "humantime-serde",
  "itertools",
+ "openraft",
  "parking_lot 0.12.0",
  "prost",
  "runkv-common",
@@ -2406,6 +2473,12 @@ name = "urlencoding"
 version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a1f0175e03a0973cf4afd476bef05c26e228520400eb1fd473ad417b1c00ffb"
+
+[[package]]
+name = "utf8-width"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5190c9442dcdaf0ddd50f37420417d219ae5261bbf5db120d0f9bab996c9cba1"
 
 [[package]]
 name = "uuid"

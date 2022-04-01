@@ -1,7 +1,7 @@
 use bytes::Bytes;
 
-use crate::lsm_tree::utils::{full_key, raw_value, value, IterRef, Skiplist};
-use crate::utils::FullKeyComparator;
+use super::{IterRef, Skiplist};
+use crate::utils::{full_key, raw_value, value, FullKeyComparator};
 
 #[derive(Clone)]
 pub struct Memtable {

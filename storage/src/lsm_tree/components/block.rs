@@ -6,11 +6,12 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use lz4::Decoder;
 use runkv_common::coding::CompressionAlgorithm;
 
-use crate::lsm_tree::utils::{crc32check, crc32sum, key_diff, var_u32_len, BufExt, BufMutExt};
 use crate::lsm_tree::{
     DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, TEST_DEFAULT_RESTART_INTERVAL,
 };
-use crate::utils::compare_full_key;
+use crate::utils::{
+    compare_full_key, crc32check, crc32sum, key_diff, var_u32_len, BufExt, BufMutExt,
+};
 use crate::{Error, Result};
 
 pub struct Block {
@@ -323,7 +324,7 @@ mod tests {
 
     use super::*;
     use crate::lsm_tree::iterator::{BlockIterator, Iterator, Seek};
-    use crate::lsm_tree::utils::full_key;
+    use crate::utils::full_key;
 
     #[test(tokio::test)]
     async fn test_block_enc_dec() {

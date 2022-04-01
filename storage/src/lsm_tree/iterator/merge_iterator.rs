@@ -192,7 +192,7 @@ mod tests {
     use super::*;
     use crate::components::{Block, BlockBuilder, BlockBuilderOptions};
     use crate::iterator::BlockIterator;
-    use crate::lsm_tree::utils::full_key;
+    use crate::utils::full_key;
 
     fn build_iterator_for_test() -> MergeIterator {
         MergeIterator::new(vec![
