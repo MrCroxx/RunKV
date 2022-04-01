@@ -186,6 +186,7 @@ mod tests {
         let mut buf = vec![0u8; 4096];
         let time = SystemTime::now();
         f.write_all(&vec![b'x'; 4096]).await.unwrap();
+        f.sync_data().await.unwrap();
         f.seek(SeekFrom::Start(0)).await.unwrap();
         f.read_exact(&mut buf).await.unwrap();
         assert_eq!(buf, vec![b'x'; 4096]);
