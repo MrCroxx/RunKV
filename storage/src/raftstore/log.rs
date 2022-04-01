@@ -129,13 +129,7 @@ impl Kv {
 #[cfg(test)]
 mod tests {
 
-    use std::io::SeekFrom;
-    use std::time::SystemTime;
-
-    use tempfile::tempdir;
     use test_log::test;
-    use tokio::fs::OpenOptions;
-    use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
     use super::*;
 
@@ -167,29 +161,5 @@ mod tests {
             decoded_logs.push(Log::decode(&mut buf));
         }
         assert_eq!(decoded_logs, logs);
-    }
-
-    // TODO: REMOVE ME!!
-    #[test(tokio::test)]
-    async fn test() {
-        let mut options = OpenOptions::new();
-        options.create(true);
-        options.read(true);
-        options.write(true);
-        #[cfg(target_os = "linux")]
-        {
-            const O_DIRECT: i32 = 0x4000;
-            options.custom_flags(O_DIRECT);
-        }
-        let dir = tokio::task::spawn_blocking(tempdir).await.unwrap().unwrap();
-        let mut f = options.open(dir.path().join("tmp")).await.unwrap();
-        let mut buf = vec![0u8; 4096];
-        let time = SystemTime::now();
-        f.write_all(&vec![b'x'; 4096]).await.unwrap();
-        f.sync_data().await.unwrap();
-        f.seek(SeekFrom::Start(0)).await.unwrap();
-        f.read_exact(&mut buf).await.unwrap();
-        assert_eq!(buf, vec![b'x'; 4096]);
-        println!("elapsed: {:?}", time.elapsed());
     }
 }
