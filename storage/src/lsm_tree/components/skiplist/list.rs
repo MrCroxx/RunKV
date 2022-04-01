@@ -432,7 +432,7 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use crate::lsm_tree::utils::FixedLengthSuffixComparator;
+    use crate::components::FixedLengthSuffixComparator;
 
     #[test]
     fn test_find_near() {

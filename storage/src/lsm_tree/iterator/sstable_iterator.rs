@@ -230,8 +230,8 @@ mod tests {
         BlockCache, SstableBuilder, SstableBuilderOptions, SstableMeta, SstableStore,
         SstableStoreOptions,
     };
-    use crate::lsm_tree::utils::full_key;
     use crate::lsm_tree::TEST_DEFAULT_RESTART_INTERVAL;
+    use crate::utils::full_key;
     use crate::MemObjectStore;
 
     fn build_sstable_for_test() -> (SstableMeta, Bytes) {

@@ -8,3 +8,5 @@ mod sstable;
 pub use sstable::*;
 mod sstable_store;
 pub use sstable_store::*;
+mod skiplist;
+pub use skiplist::*;

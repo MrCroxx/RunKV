@@ -208,7 +208,7 @@ mod tests {
 
     use super::*;
     use crate::components::{BlockBuilder, BlockBuilderOptions};
-    use crate::lsm_tree::utils::full_key;
+    use crate::utils::full_key;
 
     fn build_iterator_for_test() -> BlockIterator {
         let options = BlockBuilderOptions::default();

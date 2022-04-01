@@ -2,9 +2,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 
 use super::{Iterator, Seek};
-use crate::components::Memtable;
-use crate::lsm_tree::utils::{full_key, timestamp, user_key, value, IterRef, Skiplist};
-use crate::utils::FullKeyComparator;
+use crate::components::{IterRef, Memtable, Skiplist};
+use crate::utils::{full_key, timestamp, user_key, value, FullKeyComparator};
 use crate::Result;
 
 pub struct MemtableIterator {

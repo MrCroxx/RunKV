@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 
 use super::{BoxedIterator, Iterator, Seek};
-use crate::lsm_tree::utils::{full_key, timestamp, user_key, value};
+use crate::utils::{full_key, timestamp, user_key, value};
 use crate::Result;
 
 pub struct UserKeyIterator {

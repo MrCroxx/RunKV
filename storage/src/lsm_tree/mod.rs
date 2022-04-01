@@ -1,7 +1,6 @@
 pub mod components;
 pub mod iterator;
 pub mod manifest;
-pub mod utils;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024; // 4 MiB
 pub const DEFAULT_BLOCK_SIZE: usize = 64 * 1024; // 64 KiB
