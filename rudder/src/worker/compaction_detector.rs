@@ -422,6 +422,7 @@ async fn sub_compaction(
         id: 0,
         sstable_diffs,
     };
+    trace!("compaction version diff:\n{:#?}", version_diff);
     ctx.version_manager.update(version_diff, false).await?;
 
     Ok(())
@@ -507,17 +508,15 @@ async fn pick_ssts(
             && ctx.lsm_tree_config.levels_options[ctx.level as usize + 1].compaction_strategy
                 == LevelCompactionStrategy::NonOverlap
         {
-            for base_sst in base_level_ssts.iter() {
-                let next_ssts = ctx
-                    .version_manager
-                    .pick_overlap_ssts_by_sst_id(
-                        ctx.level as usize + 1..ctx.level as usize + 2,
-                        *base_sst,
-                    )
-                    .await?;
-                assert_eq!(next_ssts.len(), 1);
-                next_level_ssts.extend(next_ssts[0].iter());
-            }
+            let next_ssts = ctx
+                .version_manager
+                .pick_overlap_ssts_by_sst_ids(
+                    ctx.level as usize + 1..ctx.level as usize + 2,
+                    base_level_ssts.iter().cloned().collect_vec(),
+                )
+                .await?;
+            assert_eq!(next_ssts.len(), 1);
+            next_level_ssts.extend(next_ssts[0].iter());
         }
         let base_level_ssts = base_level_ssts.into_iter().collect_vec();
         let next_level_ssts = next_level_ssts.into_iter().collect_vec();

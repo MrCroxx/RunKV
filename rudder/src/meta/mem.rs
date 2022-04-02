@@ -8,6 +8,7 @@ use parking_lot::RwLock;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use runkv_proto::meta::KeyRange;
+use tracing::trace;
 
 use super::MetaStore;
 use crate::error::Result;
@@ -110,6 +111,10 @@ impl MetaStore for MemoryMetaStore {
         for sst_id in sst_ids.iter() {
             guard.pinned_sstables.insert(*sst_id, time);
         }
+        trace!(
+            "pin - pinning ssts: {:?}",
+            guard.pinned_sstables.keys().collect_vec(),
+        );
         Ok(true)
     }
 
@@ -118,6 +123,10 @@ impl MetaStore for MemoryMetaStore {
         for sst_id in sst_ids.iter() {
             guard.pinned_sstables.remove(sst_id);
         }
+        trace!(
+            "unpin - pinning ssts: {:?}",
+            guard.pinned_sstables.keys().collect_vec(),
+        );
         Ok(())
     }
 

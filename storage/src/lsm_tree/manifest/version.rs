@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::ops::{Range, RangeInclusive};
 use std::sync::Arc;
 
+use bytes::Bytes;
 use runkv_common::coding::CompressionAlgorithm;
 use runkv_common::config::{LevelCompactionStrategy, LevelOptions};
 use runkv_proto::manifest::{SstableOp, VersionDiff};
@@ -227,7 +228,7 @@ impl VersionManagerCore {
     ///
     /// If the compaction strategy is `NonOverlap`, the retrun sstable ids of the level are
     /// guaranteed sorted in ASC order.
-    async fn pick_overlap_ssts(
+    async fn pick_overlap_ssts_by_user_key_range(
         &self,
         levels: Range<usize>,
         range: RangeInclusive<&[u8]>,
@@ -299,7 +300,35 @@ impl VersionManagerCore {
         sst_id: u64,
     ) -> Result<Vec<Vec<u64>>> {
         let sst = self.sstable_store.sstable(sst_id).await?;
-        self.pick_overlap_ssts(levels, user_key(sst.first_key())..=user_key(sst.last_key()))
+        self.pick_overlap_ssts_by_user_key_range(
+            levels,
+            user_key(sst.first_key())..=user_key(sst.last_key()),
+        )
+        .await
+    }
+
+    async fn pick_overlap_ssts_by_sst_ids(
+        &self,
+        levels: Range<usize>,
+        sst_ids: Vec<u64>,
+    ) -> Result<Vec<Vec<u64>>> {
+        if sst_ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let mut first_user_key = Bytes::default();
+        let mut last_user_key = Bytes::default();
+        for sst_id in sst_ids {
+            let sst = self.sstable_store.sstable(sst_id).await?;
+            let sst_first_user_key = Bytes::copy_from_slice(user_key(sst.first_key()));
+            let sst_last_user_key = Bytes::copy_from_slice(user_key(sst.last_key()));
+            if first_user_key.is_empty() || sst_first_user_key < first_user_key {
+                first_user_key = sst_first_user_key;
+            }
+            if last_user_key.is_empty() || sst_last_user_key > last_user_key {
+                last_user_key = sst_last_user_key
+            }
+        }
+        self.pick_overlap_ssts_by_user_key_range(levels, &first_user_key..=&last_user_key)
             .await
     }
 
@@ -408,7 +437,7 @@ impl VersionManager {
         self.inner
             .read()
             .await
-            .pick_overlap_ssts(levels, range)
+            .pick_overlap_ssts_by_user_key_range(levels, range)
             .await
     }
 
@@ -438,6 +467,18 @@ impl VersionManager {
             .read()
             .await
             .pick_overlap_ssts_by_sst_id(levels, sst_id)
+            .await
+    }
+
+    pub async fn pick_overlap_ssts_by_sst_ids(
+        &self,
+        levels: Range<usize>,
+        sst_ids: Vec<u64>,
+    ) -> Result<Vec<Vec<u64>>> {
+        self.inner
+            .read()
+            .await
+            .pick_overlap_ssts_by_sst_ids(levels, sst_ids)
             .await
     }
 
@@ -644,7 +685,7 @@ mod tests {
         ingest_meta(&sstable_store, 7, fkey(b"eee"), fkey(b"fff")).await;
         assert_eq!(
             version_manager
-                .pick_overlap_ssts(0..7, &fkey(b"eee")[..]..=&fkey(b"fff")[..])
+                .pick_overlap_ssts_by_user_key_range(0..7, &fkey(b"eee")[..]..=&fkey(b"fff")[..])
                 .await
                 .unwrap(),
             vec![vec![1, 2], vec![4], vec![], vec![], vec![7], vec![], vec![]]

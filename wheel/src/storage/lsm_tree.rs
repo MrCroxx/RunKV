@@ -10,9 +10,7 @@ use runkv_common::config::LevelCompactionStrategy;
 use runkv_storage::components::{
     CachePolicy, Memtable, SstableStoreRef, SKIPLIST_NODE_TOWER_MAX_HEIGHT,
 };
-use runkv_storage::iterator::{
-    ConcatIterator, Iterator, MergeIterator, Seek, SstableIterator, UserKeyIterator,
-};
+use runkv_storage::iterator::{Iterator, MergeIterator, Seek, SstableIterator, UserKeyIterator};
 use runkv_storage::manifest::VersionManager;
 use runkv_storage::utils::value;
 use runkv_storage::{LsmTree, Result};
@@ -120,17 +118,16 @@ impl ObjectStoreLsmTreeCore {
                     UserKeyIterator::new(Box::new(MergeIterator::new(iters)), timestamp)
                 }
                 LevelCompactionStrategy::NonOverlap => {
-                    let mut iters: Vec<Box<dyn Iterator>> = Vec::with_capacity(level.len());
-                    for sst_id in level {
-                        let sst = self.sstable_store.sstable(sst_id).await?;
-                        let iter = Box::new(SstableIterator::new(
+                    assert_eq!(level.len(), 1);
+                    let sst = self.sstable_store.sstable(level[0]).await?;
+                    UserKeyIterator::new(
+                        Box::new(SstableIterator::new(
                             self.sstable_store.clone(),
                             sst,
                             CachePolicy::Fill,
-                        ));
-                        iters.push(iter);
-                    }
-                    UserKeyIterator::new(Box::new(ConcatIterator::new(iters)), timestamp)
+                        )),
+                        timestamp,
+                    )
                 }
             };
             if iter.seek(Seek::RandomForward(key)).await? {
