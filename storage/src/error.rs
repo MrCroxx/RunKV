@@ -11,6 +11,8 @@ pub enum Error {
     ObjectStoreError(#[from] ObjectStoreError),
     #[error("manifest error: {0}")]
     ManifestError(#[from] ManifestError),
+    #[error("io error: {0}")]
+    IoError(#[from] std::io::Error),
     #[error("other: {0}")]
     Other(String),
 }
