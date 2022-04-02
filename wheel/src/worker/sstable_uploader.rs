@@ -15,7 +15,7 @@ use runkv_storage::components::{
 use runkv_storage::manifest::{ManifestError, VersionManager};
 use runkv_storage::utils::{timestamp, user_key, value};
 use tonic::Request;
-use tracing::{debug, warn};
+use tracing::{debug, trace, warn};
 
 use crate::error::{Error, Result};
 use crate::storage::lsm_tree::ObjectStoreLsmTree;
@@ -100,7 +100,6 @@ impl SstableUploader {
                         sstable_builder =
                             Some(SstableBuilder::new(sstable_builder_options.clone()));
                         debug!("build and upload sst {}", sst_id);
-                        // println!("build and upload sst {}", id);
                     }
                     if !sstable_builder.as_ref().unwrap().is_empty()
                         && sstable_builder.as_ref().unwrap().approximate_len()
@@ -127,9 +126,6 @@ impl SstableUploader {
                 }
                 self.notify_update_version(sst_infos).await?;
             }
-
-            // TODO: After local version manager awared the diff, can drop immutable table.
-            // self.lsm_tree.drop_oldest_immutable_memtable();
         } else {
             tokio::time::sleep(self.options.poll_interval).await;
         }
@@ -141,17 +137,20 @@ impl SstableUploader {
         let (meta, data) = builder.build()?;
         let data_size = meta.data_size as u64;
         let sst = Sstable::new(id, Arc::new(meta));
-
+        trace!(
+            "build sst: {}\nsmallest key: {:?}\nlargest key: {:?}",
+            id,
+            sst.first_key(),
+            sst.last_key(),
+        );
         self.sstable_store
             .put(&sst, data, CachePolicy::Fill)
             .await?;
-        // println!("sst {} uploaded", id);
         debug!("sst {} uploaded", id);
         Ok(SstableInfo { id, data_size })
     }
 
     async fn notify_update_version(&mut self, sst_infos: Vec<SstableInfo>) -> Result<()> {
-        // println!("notify update version");
         let request = Request::new(InsertL0Request {
             node_id: self.node_id,
             sst_infos,
@@ -178,7 +177,7 @@ impl SstableUploader {
             }
         }
         self.lsm_tree.drop_oldest_immutable_memtable();
-        // println!("last imm dropped");
+        trace!("last imm dropped");
         Ok(())
     }
 

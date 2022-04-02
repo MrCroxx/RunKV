@@ -14,7 +14,7 @@ use runkv_storage::components::{
 use runkv_storage::iterator::{BoxedIterator, Iterator, MergeIterator, Seek, SstableIterator};
 use runkv_storage::utils::{timestamp, user_key, value};
 use tonic::{Request, Response, Status};
-use tracing::debug;
+use tracing::{debug, trace};
 
 use crate::compaction_filter::{CompactionFilter, DefaultCompactionFilter};
 use crate::error::Result;
@@ -158,6 +158,7 @@ impl Exhauster {
         let (meta, data) = builder.build()?;
         let data_size = meta.data_size as u64;
         let sst = Sstable::new(sst_id, Arc::new(meta));
+        trace!("build sst: {:#?}", sst);
         self.sstable_store
             .put(&sst, data, CachePolicy::Fill)
             .await?;
