@@ -319,16 +319,12 @@ impl VersionManagerCore {
         let mut last_user_key = Bytes::default();
         for sst_id in sst_ids {
             let sst = self.sstable_store.sstable(sst_id).await?;
-            let sst_first_user_key = Bytes::copy_from_slice(user_key(&sst.first_key()));
-            let sst_last_user_key = Bytes::copy_from_slice(user_key(&sst.last_key()));
-            if first_user_key.is_empty() {
-                first_user_key = sst_first_user_key;
-            } else if sst_first_user_key < first_user_key {
+            let sst_first_user_key = Bytes::copy_from_slice(user_key(sst.first_key()));
+            let sst_last_user_key = Bytes::copy_from_slice(user_key(sst.last_key()));
+            if first_user_key.is_empty() || sst_first_user_key < first_user_key {
                 first_user_key = sst_first_user_key;
             }
-            if last_user_key.is_empty() {
-                last_user_key = sst_last_user_key
-            } else if sst_last_user_key > last_user_key {
+            if last_user_key.is_empty() || sst_last_user_key > last_user_key {
                 last_user_key = sst_last_user_key
             }
         }
