@@ -1,2 +1,10 @@
 [workspace]
-members = ["common", "exhauster", "proto", "rudder", "storage", "tests", "wheel"]
+members = [
+    "common",
+    "exhauster",
+    "proto",
+    "rudder",
+    "storage",
+    "tests",
+    "wheel",
+]

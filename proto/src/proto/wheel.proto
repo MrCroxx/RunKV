@@ -10,6 +10,11 @@ message UpdateKeyRangesRequest {
 
 message UpdateKeyRangesResponse {}
 
+message KvRequest {}
+
+message KvResponse {}
+
 service WheelService {
   rpc UpdateKeyRanges(UpdateKeyRangesRequest) returns (UpdateKeyRangesResponse);
+  rpc Kv(KvRequest) returns (KvResponse);
 }

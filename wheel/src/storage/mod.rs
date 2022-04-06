@@ -1,2 +1,4 @@
 pub mod lsm_tree;
-pub mod raftstore;
+
+#[allow(dead_code)]
+pub mod raft_log_store;

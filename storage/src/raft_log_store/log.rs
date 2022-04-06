@@ -6,10 +6,9 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 use tracing::trace;
 
+use super::DEFAULT_LOG_BATCH_SIZE;
 use crate::entry::Entry;
 use crate::error::{Error, Result};
-
-const DEFAULT_LOG_BATCH_SIZE: usize = 8 << 10;
 
 #[derive(Clone, Debug)]
 pub struct PipeLogOptions {
@@ -168,19 +167,22 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use crate::entry::RaftLog;
+    use crate::entry::RaftLogBatchBuilder;
 
     #[test(tokio::test)]
     async fn test_pipe_log_recovery() {
         let tempdir = tempfile::tempdir().unwrap();
         let options = PipeLogOptions {
             path: tempdir.path().to_str().unwrap().to_string(),
-            log_file_capacity: 1024,
+            // Estimated size of each compressed entry is 111.
+            log_file_capacity: 100,
         };
         let log = PipeLog::open(options.clone()).await.unwrap();
-        let batches = generate_log_batches(4, 16, vec![b'x'; 64]);
-        for entries in batches.clone() {
-            log.append(entries).await.unwrap();
+        let entries = generate_entries(4, 16, vec![b'x'; 64]);
+        assert_eq!(entries.len(), 4);
+
+        for entry in entries.iter().cloned() {
+            log.append(vec![entry]).await.unwrap();
         }
         assert_eq!(log.core.lock().await.frozen_files.len(), 4);
         let mut buf = vec![];
@@ -191,16 +193,11 @@ mod tests {
                 .unwrap();
         }
         let mut buf = &buf[..];
-        let decoded_batches = (0..4)
+        let decoded_entries = (0..4)
             .into_iter()
-            .map(|_| {
-                (0..16)
-                    .into_iter()
-                    .map(|_| Entry::decode(&mut buf))
-                    .collect_vec()
-            })
+            .map(|_| Entry::decode(&mut buf))
             .collect_vec();
-        assert_eq!(decoded_batches, batches);
+        assert_eq!(decoded_entries, entries);
         log.close().await.unwrap();
 
         // Recover pipe log.
@@ -215,38 +212,25 @@ mod tests {
                 .unwrap();
         }
         let mut buf = &buf[..];
-        let decoded_batches = (0..4)
+        let decoded_entries = (0..4)
             .into_iter()
-            .map(|_| {
-                (0..16)
-                    .into_iter()
-                    .map(|_| Entry::decode(&mut buf))
-                    .collect_vec()
-            })
+            .map(|_| Entry::decode(&mut buf))
             .collect_vec();
-        assert_eq!(decoded_batches, batches);
+        assert_eq!(decoded_entries, entries);
     }
 
-    fn generate_log_batches(
-        batch_count: usize,
-        batch_size: usize,
-        data: Vec<u8>,
-    ) -> Vec<Vec<Entry>> {
-        let mut batches = vec![];
-        let mut index = 0;
-        for _ in 0..batch_count {
-            let mut batch = vec![];
-            for _ in 0..batch_size {
-                index += 1;
-                batch.push(Entry::RaftLog(RaftLog::Entry {
-                    group: 1,
-                    term: 1,
-                    index,
-                    data: data.clone(),
-                }));
+    fn generate_entries(groups: usize, group_size: usize, data: Vec<u8>) -> Vec<Entry> {
+        let mut builder = RaftLogBatchBuilder::default();
+
+        for group in 1..=groups as u64 {
+            let term = 1;
+            for index in 1..=group_size as u64 {
+                builder.add(group, term, index, &data);
             }
-            batches.push(batch);
         }
+        let batches = builder.build();
+        let batches = batches.into_iter().map(|batch| batch.into()).collect_vec();
+        assert_eq!(batches.len(), groups);
         batches
     }
 }

@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use runkv_proto::wheel::wheel_service_server::WheelService;
-use runkv_proto::wheel::{UpdateKeyRangesRequest, UpdateKeyRangesResponse};
+use runkv_proto::wheel::{KvRequest, KvResponse, UpdateKeyRangesRequest, UpdateKeyRangesResponse};
 use tonic::{Request, Response, Status};
 
 use crate::meta::MetaStoreRef;
@@ -44,5 +44,9 @@ impl WheelService for Wheel {
             .map_err(internal)?;
         let rsp = UpdateKeyRangesResponse::default();
         Ok(Response::new(rsp))
+    }
+
+    async fn kv(&self, _request: Request<KvRequest>) -> Result<Response<KvResponse>, Status> {
+        todo!()
     }
 }
