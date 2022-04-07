@@ -2,8 +2,12 @@
 pub enum RaftLogStoreError {
     #[error("group {0} not exists")]
     GroupNotExists(u64),
+    #[error("group {0} already exists")]
+    GroupAlreadyExists(u64),
     #[error("encode error: {0}")]
     EncodeError(String),
+    #[error("raft log gap exists: [{start}, {end})")]
+    RaftLogGap { start: u64, end: u64 },
     #[error("other: {0}")]
     Other(String),
 }
