@@ -1,7 +1,7 @@
 use std::io::Cursor;
 
 use async_trait::async_trait;
-use runkv_storage::store::RaftLogStore;
+use runkv_storage::raft_log_store::RaftLogStore;
 use serde::{Deserialize, Serialize};
 
 pub type RaftNodeId = u64;

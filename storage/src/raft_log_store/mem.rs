@@ -1,5 +1,6 @@
 use std::collections::btree_map::{BTreeMap, Entry};
 
+use itertools::Itertools;
 use tokio::sync::RwLock;
 
 use super::error::RaftLogStoreError;
@@ -7,11 +8,12 @@ use crate::error::Result;
 
 const DEFAULT_INDICES_INIT_CAPACITY: usize = 1024;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct EntryIndex {
     /// Prevent log entries with lower terms added from GC shadowing those with the same indices
     /// but with higher terms.
     pub term: u64,
+    pub file_id: u64,
     pub block_offset: usize,
     pub block_len: usize,
     pub offset: usize,
@@ -51,6 +53,21 @@ impl MemStates {
             }
         }
         Ok(())
+    }
+
+    pub async fn may_add_group(&self, group: u64, first_index: u64) -> bool {
+        let mut guard = self.states.write().await;
+        match guard.entry(group) {
+            Entry::Occupied(_) => false,
+            Entry::Vacant(v) => {
+                v.insert(RwLock::new(MemState {
+                    first_index,
+                    indices: Vec::with_capacity(DEFAULT_INDICES_INIT_CAPACITY),
+                    kvs: BTreeMap::default(),
+                }));
+                true
+            }
+        }
     }
 
     /// # Safety
@@ -143,7 +160,7 @@ impl MemStates {
                 continue;
             }
 
-            *state_index = *index;
+            *state_index = index.clone();
         }
 
         Ok(())
@@ -178,6 +195,37 @@ impl MemStates {
         state.first_index = index;
 
         Ok(())
+    }
+
+    pub async fn entries(&self, group: u64, index: u64, max_len: usize) -> Result<Vec<EntryIndex>> {
+        let guard = self.states.read().await;
+        let state = guard
+            .get(&group)
+            .ok_or(RaftLogStoreError::GroupNotExists(group))?
+            .read()
+            .await;
+
+        if index < state.first_index {
+            return Err(RaftLogStoreError::RaftLogGap {
+                start: index,
+                end: state.first_index,
+            }
+            .into());
+        }
+
+        if index >= state.first_index + state.indices.len() as u64 {
+            return Err(RaftLogStoreError::RaftLogGap {
+                start: state.first_index + state.indices.len() as u64,
+                end: index,
+            }
+            .into());
+        }
+
+        let start = (index - state.first_index) as usize;
+        let end = std::cmp::min(start + max_len, state.indices.len());
+
+        let indices = (&state.indices[start..end]).iter().cloned().collect_vec();
+        Ok(indices)
     }
 
     pub async fn put(&self, group: u64, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
@@ -225,7 +273,9 @@ mod tests {
     #[test(tokio::test)]
     async fn test_raft_log() {
         let states = MemStates::default();
+
         states.add_group(1, 1).await.unwrap();
+
         states.append(1, 1, gen_indices(1, 100)).await.unwrap();
         assert_range(&states, 1, 1..101).await;
         assert!(states.append(1, 102, gen_indices(1, 100)).await.is_err());
@@ -240,6 +290,28 @@ mod tests {
         assert_range(&states, 1, 251..251).await;
         assert!(states.compact(1, 252).await.is_err());
         states.compact(1, 101).await.unwrap();
+
+        states.append(1, 251, gen_indices(2, 100)).await.unwrap();
+        assert_range(&states, 1, 251..351).await;
+        assert_eq!(
+            states.entries(1, 251, usize::MAX).await.unwrap(),
+            gen_indices(2, 100)
+        );
+        states.append(1, 301, gen_indices(3, 100)).await.unwrap();
+        assert_range(&states, 1, 251..401).await;
+        assert_eq!(
+            states.entries(1, 251, usize::MAX).await.unwrap(),
+            [gen_indices(2, 50), gen_indices(3, 100)].concat(),
+        );
+        states.append(1, 1, gen_indices(1, 400)).await.unwrap();
+        assert_range(&states, 1, 251..401).await;
+        assert_eq!(
+            states.entries(1, 251, usize::MAX).await.unwrap(),
+            [gen_indices(2, 50), gen_indices(3, 100)].concat(),
+        );
+        assert!(states.entries(1, 250, usize::MAX).await.is_err());
+        assert!(states.entries(1, 401, usize::MAX).await.is_err());
+
         states.remove_group(1).await.unwrap();
     }
 
@@ -278,6 +350,7 @@ mod tests {
         vec![
             EntryIndex {
                 term,
+                file_id: 1,
                 block_offset: 0,
                 block_len: 0,
                 offset: 0,
