@@ -5,9 +5,7 @@ use runkv_common::coding::CompressionAlgorithm;
 
 use super::DEFAULT_LOG_BATCH_SIZE;
 use crate::raft_log_store::error::RaftLogStoreError;
-use crate::utils::{
-    crc32sum, get_length_prefixed_slice, put_length_prefixed_slice, BufExt, BufMutExt,
-};
+use crate::utils::{crc32sum, get_length_prefixed_slice, put_length_prefixed_slice};
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Entry {
@@ -70,6 +68,7 @@ pub struct RaftLogBatch {
     term: u64,
     first_index: u64,
     offsets: Vec<usize>,
+    /// Note: Only used for encoding.
     data: Vec<u8>,
 }
 
@@ -101,6 +100,10 @@ impl RaftLogBatch {
         self.group
     }
 
+    pub fn first_index(&self) -> u64 {
+        self.first_index
+    }
+
     pub fn term(&self) -> u64 {
         self.term
     }
@@ -108,6 +111,12 @@ impl RaftLogBatch {
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.offsets.len() - 1
+    }
+
+    pub fn data_segment_location(&self) -> (usize, usize) {
+        let offset = 8 + 8 + 8 + 8 + self.offsets.len() * 4 + 8;
+        let len = self.offsets[self.offsets.len() - 1];
+        (offset, len)
     }
 
     pub fn location(&self, index: usize) -> (usize, usize) {
@@ -120,11 +129,11 @@ impl RaftLogBatch {
     /// Format:
     ///
     /// ```plain
-    /// | group (8B) | term (8B) | first index (8B) | N+1 (8B) | offset 0 | ... | offset (N-1) | offset N (phantom) |
+    /// | group (8B) | term (8B) | first index (8B) | N+1 (8B) | offset 0 (4B) | ... | offset (N-1) | offset N (phantom) |
     /// | data segment len (8B) | data block (compressed) | compression algorithm (1B) | crc32sum (4B) |
     ///                         | <---------- data segment ------------------------------------------->|
     /// ```
-    pub fn encode(&self, mut buf_meta: &mut Vec<u8>, buf_data: &mut Vec<u8>) {
+    pub fn encode(&self, buf_meta: &mut Vec<u8>, buf_data: &mut Vec<u8>) {
         debug_assert!(!self.offsets.is_empty());
 
         // Encode meta.
@@ -133,7 +142,7 @@ impl RaftLogBatch {
         buf_meta.put_u64_le(self.first_index);
         buf_meta.put_u64_le(self.offsets.len() as u64);
         for offset in self.offsets.iter() {
-            buf_meta.put_var_u32(*offset as u32);
+            buf_meta.put_u32_le(*offset as u32);
         }
 
         // Encode data.
@@ -160,14 +169,14 @@ impl RaftLogBatch {
     }
 
     /// Decode meta only. [`RaftLogBatch.data`] will be left empty.
-    pub fn decode(mut buf: &mut &[u8]) -> Self {
+    pub fn decode(buf: &mut &[u8]) -> Self {
         let group = buf.get_u64_le();
         let term = buf.get_u64_le();
         let first_index = buf.get_u64_le();
         let offsets_len = buf.get_u64_le() as usize;
         let mut offsets = Vec::with_capacity(offsets_len);
         for _ in 0..offsets_len {
-            let offset = buf.get_var_u32() as usize;
+            let offset = buf.get_u32_le() as usize;
             offsets.push(offset);
         }
         let data_segment_len = buf.get_u64_le() as usize;

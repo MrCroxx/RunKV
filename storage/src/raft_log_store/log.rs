@@ -11,25 +11,25 @@ use crate::entry::Entry;
 use crate::error::{Error, Result};
 
 #[derive(Clone, Debug)]
-pub struct PipeLogOptions {
+pub struct LogOptions {
     path: String,
     log_file_capacity: usize,
 }
 
-struct PipeLogCore {
+struct LogCore {
     active_file: File,
     frozen_files: Vec<File>,
     first_log_file_id: u64,
 }
 
-pub struct PipeLog {
+pub struct Log {
     path: String,
     log_file_capacity: usize,
-    core: Mutex<PipeLogCore>,
+    core: Mutex<LogCore>,
 }
 
-impl PipeLog {
-    pub async fn open(options: PipeLogOptions) -> Result<Self> {
+impl Log {
+    pub async fn open(options: LogOptions) -> Result<Self> {
         create_dir_all(&options.path).await?;
         let (frozen_files, first_log_file_id) = {
             let mut frozen_files = vec![];
@@ -68,7 +68,7 @@ impl PipeLog {
         let active_file_id = first_log_file_id + frozen_files.len() as u64 + 1;
         let active_file = Self::new_active_file(&options.path, active_file_id).await?;
 
-        let core = PipeLogCore {
+        let core = LogCore {
             active_file,
             frozen_files,
             first_log_file_id,
@@ -89,19 +89,19 @@ impl PipeLog {
         Ok(())
     }
 
-    pub async fn append(&self, entries: Vec<Entry>) -> Result<()> {
+    pub async fn push(&self, entry: Entry) -> Result<(usize, usize)> {
         let mut guard = self.core.lock().await;
+        let start = guard.active_file.metadata().await?.len() as usize;
         let mut buf = Vec::with_capacity(DEFAULT_LOG_BATCH_SIZE);
-        for entry in entries {
-            entry.encode(&mut buf);
-        }
+        entry.encode(&mut buf);
         guard.active_file.write_all(&buf).await?;
         guard.active_file.sync_data().await?;
-        if guard.active_file.metadata().await?.len() as usize >= self.log_file_capacity {
+        let end = guard.active_file.metadata().await?.len() as usize;
+        if end >= self.log_file_capacity {
             drop(guard);
             self.rotate().await?;
         }
-        Ok(())
+        Ok((start, end - start))
     }
 
     pub async fn read(&self, log_file_id: u64, offset: u64, len: usize) -> Result<Vec<u8>> {
@@ -119,7 +119,7 @@ impl PipeLog {
     }
 }
 
-impl PipeLog {
+impl Log {
     async fn rotate(&self) -> Result<()> {
         let mut guard = self.core.lock().await;
         // Sync old active file.
@@ -172,17 +172,17 @@ mod tests {
     #[test(tokio::test)]
     async fn test_pipe_log_recovery() {
         let tempdir = tempfile::tempdir().unwrap();
-        let options = PipeLogOptions {
+        let options = LogOptions {
             path: tempdir.path().to_str().unwrap().to_string(),
             // Estimated size of each compressed entry is 111.
             log_file_capacity: 100,
         };
-        let log = PipeLog::open(options.clone()).await.unwrap();
+        let log = Log::open(options.clone()).await.unwrap();
         let entries = generate_entries(4, 16, vec![b'x'; 64]);
         assert_eq!(entries.len(), 4);
 
         for entry in entries.iter().cloned() {
-            log.append(vec![entry]).await.unwrap();
+            log.push(entry).await.unwrap();
         }
         assert_eq!(log.core.lock().await.frozen_files.len(), 4);
         let mut buf = vec![];
@@ -202,7 +202,7 @@ mod tests {
 
         // Recover pipe log.
         drop(log);
-        let log = PipeLog::open(options).await.unwrap();
+        let log = Log::open(options).await.unwrap();
         assert_eq!(log.core.lock().await.frozen_files.len(), 5);
         let mut buf = vec![];
         for i in 0..4 {
