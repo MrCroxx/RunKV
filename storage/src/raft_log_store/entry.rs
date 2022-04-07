@@ -1,11 +1,13 @@
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Read, Write};
 
 use bytes::{Buf, BufMut};
+use lz4::Decoder;
 use runkv_common::coding::CompressionAlgorithm;
 
 use super::DEFAULT_LOG_BATCH_SIZE;
+use crate::error::Result;
 use crate::raft_log_store::error::RaftLogStoreError;
-use crate::utils::{crc32sum, get_length_prefixed_slice, put_length_prefixed_slice};
+use crate::utils::{crc32check, crc32sum, get_length_prefixed_slice, put_length_prefixed_slice};
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Entry {
@@ -37,9 +39,7 @@ impl Entry {
         match self {
             Self::RaftLogBatch(batch) => {
                 buf.put_u8(0);
-                let mut buf_data = Vec::with_capacity(DEFAULT_LOG_BATCH_SIZE);
-                batch.encode(buf, &mut buf_data);
-                buf.put_slice(&buf_data);
+                batch.encode(buf);
             }
             Self::Compact(compact) => {
                 buf.put_u8(1);
@@ -68,6 +68,7 @@ pub struct RaftLogBatch {
     term: u64,
     first_index: u64,
     offsets: Vec<usize>,
+    data_len: usize,
     /// Note: Only used for encoding.
     data: Vec<u8>,
 }
@@ -90,6 +91,7 @@ impl Default for RaftLogBatch {
             term: 0,
             first_index: 0,
             offsets: vec![],
+            data_len: 0,
             data: Vec::with_capacity(DEFAULT_LOG_BATCH_SIZE),
         }
     }
@@ -115,38 +117,26 @@ impl RaftLogBatch {
 
     pub fn data_segment_location(&self) -> (usize, usize) {
         let offset = 8 + 8 + 8 + 8 + self.offsets.len() * 4 + 8;
-        let len = self.offsets[self.offsets.len() - 1];
+        let len = self.data_len;
         (offset, len)
     }
 
     pub fn location(&self, index: usize) -> (usize, usize) {
-        debug_assert!(index < self.len() - 1);
+        debug_assert!(index < self.len());
         let offset = self.offsets[index];
         let len = self.offsets[index + 1] - offset;
         (offset, len)
     }
 
+    /// Convert raw data to encoded data.
+    ///
     /// Format:
     ///
     /// ```plain
-    /// | group (8B) | term (8B) | first index (8B) | N+1 (8B) | offset 0 (4B) | ... | offset (N-1) | offset N (phantom) |
-    /// | data segment len (8B) | data block (compressed) | compression algorithm (1B) | crc32sum (4B) |
-    ///                         | <---------- data segment ------------------------------------------->|
+    /// | data block (compressed) | compression algorithm (1B) | crc32sum (4B) |
     /// ```
-    pub fn encode(&self, buf_meta: &mut Vec<u8>, buf_data: &mut Vec<u8>) {
-        debug_assert!(!self.offsets.is_empty());
-
-        // Encode meta.
-        buf_meta.put_u64_le(self.group);
-        buf_meta.put_u64_le(self.term);
-        buf_meta.put_u64_le(self.first_index);
-        buf_meta.put_u64_le(self.offsets.len() as u64);
-        for offset in self.offsets.iter() {
-            buf_meta.put_u32_le(*offset as u32);
-        }
-
-        // Encode data.
-        let buf = {
+    fn encode_data(&mut self) {
+        let mut buf = {
             let mut encoder = lz4::EncoderBuilder::new()
                 .level(4)
                 .build(Vec::with_capacity(self.data.len()).writer())
@@ -160,12 +150,33 @@ impl RaftLogBatch {
             result.map_err(RaftLogStoreError::encode_error).unwrap();
             writer.into_inner()
         };
+        CompressionAlgorithm::Lz4.encode(&mut buf);
         let checksum = crc32sum(&buf);
-        let len = buf.len() + 1 + 4;
-        buf_data.put_u64_le(len as u64);
-        buf_data.put_slice(&buf);
-        CompressionAlgorithm::Lz4.encode(buf_data);
-        buf_data.put_u32_le(checksum);
+        buf.put_u32_le(checksum);
+        self.data = buf;
+        self.data_len = self.data.len()
+    }
+
+    /// Format:
+    ///
+    /// ```plain
+    /// | group (8B) | term (8B) | first index (8B) | N+1 (8B) | offset 0 (4B) | ... | offset (N-1) | offset N (phantom) |
+    /// | data segment len (8B) | data block (compressed) | compression algorithm (1B) | crc32sum (4B) |
+    ///                         | <---------- data segment ------------------------------------------->|
+    /// ```
+    fn encode(&self, buf: &mut Vec<u8>) {
+        debug_assert!(!self.offsets.is_empty());
+
+        // Encode meta.
+        buf.put_u64_le(self.group);
+        buf.put_u64_le(self.term);
+        buf.put_u64_le(self.first_index);
+        buf.put_u64_le(self.offsets.len() as u64);
+        for offset in self.offsets.iter() {
+            buf.put_u32_le(*offset as u32);
+        }
+        buf.put_u64_le(self.data_len as u64);
+        buf.put_slice(&self.data)
     }
 
     /// Decode meta only. [`RaftLogBatch.data`] will be left empty.
@@ -186,8 +197,39 @@ impl RaftLogBatch {
             term,
             first_index,
             offsets,
+            data_len: data_segment_len,
             data: vec![],
         }
+    }
+
+    pub fn extract_data_segment(buf: &[u8]) -> Result<Vec<u8>> {
+        let checksum = (&buf[buf.len() - 4..]).get_u32_le();
+        let buf = &buf[..buf.len() - 4];
+        if !crc32check(buf, checksum) {
+            return Err(RaftLogStoreError::ChecksumMismatch {
+                expected: checksum,
+                get: crc32sum(buf),
+            }
+            .into());
+        }
+        let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 1..])
+            .map_err(RaftLogStoreError::decode_error)?;
+        let buf = &buf[..buf.len() - 1];
+        let buf = match compression {
+            CompressionAlgorithm::None => buf.to_vec(),
+            CompressionAlgorithm::Lz4 => {
+                let mut decoder = Decoder::new(buf.reader())
+                    .map_err(RaftLogStoreError::decode_error)
+                    .unwrap();
+                let mut decoded = Vec::with_capacity(buf.len());
+                decoder
+                    .read_to_end(&mut decoded)
+                    .map_err(RaftLogStoreError::decode_error)
+                    .unwrap();
+                decoded
+            }
+        };
+        Ok(buf)
     }
 }
 
@@ -216,6 +258,9 @@ impl RaftLogBatchBuilder {
 
     pub fn build(mut self) -> Vec<RaftLogBatch> {
         self.may_rotate(0, 0, 0);
+        for batch in self.batches.iter_mut() {
+            batch.encode_data()
+        }
         self.batches
     }
 

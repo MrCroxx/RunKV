@@ -1,19 +1,22 @@
 use std::path::Path;
+use std::sync::Arc;
 
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use tokio::fs::{create_dir_all, read_dir, File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 use tracing::trace;
 
+use super::entry::Entry;
+use super::error::RaftLogStoreError;
 use super::DEFAULT_LOG_BATCH_SIZE;
-use crate::entry::Entry;
-use crate::error::{Error, Result};
+use crate::error::Result;
 
 #[derive(Clone, Debug)]
 pub struct LogOptions {
-    path: String,
-    log_file_capacity: usize,
+    pub path: String,
+    pub log_file_capacity: usize,
 }
 
 struct LogCore {
@@ -40,23 +43,28 @@ impl Log {
                     entry
                         .file_name()
                         .into_string()
-                        .map_err(|s| Error::Other(format!("invalid file name: {:?}", s)))?
+                        .map_err(|s| {
+                            RaftLogStoreError::Other(format!("invalid file name: {:?}", s))
+                        })?
                         .parse::<u64>()
-                        .map_err(|e| Error::Other(format!("invalid file name: {}", e)))?,
+                        .map_err(|e| {
+                            RaftLogStoreError::Other(format!("invalid file name: {}", e))
+                        })?,
                     file,
                 ));
             }
             if frozen_files.is_empty() {
-                (vec![], 0)
+                (vec![], 1)
             } else {
                 frozen_files.sort_by_key(|(id, _)| *id);
                 let first_log_file_id = frozen_files[0].0;
                 for (i, frozen_file) in frozen_files.iter().enumerate() {
                     if frozen_file.0 != first_log_file_id + i as u64 {
-                        return Err(Error::Other(format!(
+                        return Err(RaftLogStoreError::Other(format!(
                             "log file {} is missing",
                             first_log_file_id + i as u64
-                        )));
+                        ))
+                        .into());
                     }
                 }
                 (
@@ -65,7 +73,7 @@ impl Log {
                 )
             }
         };
-        let active_file_id = first_log_file_id + frozen_files.len() as u64 + 1;
+        let active_file_id = first_log_file_id + frozen_files.len() as u64;
         let active_file = Self::new_active_file(&options.path, active_file_id).await?;
 
         let core = LogCore {
@@ -73,8 +81,6 @@ impl Log {
             frozen_files,
             first_log_file_id,
         };
-
-        // TODO: Replay frozen logs.
 
         Ok(Self {
             core: Mutex::new(core),
@@ -89,8 +95,10 @@ impl Log {
         Ok(())
     }
 
-    pub async fn push(&self, entry: Entry) -> Result<(usize, usize)> {
+    /// Push [`entry`] to log file. Returns `(file id, offset, len)`.
+    pub async fn push(&self, entry: Entry) -> Result<(u64, usize, usize)> {
         let mut guard = self.core.lock().await;
+        let file_id = guard.first_log_file_id + guard.frozen_files.len() as u64;
         let start = guard.active_file.metadata().await?.len() as usize;
         let mut buf = Vec::with_capacity(DEFAULT_LOG_BATCH_SIZE);
         entry.encode(&mut buf);
@@ -101,7 +109,7 @@ impl Log {
             drop(guard);
             self.rotate().await?;
         }
-        Ok((start, end - start))
+        Ok((file_id, start, end - start))
     }
 
     pub async fn read(&self, log_file_id: u64, offset: u64, len: usize) -> Result<Vec<u8>> {
@@ -117,6 +125,40 @@ impl Log {
         file.read_exact(&mut buf).await?;
         Ok(buf)
     }
+
+    /// Yield [`(file id, offset, Entry)`] of all frozen logs in order.
+    // TODO: Remove clippy exception. Currently clippy reports `needless_lifetime` with
+    // `try_stream`.
+    #[allow(clippy::needless_lifetimes)]
+    #[try_stream(ok = (u64,usize, Entry), error = RaftLogStoreError)]
+    pub async fn replay(&self) {
+        let guard = self.core.lock().await;
+        let begin_log_file_id = guard.first_log_file_id;
+        let end_log_file_id = guard.first_log_file_id + guard.frozen_files.len() as u64;
+        drop(guard);
+
+        let mut buf = Vec::with_capacity(DEFAULT_LOG_BATCH_SIZE);
+        for (i, current_log_file_id) in (begin_log_file_id..end_log_file_id).enumerate() {
+            trace!("replay index: {} file id: {}", i, current_log_file_id);
+            let mut guard = self.core.lock().await;
+            guard.frozen_files[i]
+                .seek(std::io::SeekFrom::Start(0))
+                .await?;
+            buf.clear();
+            guard.frozen_files[i].read_to_end(&mut buf).await?;
+            drop(guard);
+            let cursor = &mut &buf[..];
+            while !cursor.is_empty() {
+                let offset = buf.len() - cursor.len();
+                let entry = Entry::decode(cursor);
+                yield (current_log_file_id, offset, entry);
+            }
+        }
+    }
+
+    pub async fn frozen_file_count(&self) -> usize {
+        self.core.lock().await.frozen_files.len()
+    }
 }
 
 impl Log {
@@ -125,7 +167,7 @@ impl Log {
         // Sync old active file.
         guard.active_file.sync_all().await?;
         // Rotate active file.
-        let active_file_id = guard.first_log_file_id + guard.frozen_files.len() as u64 + 1;
+        let active_file_id = guard.first_log_file_id + guard.frozen_files.len() as u64;
         let new_active_file_id = active_file_id + 1;
         guard.active_file = Self::new_active_file(&self.path, new_active_file_id).await?;
         self.sync_dir().await?;
@@ -162,12 +204,14 @@ impl Log {
     }
 }
 
+pub type LogRef = Arc<Log>;
+
 #[cfg(test)]
 mod tests {
     use test_log::test;
 
     use super::*;
-    use crate::entry::RaftLogBatchBuilder;
+    use crate::raft_log_store::entry::RaftLogBatchBuilder;
 
     #[test(tokio::test)]
     async fn test_pipe_log_recovery() {
