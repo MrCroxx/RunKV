@@ -302,19 +302,28 @@ impl Compact {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Kv {
-    Put { key: Vec<u8>, value: Vec<u8> },
-    Delete { key: Vec<u8> },
+    Put {
+        group: u64,
+        key: Vec<u8>,
+        value: Vec<u8>,
+    },
+    Delete {
+        group: u64,
+        key: Vec<u8>,
+    },
 }
 
 impl Kv {
     pub fn encode(&self, buf: &mut Vec<u8>) {
         match self {
-            Kv::Put { key, value } => {
+            Kv::Put { group, key, value } => {
+                buf.put_u64_le(*group);
                 put_length_prefixed_slice(buf, key);
                 buf.put_u8(1);
                 put_length_prefixed_slice(buf, value);
             }
-            Kv::Delete { key } => {
+            Kv::Delete { group, key } => {
+                buf.put_u64_le(*group);
                 put_length_prefixed_slice(buf, key);
                 buf.put_u8(0);
             }
@@ -322,13 +331,14 @@ impl Kv {
     }
 
     pub fn decode(buf: &mut &[u8]) -> Self {
+        let group = buf.get_u64_le();
         let key = get_length_prefixed_slice(buf);
         match buf.get_u8() {
             1 => {
                 let value = get_length_prefixed_slice(buf);
-                Self::Put { key, value }
+                Self::Put { group, key, value }
             }
-            0 => Self::Delete { key },
+            0 => Self::Delete { group, key },
             _ => unreachable!(),
         }
     }
@@ -367,10 +377,12 @@ mod tests {
             Entry::RaftLogBatch(batches[2].clone()),
             Entry::RaftLogBatch(batches[3].clone()),
             Entry::Kv(Kv::Put {
+                group: 1,
                 key: b"some-key".to_vec(),
                 value: b"some-value".to_vec(),
             }),
             Entry::Kv(Kv::Delete {
+                group: 1,
                 key: b"some-key".to_vec(),
             }),
         ];

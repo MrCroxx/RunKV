@@ -55,13 +55,13 @@ impl MemStates {
         Ok(())
     }
 
-    pub async fn may_add_group(&self, group: u64, first_index: u64) -> bool {
+    pub async fn may_add_group(&self, group: u64) -> bool {
         let mut guard = self.states.write().await;
         match guard.entry(group) {
             Entry::Occupied(_) => false,
             Entry::Vacant(v) => {
                 v.insert(RwLock::new(MemState {
-                    first_index,
+                    first_index: 0,
                     indices: Vec::with_capacity(DEFAULT_INDICES_INIT_CAPACITY),
                     kvs: BTreeMap::default(),
                 }));
@@ -122,10 +122,15 @@ impl MemStates {
             .write()
             .await;
 
-        let state_next_index = state.first_index + state.indices.len() as u64;
+        let mut state_next_index = state.first_index + state.indices.len() as u64;
 
         // Return error if there is gap in raft log.
-        if first_index > state_next_index {
+
+        if state_next_index == 0 {
+            // Accpet anyway.
+            state.first_index = first_index;
+            state_next_index = first_index;
+        } else if first_index > state_next_index {
             return Err(RaftLogStoreError::RaftLogGap {
                 start: state_next_index,
                 end: first_index,
