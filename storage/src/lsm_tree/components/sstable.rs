@@ -155,19 +155,19 @@ impl SstableMeta {
         buf
     }
 
-    pub fn decode(buf: Vec<u8>) -> Self {
-        let mut rbuf = &buf[..];
-        let checksum = rbuf.get_u32_le();
-        crc32check(&buf, checksum);
-        let block_metas_len = rbuf.get_u32_le() as usize;
+    pub fn decode(buf: &mut &[u8]) -> Self {
+        // let mut rbuf = &buf[..];
+        let checksum = buf.get_u32_le();
+        crc32check(buf, checksum);
+        let block_metas_len = buf.get_u32_le() as usize;
         let mut block_metas = Vec::with_capacity(block_metas_len);
         for _ in 0..block_metas_len {
-            block_metas.push(BlockMeta::decode(&mut rbuf));
+            block_metas.push(BlockMeta::decode(buf));
         }
-        let bloom_filter_len = rbuf.get_u32_le() as usize;
-        let bloom_filter_bytes = rbuf.copy_to_bytes(bloom_filter_len).to_vec();
-        let data_size = rbuf.get_u64_le() as usize;
-        debug_assert!(rbuf.is_empty());
+        let bloom_filter_len = buf.get_u32_le() as usize;
+        let bloom_filter_bytes = buf.copy_to_bytes(bloom_filter_len).to_vec();
+        let data_size = buf.get_u64_le() as usize;
+        debug_assert!(buf.is_empty());
         Self {
             block_metas,
             bloom_filter_bytes,
@@ -193,8 +193,8 @@ impl SstableMeta {
         //     self.block_metas.last().as_ref().unwrap().last_key
         // );
 
-        !(&&self.block_metas.first().as_ref().unwrap().first_key[..] > range.end()
-            || &&self.block_metas.last().as_ref().unwrap().last_key[..] < range.start())
+        !(&self.block_metas.first().as_ref().unwrap().first_key[..] > *range.end()
+            || &self.block_metas.last().as_ref().unwrap().last_key[..] < *range.start())
     }
 
     fn is_overlap_with_user_key_range(&self, user_key_range: RangeInclusive<&[u8]>) -> bool {
@@ -404,8 +404,7 @@ mod tests {
 
         let begin = meta.block_metas[0].offset;
         let end = meta.block_metas[0].offset + meta.block_metas[0].len;
-        let mut bi =
-            BlockIterator::new(Arc::new(Block::decode(data[begin..end].to_vec()).unwrap()));
+        let mut bi = BlockIterator::new(Arc::new(Block::decode(&data[begin..end]).unwrap()));
         bi.seek(Seek::First).await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k01", 1)[..], bi.key());
@@ -419,8 +418,7 @@ mod tests {
 
         let begin = meta.block_metas[1].offset;
         let end = meta.block_metas[1].offset + meta.block_metas[1].len;
-        let mut bi =
-            BlockIterator::new(Arc::new(Block::decode(data[begin..end].to_vec()).unwrap()));
+        let mut bi = BlockIterator::new(Arc::new(Block::decode(&data[begin..end]).unwrap()));
         bi.seek(Seek::First).await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k04", 4)[..], bi.key());
@@ -456,8 +454,7 @@ mod tests {
 
         let begin = meta.block_metas[0].offset;
         let end = meta.block_metas[0].offset + meta.block_metas[0].len;
-        let mut bi =
-            BlockIterator::new(Arc::new(Block::decode(data[begin..end].to_vec()).unwrap()));
+        let mut bi = BlockIterator::new(Arc::new(Block::decode(&data[begin..end]).unwrap()));
         bi.seek(Seek::First).await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k01", 1)[..], bi.key());
@@ -471,8 +468,7 @@ mod tests {
 
         let begin = meta.block_metas[1].offset;
         let end = meta.block_metas[1].offset + meta.block_metas[1].len;
-        let mut bi =
-            BlockIterator::new(Arc::new(Block::decode(data[begin..end].to_vec()).unwrap()));
+        let mut bi = BlockIterator::new(Arc::new(Block::decode(&data[begin..end]).unwrap()));
         bi.seek(Seek::First).await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k04", 4)[..], bi.key());
@@ -501,7 +497,7 @@ mod tests {
         builder.add(b"k05", 5, None).unwrap();
         let (meta, _) = builder.build().unwrap();
         let buf = meta.encode();
-        let decoded_meta = SstableMeta::decode(buf);
+        let decoded_meta = SstableMeta::decode(&mut &buf[..]);
         assert_eq!(meta.block_metas.len(), decoded_meta.block_metas.len());
         for (block_meta, decoded_block_meta) in
             meta.block_metas.iter().zip(decoded_meta.block_metas.iter())

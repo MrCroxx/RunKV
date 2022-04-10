@@ -218,7 +218,7 @@ mod tests {
         builder.add(&full_key(b"k04", 4), b"v04");
         builder.add(&full_key(b"k05", 5), b"v05");
         let buf = builder.build();
-        BlockIterator::new(Arc::new(Block::decode(buf).unwrap()))
+        BlockIterator::new(Arc::new(Block::decode(&buf).unwrap()))
     }
 
     #[test(tokio::test)]

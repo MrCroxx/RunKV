@@ -22,7 +22,7 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn decode(buf: Vec<u8>) -> Result<Self> {
+    pub fn decode(buf: &[u8]) -> Result<Self> {
         // Verify checksum.
         let crc32sum = (&buf[buf.len() - 4..]).get_u32_le();
         if !crc32check(&buf[..buf.len() - 4], crc32sum) {
@@ -335,7 +335,7 @@ mod tests {
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
         let buf = builder.build();
-        let block = Arc::new(Block::decode(buf).unwrap());
+        let block = Arc::new(Block::decode(&buf).unwrap());
         let mut bi = BlockIterator::new(block);
 
         bi.seek(Seek::First).await.unwrap();
@@ -374,7 +374,7 @@ mod tests {
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
         let buf = builder.build();
-        let block = Arc::new(Block::decode(buf).unwrap());
+        let block = Arc::new(Block::decode(&buf).unwrap());
         let mut bi = BlockIterator::new(block);
 
         bi.seek(Seek::First).await.unwrap();
@@ -410,7 +410,7 @@ mod tests {
         builder.add(&full_key(b"k2", u64::MAX / 2), b"v21");
         builder.add(&full_key(b"k20000", u64::MAX), b"v22");
         let buf = builder.build();
-        let block = Arc::new(Block::decode(buf).unwrap());
+        let block = Arc::new(Block::decode(&buf).unwrap());
         let mut bi = BlockIterator::new(block);
 
         bi.seek(Seek::First).await.unwrap();

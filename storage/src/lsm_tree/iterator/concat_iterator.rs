@@ -210,7 +210,7 @@ mod tests {
             );
         }
         let buf = builder.build();
-        Arc::new(Block::decode(buf).unwrap())
+        Arc::new(Block::decode(&buf).unwrap())
     }
 
     #[test(tokio::test)]

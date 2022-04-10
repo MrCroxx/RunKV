@@ -54,7 +54,7 @@ impl SstableStore {
 
         if let CachePolicy::Fill = policy {
             for (block_idx, meta) in sst.block_metas_iter().enumerate() {
-                let block = Arc::new(Block::decode(data[meta.data_range()].to_vec())?);
+                let block = Arc::new(Block::decode(&data[meta.data_range()])?);
                 self.block_cache.insert(sst.id(), block_idx, block).await
             }
         }
@@ -84,7 +84,7 @@ impl SstableStore {
                 .ok_or(Error::ObjectStoreError(ObjectStoreError::ObjectNotFound(
                     data_path,
                 )))?;
-            let block = Block::decode(block_data)?;
+            let block = Block::decode(&block_data)?;
             Ok(Arc::new(block))
         };
 
@@ -119,7 +119,7 @@ impl SstableStore {
             .ok_or(Error::ObjectStoreError(ObjectStoreError::ObjectNotFound(
                 path,
             )))?;
-        let meta = Arc::new(SstableMeta::decode(buf));
+        let meta = Arc::new(SstableMeta::decode(&mut &buf[..]));
         self.meta_cache.insert(sst_id, meta.clone()).await;
         Ok(meta)
     }
@@ -193,7 +193,7 @@ mod tests {
                 .block(&sst, block_idx, CachePolicy::Fill)
                 .await
                 .unwrap();
-            let origin_block = Block::decode(data[block_meta.data_range()].to_vec()).unwrap();
+            let origin_block = Block::decode(&data[block_meta.data_range()]).unwrap();
             assert_eq!(origin_block.data(), block.data());
         }
         // Test fetch from object store.
@@ -202,7 +202,7 @@ mod tests {
                 .block(&sst, block_idx, CachePolicy::Disable)
                 .await
                 .unwrap();
-            let origin_block = Block::decode(data[block_meta.data_range()].to_vec()).unwrap();
+            let origin_block = Block::decode(&data[block_meta.data_range()]).unwrap();
             assert_eq!(origin_block.data(), block.data());
         }
     }
