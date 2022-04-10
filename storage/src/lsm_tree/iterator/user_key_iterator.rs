@@ -1,7 +1,6 @@
 use async_recursion::async_recursion;
 use async_trait::async_trait;
 
-
 use super::{BoxedIterator, Iterator, Seek};
 use crate::utils::{full_key, timestamp, user_key, value};
 use crate::Result;
@@ -223,7 +222,7 @@ mod tests {
                         .add(
                             format!("k{:02}", k).as_bytes(),
                             t as u64,
-                            Some(&format!("v{:02}-{:02}", k, t).as_bytes()),
+                            Some(format!("v{:02}-{:02}", k, t).as_bytes()),
                         )
                         .unwrap();
                 } else {

@@ -404,7 +404,8 @@ mod tests {
 
         let begin = meta.block_metas[0].offset;
         let end = meta.block_metas[0].offset + meta.block_metas[0].len;
-        let mut bi = BlockIterator::new(Arc::new(Block::decode(data[begin..end].to_vec()).unwrap()));
+        let mut bi =
+            BlockIterator::new(Arc::new(Block::decode(data[begin..end].to_vec()).unwrap()));
         bi.seek(Seek::First).await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k01", 1)[..], bi.key());
@@ -418,7 +419,8 @@ mod tests {
 
         let begin = meta.block_metas[1].offset;
         let end = meta.block_metas[1].offset + meta.block_metas[1].len;
-        let mut bi = BlockIterator::new(Arc::new(Block::decode(data[begin..end].to_vec()).unwrap()));
+        let mut bi =
+            BlockIterator::new(Arc::new(Block::decode(data[begin..end].to_vec()).unwrap()));
         bi.seek(Seek::First).await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k04", 4)[..], bi.key());
@@ -454,7 +456,8 @@ mod tests {
 
         let begin = meta.block_metas[0].offset;
         let end = meta.block_metas[0].offset + meta.block_metas[0].len;
-        let mut bi = BlockIterator::new(Arc::new(Block::decode(data[begin..end].to_vec()).unwrap()));
+        let mut bi =
+            BlockIterator::new(Arc::new(Block::decode(data[begin..end].to_vec()).unwrap()));
         bi.seek(Seek::First).await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k01", 1)[..], bi.key());
@@ -468,7 +471,8 @@ mod tests {
 
         let begin = meta.block_metas[1].offset;
         let end = meta.block_metas[1].offset + meta.block_metas[1].len;
-        let mut bi = BlockIterator::new(Arc::new(Block::decode(data[begin..end].to_vec()).unwrap()));
+        let mut bi =
+            BlockIterator::new(Arc::new(Block::decode(data[begin..end].to_vec()).unwrap()));
         bi.seek(Seek::First).await.unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k04", 4)[..], bi.key());

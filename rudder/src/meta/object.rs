@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use runkv_storage::ObjectStoreRef;
 
 use crate::error::{Error, Result};
@@ -17,28 +16,28 @@ impl ObjectMetaStore {
         Self { object_store, path }
     }
 
-    async fn put(&self, key: &Bytes, value: Bytes) -> Result<()> {
+    async fn put(&self, key: &Vec<u8>, value: Vec<u8>) -> Result<()> {
         self.object_store
             .put(&self.key(key), value)
             .await
             .map_err(Error::StorageError)
     }
 
-    async fn get(&self, key: &Bytes) -> Result<Option<Bytes>> {
+    async fn get(&self, key: &Vec<u8>) -> Result<Option<Vec<u8>>> {
         self.object_store
             .get(&self.key(key))
             .await
             .map_err(Error::StorageError)
     }
 
-    async fn remove(&self, key: &Bytes) -> Result<()> {
+    async fn remove(&self, key: &Vec<u8>) -> Result<()> {
         self.object_store
             .remove(&self.key(key))
             .await
             .map_err(Error::StorageError)
     }
 
-    fn key(&self, key: &Bytes) -> String {
+    fn key(&self, key: &Vec<u8>) -> String {
         format!("{}/{}", self.path, base64::encode(key))
     }
 }
@@ -57,8 +56,8 @@ mod tests {
     async fn test_crud() {
         let object_store = Arc::new(MemObjectStore::default());
         let store = ObjectMetaStore::new(object_store, "meta-test".to_string());
-        let key = Bytes::from_static(b"test-key");
-        let value = Bytes::from_static(b"test-value");
+        let key = b"test-key".to_vec();
+        let value = b"test-value".to_vec();
         store.put(&key, value.clone()).await.unwrap();
         let fetched_value = store.get(&key).await.unwrap().unwrap();
         assert_eq!(fetched_value, value);

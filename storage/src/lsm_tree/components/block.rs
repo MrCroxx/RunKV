@@ -51,7 +51,7 @@ impl Block {
         let n_restarts = (&buf[buf.len() - 4..]).get_u32_le();
         let data_len = buf.len() - 4 - n_restarts as usize * 4;
         let mut restart_points = Vec::with_capacity(n_restarts as usize);
-        let mut restart_points_buf = &buf[data_len..buf.len() - 4]; //fixme: remove mut
+        let mut restart_points_buf = &buf[data_len..buf.len() - 4]; // fixme: remove mut
         for _ in 0..n_restarts {
             restart_points.push(restart_points_buf.get_u32_le());
         }
@@ -247,7 +247,7 @@ impl BlockBuilder {
         // Update restart point if needed and calculate diff key.
         let diff_key = if self.entry_count % self.restart_count == 0 {
             self.restart_points.push(self.buf.len() as u32);
-            self.last_key = key.to_vec().into();
+            self.last_key = key.to_vec();
             key
         } else {
             key_diff(&self.last_key, key)
@@ -264,7 +264,7 @@ impl BlockBuilder {
         self.buf.put_slice(diff_key);
         self.buf.put_slice(value);
 
-        self.last_key = key.to_vec().into();
+        self.last_key = key.to_vec();
         self.entry_count += 1;
     }
 
