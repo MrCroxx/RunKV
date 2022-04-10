@@ -1,6 +1,6 @@
 use async_recursion::async_recursion;
 use async_trait::async_trait;
-use bytes::Bytes;
+
 
 use super::{BoxedIterator, Iterator, Seek};
 use crate::utils::{full_key, timestamp, user_key, value};
@@ -15,7 +15,7 @@ pub struct UserKeyIterator {
     /// Timestamp for snapshot read.
     timestamp: u64,
     /// Current user key.
-    key: Bytes,
+    key: Vec<u8>,
 }
 
 impl UserKeyIterator {
@@ -23,7 +23,7 @@ impl UserKeyIterator {
         Self {
             iter,
             timestamp,
-            key: Bytes::default(),
+            key: Vec::default(),
         }
     }
 
@@ -42,10 +42,10 @@ impl UserKeyIterator {
             }
             if self.timestamp >= ts && value(self.iter.value()).is_none() {
                 // Get tombstone, skip the former versions of this user key.
-                self.key = Bytes::from(uk.to_vec());
+                self.key = uk.to_vec();
             }
             if self.timestamp >= ts && uk != self.key {
-                self.key = Bytes::from(uk.to_vec());
+                self.key = uk.to_vec();
                 return Ok(found);
             }
             // Call inner iter `next` later. It's useful to impl `Seel::First`.
@@ -68,7 +68,7 @@ impl UserKeyIterator {
                 found = true;
             }
             if self.timestamp >= ts && uk != self.key {
-                self.key = Bytes::from(uk.to_vec());
+                self.key = uk.to_vec();
                 self.seek_latest_visiable_current_user_key().await?;
                 match value(self.iter.value()) {
                     Some(_) => return Ok(found),
@@ -198,7 +198,7 @@ mod tests {
         UserKeyIterator::new(Box::new(si), timestamp)
     }
 
-    fn build_sstable_for_test() -> (SstableMeta, Bytes) {
+    fn build_sstable_for_test() -> (SstableMeta, Vec<u8>) {
         let options = SstableBuilderOptions::default();
         let mut builder = SstableBuilder::new(options);
         // Negative numbers stands for delete on the absolute number timestamp.
@@ -223,7 +223,7 @@ mod tests {
                         .add(
                             format!("k{:02}", k).as_bytes(),
                             t as u64,
-                            Some(&Bytes::from(format!("v{:02}-{:02}", k, t))),
+                            Some(&format!("v{:02}-{:02}", k, t).as_bytes()),
                         )
                         .unwrap();
                 } else {

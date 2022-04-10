@@ -5,7 +5,6 @@ use aws_sdk_s3::error::{GetObjectError, GetObjectErrorKind};
 use aws_sdk_s3::types::SdkError;
 use aws_sdk_s3::{Client, Endpoint, Region};
 use aws_smithy_http::body::SdkBody;
-use bytes::Bytes;
 
 use super::ObjectStore;
 use crate::{ObjectStoreError, Result};
@@ -55,7 +54,7 @@ fn err(err: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> ObjectStoreE
 
 #[async_trait]
 impl ObjectStore for S3ObjectStore {
-    async fn put(&self, path: &str, obj: Bytes) -> Result<()> {
+    async fn put(&self, path: &str, obj: Vec<u8>) -> Result<()> {
         self.client
             .put_object()
             .bucket(&self.bucket)
@@ -67,7 +66,7 @@ impl ObjectStore for S3ObjectStore {
         Ok(())
     }
 
-    async fn get(&self, path: &str) -> Result<Option<Bytes>> {
+    async fn get(&self, path: &str) -> Result<Option<Vec<u8>>> {
         let req = self.client.get_object().bucket(&self.bucket).key(path);
         let rsp = match req.send().await {
             Ok(rsp) => rsp,
@@ -81,11 +80,11 @@ impl ObjectStore for S3ObjectStore {
             }) => return Ok(None),
             Err(e) => return Err(err(e).into()),
         };
-        let data = rsp.body.collect().await.map_err(err)?.into_bytes();
+        let data = rsp.body.collect().await.map_err(err)?.into_bytes().to_vec();
         Ok(Some(data))
     }
 
-    async fn get_range(&self, path: &str, range: Range<usize>) -> Result<Option<Bytes>> {
+    async fn get_range(&self, path: &str, range: Range<usize>) -> Result<Option<Vec<u8>>> {
         let req = self
             .client
             .get_object()
@@ -104,7 +103,7 @@ impl ObjectStore for S3ObjectStore {
             }) => return Ok(None),
             Err(e) => return Err(err(e).into()),
         };
-        let data = rsp.body.collect().await.map_err(err)?.into_bytes();
+        let data = rsp.body.collect().await.map_err(err)?.into_bytes().to_vec();
         Ok(Some(data))
     }
 

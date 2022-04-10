@@ -1,6 +1,6 @@
 use std::{cmp, ptr};
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut};
 
 use crate::components::KeyComparator;
 
@@ -134,11 +134,11 @@ pub fn crc32check(data: &[u8], crc32sum: u32) -> bool {
 ///
 /// |<------- full key ------->|
 /// ```
-pub fn full_key(user_key: &[u8], timestamp: u64) -> Bytes {
-    let mut buf = BytesMut::with_capacity(user_key.len() + 8);
+pub fn full_key(user_key: &[u8], timestamp: u64) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(user_key.len() + 8);
     buf.put_slice(user_key);
     buf.put_u64(!timestamp);
-    buf.freeze()
+    buf
 }
 
 /// Get user key in full key.
