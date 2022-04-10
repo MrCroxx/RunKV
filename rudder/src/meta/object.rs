@@ -16,28 +16,28 @@ impl ObjectMetaStore {
         Self { object_store, path }
     }
 
-    async fn put(&self, key: &Vec<u8>, value: Vec<u8>) -> Result<()> {
+    async fn put(&self, key: &[u8], value: Vec<u8>) -> Result<()> {
         self.object_store
             .put(&self.key(key), value)
             .await
             .map_err(Error::StorageError)
     }
 
-    async fn get(&self, key: &Vec<u8>) -> Result<Option<Vec<u8>>> {
+    async fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
         self.object_store
             .get(&self.key(key))
             .await
             .map_err(Error::StorageError)
     }
 
-    async fn remove(&self, key: &Vec<u8>) -> Result<()> {
+    async fn remove(&self, key: &[u8]) -> Result<()> {
         self.object_store
             .remove(&self.key(key))
             .await
             .map_err(Error::StorageError)
     }
 
-    fn key(&self, key: &Vec<u8>) -> String {
+    fn key(&self, key: &[u8]) -> String {
         format!("{}/{}", self.path, base64::encode(key))
     }
 }
