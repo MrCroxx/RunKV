@@ -80,11 +80,11 @@ impl Sstable {
         self.meta.data_size
     }
 
-    pub fn first_key(&self) -> &Vec<u8> {
+    pub fn first_key(&self) -> &[u8] {
         &self.meta.block_metas.first().as_ref().unwrap().first_key
     }
 
-    pub fn last_key(&self) -> &Vec<u8> {
+    pub fn last_key(&self) -> &[u8] {
         &self.meta.block_metas.last().as_ref().unwrap().last_key
     }
 
@@ -92,7 +92,7 @@ impl Sstable {
         self.meta.is_overlap_with(&rhs.meta)
     }
 
-    pub fn is_overlap_with_range(&self, range: RangeInclusive<&Vec<u8>>) -> bool {
+    pub fn is_overlap_with_range(&self, range: RangeInclusive<&[u8]>) -> bool {
         self.meta.is_overlap_with_range(range)
     }
 
@@ -156,17 +156,18 @@ impl SstableMeta {
     }
 
     pub fn decode(buf: Vec<u8>) -> Self {
-        let checksum = (&buf[..]).get_u32_le();
+        let mut rbuf = &buf[..];
+        let checksum = rbuf.get_u32_le();
         crc32check(&buf, checksum);
-        let block_metas_len = (&buf[..]).get_u32_le() as usize;
+        let block_metas_len = rbuf.get_u32_le() as usize;
         let mut block_metas = Vec::with_capacity(block_metas_len);
         for _ in 0..block_metas_len {
-            block_metas.push(BlockMeta::decode(&mut &buf[..]));
+            block_metas.push(BlockMeta::decode(&mut rbuf));
         }
-        let bloom_filter_len = (&buf[..]).get_u32_le() as usize;
-        let bloom_filter_bytes = (&buf[..]).copy_to_bytes(bloom_filter_len).to_vec();
-        let data_size = (&buf[..]).get_u64_le() as usize;
-        debug_assert!(buf.is_empty());
+        let bloom_filter_len = rbuf.get_u32_le() as usize;
+        let bloom_filter_bytes = rbuf.copy_to_bytes(bloom_filter_len).to_vec();
+        let data_size = rbuf.get_u64_le() as usize;
+        debug_assert!(rbuf.is_empty());
         Self {
             block_metas,
             bloom_filter_bytes,
@@ -181,7 +182,7 @@ impl SstableMeta {
         )
     }
 
-    fn is_overlap_with_range(&self, range: RangeInclusive<&Vec<u8>>) -> bool {
+    fn is_overlap_with_range(&self, range: RangeInclusive<&[u8]>) -> bool {
         // println!("range: {:?}", range);
         // println!(
         //     "first: {:?}",
@@ -192,8 +193,8 @@ impl SstableMeta {
         //     self.block_metas.last().as_ref().unwrap().last_key
         // );
 
-        !(&&self.block_metas.first().as_ref().unwrap().first_key > range.end()
-            || &&self.block_metas.last().as_ref().unwrap().last_key < range.start())
+        !(&&self.block_metas.first().as_ref().unwrap().first_key[..] > range.end()
+            || &&self.block_metas.last().as_ref().unwrap().last_key[..] < range.start())
     }
 
     fn is_overlap_with_user_key_range(&self, user_key_range: RangeInclusive<&[u8]>) -> bool {

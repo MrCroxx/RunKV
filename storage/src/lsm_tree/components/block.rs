@@ -100,7 +100,7 @@ impl Block {
     }
 
     #[cfg(test)]
-    pub fn data(&self) -> &Vec<u8> {
+    pub fn data(&self) -> &[u8] {
         &self.data
     }
 }
