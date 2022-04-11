@@ -269,7 +269,7 @@ mod tests {
         for group in 1..=groups as u64 {
             let term = 1;
             for index in 1..=group_size as u64 {
-                builder.add(group, term, index, &data);
+                builder.add(group, term, index, b"some-ctx", &data);
             }
         }
         let batches = builder.build();

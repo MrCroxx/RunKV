@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::{cmp, ptr};
 
 use bytes::{Buf, BufMut};
@@ -44,6 +45,12 @@ pub trait BufMutExt: BufMut {
             self.put_u8((n >> 28) as u8);
         }
     }
+
+    fn put_length_prefixed_slice(&mut self, slice: &[u8]) {
+        let len = slice.len() as u32;
+        self.put_var_u32(len);
+        self.put_slice(slice);
+    }
 }
 
 pub trait BufExt: Buf {
@@ -61,6 +68,14 @@ pub trait BufExt: Buf {
             shift += 7;
         }
         n
+    }
+
+    fn get_length_prefixed_slice(&mut self) -> Vec<u8> {
+        let len = self.get_var_u32() as usize;
+        let mut reader = self.reader();
+        let mut slice = vec![0; len];
+        reader.read_exact(&mut slice).unwrap();
+        slice
     }
 }
 

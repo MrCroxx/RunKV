@@ -1,14 +1,22 @@
 use std::sync::Arc;
 
 use futures_async_stream::for_await;
-use itertools::Itertools;
 use tracing::trace;
 
 use super::block_cache::BlockCache;
-use super::entry::{Compact, Entry, Kv, RaftLogBatch};
+use super::entry::{Compact, Entry as LogEntry, Kv, RaftLogBatch, Truncate};
 use super::log::{Log, LogOptions, LogRef};
 use super::mem::{EntryIndex, MemStates};
 use crate::error::Result;
+
+#[derive(Clone, Debug)]
+pub struct Entry {
+    pub group: u64,
+    pub term: u64,
+    pub index: u64,
+    pub ctx: Vec<u8>,
+    pub data: Vec<u8>,
+}
 
 #[derive(Clone, Debug)]
 pub struct RaftLogStoreOptions {
@@ -50,38 +58,43 @@ impl RaftLogStore {
         for item in log.replay() {
             let (file_id, write_offset, entry) = item?;
             match entry {
-                Entry::RaftLogBatch(batch) => {
+                LogEntry::RaftLogBatch(batch) => {
                     let (data_segment_offset, data_segment_len) = batch.data_segment_location();
                     let group = batch.group();
                     let term = batch.term();
                     let first_index = batch.first_index();
-                    let locations = (0..batch.len())
-                        .into_iter()
-                        .map(|i| batch.location(i))
-                        .collect_vec();
-                    let indices = locations
-                        .into_iter()
-                        .map(|(offset, len)| EntryIndex {
+                    let block_offset = write_offset + data_segment_offset + 1;
+                    let block_len = data_segment_len;
+                    let mut indices = Vec::with_capacity(batch.len());
+                    for i in 0..batch.len() {
+                        let (offset, len) = batch.location(i);
+                        let index = EntryIndex {
                             term,
+                            ctx: batch.ctx(i).to_vec(),
                             file_id,
-                            block_offset: write_offset + data_segment_offset + 1, // `1` for entry type
-                            block_len: data_segment_len,
+                            block_offset,
+                            block_len,
                             offset,
                             len,
-                        })
-                        .collect_vec();
+                        };
+                        indices.push(index);
+                    }
                     states.may_add_group(group).await;
                     states.append(group, first_index, indices).await?;
                 }
-                Entry::Compact(Compact { group, index }) => {
+                LogEntry::Truncate(Truncate { group, index }) => {
+                    states.may_add_group(group).await;
+                    states.truncate(group, index).await?;
+                }
+                LogEntry::Compact(Compact { group, index }) => {
                     states.may_add_group(group).await;
                     states.compact(group, index).await?;
                 }
-                Entry::Kv(Kv::Put { group, key, value }) => {
+                LogEntry::Kv(Kv::Put { group, key, value }) => {
                     states.may_add_group(group).await;
                     states.put(group, key, value).await?;
                 }
-                Entry::Kv(Kv::Delete { group, key }) => {
+                LogEntry::Kv(Kv::Delete { group, key }) => {
                     states.may_add_group(group).await;
                     states.delete(group, key).await?;
                 }
@@ -117,28 +130,45 @@ impl RaftLogStore {
         let group = batch.group();
         let term = batch.term();
         let first_index = batch.first_index();
-        let locations = (0..batch.len())
-            .into_iter()
-            .map(|i| batch.location(i))
-            .collect_vec();
 
-        let entry = Entry::RaftLogBatch(batch);
-        let (file_id, write_offset, _write_len) = self.core.log.push(entry).await?;
-
-        let indices = locations
-            .into_iter()
-            .map(|(offset, len)| EntryIndex {
+        let mut indices = Vec::with_capacity(batch.len());
+        for i in 0..batch.len() {
+            let (offset, len) = batch.location(i);
+            let index = EntryIndex {
                 term,
-                file_id,
-                block_offset: write_offset + data_segment_offset + 1, // `1` for entry type
-                block_len: data_segment_len,
+                ctx: batch.ctx(i).to_vec(),
+                file_id: 0,
+                block_offset: 0,
+                block_len: 0,
                 offset,
                 len,
-            })
-            .collect_vec();
+            };
+            indices.push(index);
+        }
+
+        let entry = LogEntry::RaftLogBatch(batch);
+        let (file_id, write_offset, _write_len) = self.core.log.push(entry).await?;
+
+        let block_offset = write_offset + data_segment_offset + 1;
+        let block_len = data_segment_len;
+        for index in indices.iter_mut() {
+            index.file_id = file_id;
+            index.block_offset = block_offset;
+            index.block_len = block_len;
+        }
 
         self.core.states.append(group, first_index, indices).await?;
 
+        Ok(())
+    }
+
+    /// Truncate raft log of given `group` since given `index`.
+    pub async fn truncate(&self, group: u64, index: u64) -> Result<()> {
+        self.core
+            .log
+            .push(LogEntry::Truncate(Truncate { group, index }))
+            .await?;
+        self.core.states.truncate(group, index).await?;
         Ok(())
     }
 
@@ -146,28 +176,51 @@ impl RaftLogStore {
     pub async fn compact(&self, group: u64, index: u64) -> Result<()> {
         self.core
             .log
-            .push(Entry::Compact(Compact { group, index }))
+            .push(LogEntry::Compact(Compact { group, index }))
             .await?;
         self.core.states.compact(group, index).await?;
         Ok(())
     }
 
     /// Get raft log entries from [`RaftLogStore`].
-    pub async fn entries(&self, group: u64, index: u64, max_len: usize) -> Result<Vec<Vec<u8>>> {
+    pub async fn entries(&self, group: u64, index: u64, max_len: usize) -> Result<Vec<Entry>> {
         let indices = self.core.states.entries(group, index, max_len).await?;
         // TODO: Use concurrent operation?
         let mut entries = Vec::with_capacity(indices.len());
-        for index in indices {
-            let entry = self.entry(index).await?;
+        for (i, ei) in indices.into_iter().enumerate() {
+            let data = self.entry_data(&ei).await?;
+            let entry = Entry {
+                group,
+                term: ei.term,
+                index: index + i as u64,
+                ctx: ei.ctx,
+                data,
+            };
             entries.push(entry);
         }
         Ok(entries)
     }
 
+    pub async fn term(&self, group: u64, index: u64) -> Result<Option<u64>> {
+        self.core.states.term(group, index).await
+    }
+
+    pub async fn ctx(&self, group: u64, index: u64) -> Result<Option<Vec<u8>>> {
+        self.core.states.ctx(group, index).await
+    }
+
+    pub async fn first_index(&self, group: u64) -> Result<core::result::Result<u64, u64>> {
+        self.core.states.first_index(group).await
+    }
+
+    pub async fn next_index(&self, group: u64) -> Result<core::result::Result<u64, u64>> {
+        self.core.states.next_index(group).await
+    }
+
     pub async fn put(&self, group: u64, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
         self.core
             .log
-            .push(Entry::Kv(Kv::Put {
+            .push(LogEntry::Kv(Kv::Put {
                 group,
                 key: key.clone(),
                 value: value.clone(),
@@ -180,7 +233,7 @@ impl RaftLogStore {
     pub async fn delete(&self, group: u64, key: Vec<u8>) -> Result<()> {
         self.core
             .log
-            .push(Entry::Kv(Kv::Delete {
+            .push(LogEntry::Kv(Kv::Delete {
                 group,
                 key: key.clone(),
             }))
@@ -195,7 +248,7 @@ impl RaftLogStore {
 }
 
 impl RaftLogStore {
-    async fn entry(&self, index: EntryIndex) -> Result<Vec<u8>> {
+    async fn entry_data(&self, index: &EntryIndex) -> Result<Vec<u8>> {
         trace!("read entry: {:?}", index);
         let log = self.core.log.clone();
         let index_clone = index.clone();
@@ -224,6 +277,7 @@ impl RaftLogStore {
 #[cfg(test)]
 mod tests {
 
+    use itertools::Itertools;
     use test_log::test;
 
     use super::*;
@@ -242,7 +296,7 @@ mod tests {
         let mut builder = RaftLogBatchBuilder::default();
         for group in 1..=4 {
             for index in 1..=16 {
-                builder.add(group, 1, index, &data(group, 1, index));
+                builder.add(group, 1, index, b"some-ctx", &data(group, 1, index));
             }
         }
         let batches = builder.build();
@@ -268,7 +322,7 @@ mod tests {
         for group in 1..=4 {
             let entries = store.entries(group, 1, usize::MAX).await.unwrap();
             assert_eq!(
-                entries,
+                entries.into_iter().map(|entry| entry.data).collect_vec(),
                 (1..=16)
                     .into_iter()
                     .map(|index| data(group, 1, index))
@@ -282,7 +336,7 @@ mod tests {
         for group in 1..=4 {
             let entries = store.entries(group, 1, usize::MAX).await.unwrap();
             assert_eq!(
-                entries,
+                entries.into_iter().map(|entry| entry.data).collect_vec(),
                 (1..=16)
                     .into_iter()
                     .map(|index| data(group, 1, index))
@@ -297,7 +351,7 @@ mod tests {
             assert!(store.entries(group, 8, usize::MAX).await.is_err());
             let entries = store.entries(group, 9, usize::MAX).await.unwrap();
             assert_eq!(
-                entries,
+                entries.into_iter().map(|entry| entry.data).collect_vec(),
                 (9..=16)
                     .into_iter()
                     .map(|index| data(group, 1, index))
@@ -312,8 +366,39 @@ mod tests {
             assert!(store.entries(group, 8, usize::MAX).await.is_err());
             let entries = store.entries(group, 9, usize::MAX).await.unwrap();
             assert_eq!(
-                entries,
+                entries.into_iter().map(|entry| entry.data).collect_vec(),
                 (9..=16)
+                    .into_iter()
+                    .map(|index| data(group, 1, index))
+                    .collect_vec()
+            );
+        }
+
+        for group in 1..=4 {
+            store.truncate(group, 11).await.unwrap();
+        }
+
+        for group in 1..=4 {
+            assert!(store.entries(group, 8, usize::MAX).await.is_err());
+            let entries = store.entries(group, 9, usize::MAX).await.unwrap();
+            assert_eq!(
+                entries.into_iter().map(|entry| entry.data).collect_vec(),
+                (9..=10)
+                    .into_iter()
+                    .map(|index| data(group, 1, index))
+                    .collect_vec()
+            );
+        }
+
+        drop(store);
+        let store = RaftLogStore::open(options.clone()).await.unwrap();
+        assert_eq!(store.core.log.frozen_file_count().await, 7);
+        for group in 1..=4 {
+            assert!(store.entries(group, 8, usize::MAX).await.is_err());
+            let entries = store.entries(group, 9, usize::MAX).await.unwrap();
+            assert_eq!(
+                entries.into_iter().map(|entry| entry.data).collect_vec(),
+                (9..=10)
                     .into_iter()
                     .map(|index| data(group, 1, index))
                     .collect_vec()
