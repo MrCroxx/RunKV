@@ -14,7 +14,6 @@ clap = { version = "3.1.6", features = ["derive"] }
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
 itertools = "0.10.3"
-lol-core = "0.9"
 openraft = { git = "https://github.com/datafuselabs/openraft", rev = "8d3d1285aa93ed00722da4a898adf390ea6f1e82" }
 parking_lot = "0.12"
 prost = "0.9"
