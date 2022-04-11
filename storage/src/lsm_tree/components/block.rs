@@ -51,13 +51,13 @@ impl Block {
         let n_restarts = (&buf[buf.len() - 4..]).get_u32_le();
         let data_len = buf.len() - 4 - n_restarts as usize * 4;
         let mut restart_points = Vec::with_capacity(n_restarts as usize);
-        let mut restart_points_buf = &buf[data_len..buf.len() - 4]; // fixme: remove mut
+        let mut restart_points_buf = &buf[data_len..buf.len() - 4];
         for _ in 0..n_restarts {
             restart_points.push(restart_points_buf.get_u32_le());
         }
 
         Ok(Block {
-            data: buf[..data_len].to_vec(), // clone
+            data: buf[..data_len].to_vec(),
             restart_points,
         })
     }
