@@ -13,6 +13,7 @@ pub struct EntryIndex {
     /// Prevent log entries with lower terms added from GC shadowing those with the same indices
     /// but with higher terms.
     pub term: u64,
+    pub ctx: Vec<u8>,
     pub file_id: u64,
     pub block_offset: usize,
     pub block_len: usize,
@@ -87,24 +88,64 @@ impl MemStates {
         Ok(())
     }
 
-    pub async fn first_index(&self, group: u64) -> Result<u64> {
+    pub async fn term(&self, group: u64, index: u64) -> Result<Option<u64>> {
         let guard = self.states.read().await;
         let state = guard
             .get(&group)
             .ok_or(RaftLogStoreError::GroupNotExists(group))?
             .read()
             .await;
-        Ok(state.first_index)
+        if index < state.first_index || index >= state.first_index + state.indices.len() as u64 {
+            Ok(None)
+        } else {
+            let i = (index - state.first_index) as usize;
+            let term = state.indices[i].term;
+            Ok(Some(term))
+        }
     }
 
-    pub async fn last_index(&self, group: u64) -> Result<u64> {
+    pub async fn ctx(&self, group: u64, index: u64) -> Result<Option<Vec<u8>>> {
         let guard = self.states.read().await;
         let state = guard
             .get(&group)
             .ok_or(RaftLogStoreError::GroupNotExists(group))?
             .read()
             .await;
-        Ok(state.first_index + state.indices.len() as u64 - 1)
+        if index < state.first_index || index >= state.first_index + state.indices.len() as u64 {
+            Ok(None)
+        } else {
+            let i = (index - state.first_index) as usize;
+            let ctx = state.indices[i].ctx.clone();
+            Ok(Some(ctx))
+        }
+    }
+
+    pub async fn first_index(&self, group: u64) -> Result<core::result::Result<u64, u64>> {
+        let guard = self.states.read().await;
+        let state = guard
+            .get(&group)
+            .ok_or(RaftLogStoreError::GroupNotExists(group))?
+            .read()
+            .await;
+        if state.indices.is_empty() {
+            Ok(Err(state.first_index))
+        } else {
+            Ok(Ok(state.first_index))
+        }
+    }
+
+    pub async fn next_index(&self, group: u64) -> Result<core::result::Result<u64, u64>> {
+        let guard = self.states.read().await;
+        let state = guard
+            .get(&group)
+            .ok_or(RaftLogStoreError::GroupNotExists(group))?
+            .read()
+            .await;
+        if state.indices.is_empty() {
+            Ok(Err(state.first_index + state.indices.len() as u64))
+        } else {
+            Ok(Ok(state.first_index + state.indices.len() as u64))
+        }
     }
 
     /// Append raft log indices.
@@ -167,6 +208,37 @@ impl MemStates {
 
             *state_index = index.clone();
         }
+
+        Ok(())
+    }
+
+    /// Truncate raft log of given `group` since given `index`.
+    pub async fn truncate(&self, group: u64, index: u64) -> Result<()> {
+        let guard = self.states.read().await;
+        let mut state = guard
+            .get(&group)
+            .ok_or(RaftLogStoreError::GroupNotExists(group))?
+            .write()
+            .await;
+
+        if index < state.first_index {
+            return Err(RaftLogStoreError::RaftLogGap {
+                start: index,
+                end: state.first_index,
+            }
+            .into());
+        }
+
+        if index >= state.first_index + state.indices.len() as u64 {
+            return Err(RaftLogStoreError::RaftLogGap {
+                start: state.first_index + state.indices.len() as u64,
+                end: index,
+            }
+            .into());
+        }
+
+        let len = (index - state.first_index) as usize;
+        state.indices.truncate(len);
 
         Ok(())
     }
@@ -317,6 +389,11 @@ mod tests {
         assert!(states.entries(1, 250, usize::MAX).await.is_err());
         assert!(states.entries(1, 401, usize::MAX).await.is_err());
 
+        assert!(states.truncate(1, 250).await.is_err());
+        assert!(states.truncate(1, 401).await.is_err());
+        states.truncate(1, 301).await.unwrap();
+        assert_range(&states, 1, 251..301).await;
+
         states.remove_group(1).await.unwrap();
     }
 
@@ -355,6 +432,7 @@ mod tests {
         vec![
             EntryIndex {
                 term,
+                ctx: vec![],
                 file_id: 1,
                 block_offset: 0,
                 block_len: 0,

@@ -10,21 +10,27 @@ pub enum Error {
     TransportError(#[from] tonic::transport::Error),
     #[error("rpc status error: {0}")]
     RpcStatus(#[from] Status),
+    #[error("serde error: {0}")]
+    SerdeError(String),
     #[error("other: {0}")]
     Other(String),
 }
 
 impl Error {
     pub fn err(e: impl Into<Box<dyn std::error::Error>>) -> Error {
-        Error::Other(e.into().to_string())
+        Self::Other(e.into().to_string())
     }
 
     pub fn config_err(e: impl Into<Box<dyn std::error::Error>>) -> Error {
-        Error::ConfigError(e.into().to_string())
+        Self::ConfigError(e.into().to_string())
     }
 
     pub fn storage_err(e: runkv_storage::Error) -> Error {
-        Error::StorageError(e)
+        Self::StorageError(e)
+    }
+
+    pub fn serde_err(e: impl Into<Box<dyn std::error::Error>>) -> Error {
+        Self::SerdeError(e.into().to_string())
     }
 }
 
