@@ -1333,6 +1333,7 @@ checksum = "87f3e037eac156d1775da914196f0f37741a274155e34a0b7e427c35d2a2ecb9"
 [[package]]
 name = "openraft"
 version = "0.6.4"
+source = "git+https://github.com/mrcroxx/openraft?rev=4b2ece2299bd52d6ceda08498fca33821c35fee2#4b2ece2299bd52d6ceda08498fca33821c35fee2"
 dependencies = [
  "anyerror",
  "async-trait",
