@@ -2,6 +2,7 @@ use std::collections::btree_map::{BTreeMap, Entry};
 
 use itertools::Itertools;
 use tokio::sync::RwLock;
+use tracing::trace;
 
 use super::error::RaftLogStoreError;
 use crate::error::Result;
@@ -230,11 +231,13 @@ impl MemStates {
         }
 
         if index >= state.first_index + state.indices.len() as u64 {
-            return Err(RaftLogStoreError::RaftLogGap {
-                start: state.first_index + state.indices.len() as u64,
-                end: index,
-            }
-            .into());
+            // TODO: For adaptation to openraft, which may truncate on a larger index.
+            // return Err(RaftLogStoreError::RaftLogGap {
+            //     start: state.first_index + state.indices.len() as u64,
+            //     end: index,
+            // }
+            // .into());
+            return Ok(());
         }
 
         let len = (index - state.first_index) as usize;
@@ -252,18 +255,21 @@ impl MemStates {
             .write()
             .await;
 
+        trace!("compact log before {} of group {}", index, group);
+
         // Ignore outdated compact command.
         if index <= state.first_index {
             return Ok(());
         }
 
-        // Return error if there is gap in raft log.
+        // If given index is greater than `next_index`, truncate all indices and accepts anyway.
         if index > state.first_index + state.indices.len() as u64 {
-            return Err(RaftLogStoreError::RaftLogGap {
-                start: state.first_index + state.indices.len() as u64,
-                end: index,
-            }
-            .into());
+            state.indices.clear();
+            state.first_index = 0;
+
+            trace!("first index after compact: {}", state.first_index);
+
+            return Ok(());
         }
 
         // Truncate indices.
@@ -271,7 +277,47 @@ impl MemStates {
         state.indices.drain(..len);
         state.first_index = index;
 
+        trace!("first index after compact: {}", state.first_index);
+
         Ok(())
+    }
+
+    pub async fn may_entries(
+        &self,
+        group: u64,
+        index: u64,
+        max_len: usize,
+    ) -> Result<(u64, Vec<EntryIndex>)> {
+        let guard = self.states.read().await;
+        let state = guard
+            .get(&group)
+            .ok_or(RaftLogStoreError::GroupNotExists(group))?
+            .read()
+            .await;
+
+        let start_index = std::cmp::max(index, state.first_index);
+        let end_index = std::cmp::min(
+            index + max_len as u64,
+            state.first_index + state.indices.len() as u64,
+        );
+
+        if start_index >= end_index {
+            return Ok((0, vec![]));
+        }
+
+        let start = (start_index - state.first_index) as usize;
+        let end = start + (end_index - start_index) as usize;
+
+        trace!(
+            "get indices [{}..{}) out of [{}..{})",
+            start as u64 + state.first_index,
+            end as u64 + state.first_index,
+            state.first_index,
+            state.first_index + state.indices.len() as u64,
+        );
+
+        let indices = (&state.indices[start..end]).iter().cloned().collect_vec();
+        Ok((start_index, indices))
     }
 
     pub async fn entries(&self, group: u64, index: u64, max_len: usize) -> Result<Vec<EntryIndex>> {
@@ -365,7 +411,7 @@ mod tests {
         assert_range(&states, 1, 101..251).await;
         states.compact(1, 251).await.unwrap();
         assert_range(&states, 1, 251..251).await;
-        assert!(states.compact(1, 252).await.is_err());
+        // assert!(states.compact(1, 252).await.is_err());
         states.compact(1, 101).await.unwrap();
 
         states.append(1, 251, gen_indices(2, 100)).await.unwrap();
@@ -390,7 +436,7 @@ mod tests {
         assert!(states.entries(1, 401, usize::MAX).await.is_err());
 
         assert!(states.truncate(1, 250).await.is_err());
-        assert!(states.truncate(1, 401).await.is_err());
+        // assert!(states.truncate(1, 401).await.is_err());
         states.truncate(1, 301).await.unwrap();
         assert_range(&states, 1, 251..301).await;
 
