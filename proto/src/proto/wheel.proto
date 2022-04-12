@@ -10,7 +10,6 @@ message UpdateKeyRangesRequest {
 
 message UpdateKeyRangesResponse {}
 
-
 message KvPutRequest {
   bytes key = 1;
   bytes value = 2;
@@ -60,16 +59,32 @@ service WheelService {
   rpc UpdateKeyRanges(UpdateKeyRangesRequest) returns (UpdateKeyRangesResponse);
 }
 
-message RaftRequest {
+message AppendEntriesRequest {
   bytes data = 1;
 }
 
-message RaftResponse {
+message AppendEntriesResponse {
+  bytes data = 1;
+}
+
+message InstallSnapshotRequest {
+  bytes data = 1;
+}
+
+message InstallSnapshotResponse {
+  bytes data = 1;
+}
+
+message VoteRequest {
+  bytes data = 1;
+}
+
+message VoteResponse {
   bytes data = 1;
 }
 
 service RaftService {
-  rpc AppendEntries(RaftRequest) returns (RaftResponse);
-  rpc InstallSnapshot(RaftRequest) returns (RaftResponse);
-  rpc Vote(RaftRequest) returns (RaftResponse);
+  rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse);
+  rpc InstallSnapshot(InstallSnapshotRequest) returns (InstallSnapshotResponse);
+  rpc Vote(VoteRequest) returns (VoteResponse);
 }

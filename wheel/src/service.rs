@@ -3,7 +3,8 @@ use runkv_common::channel_pool::ChannelPool;
 use runkv_proto::wheel::raft_service_server::RaftService;
 use runkv_proto::wheel::wheel_service_server::WheelService;
 use runkv_proto::wheel::{
-    RaftRequest, RaftResponse, UpdateKeyRangesRequest, UpdateKeyRangesResponse,
+    AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
+    UpdateKeyRangesRequest, UpdateKeyRangesResponse, VoteRequest, VoteResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -56,19 +57,19 @@ impl WheelService for Wheel {
 impl RaftService for Wheel {
     async fn append_entries(
         &self,
-        _request: Request<RaftRequest>,
-    ) -> Result<Response<RaftResponse>, Status> {
+        _request: Request<AppendEntriesRequest>,
+    ) -> Result<Response<AppendEntriesResponse>, Status> {
         todo!()
     }
 
     async fn install_snapshot(
         &self,
-        _request: Request<RaftRequest>,
-    ) -> Result<Response<RaftResponse>, Status> {
+        _request: Request<InstallSnapshotRequest>,
+    ) -> Result<Response<InstallSnapshotResponse>, Status> {
         todo!()
     }
 
-    async fn vote(&self, _request: Request<RaftRequest>) -> Result<Response<RaftResponse>, Status> {
+    async fn vote(&self, _request: Request<VoteRequest>) -> Result<Response<VoteResponse>, Status> {
         todo!()
     }
 }
