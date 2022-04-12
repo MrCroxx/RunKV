@@ -15,7 +15,7 @@ humantime = "2.1.0"
 humantime-serde = "1.1.1"
 itertools = "0.10.3"
 # openraft = { git = "https://github.com/datafuselabs/openraft", rev = "b50679dcc6eba4e44a7e2106a1919f350676eff4" }
-openraft = { git = "https://github.com/mrcroxx/openraft", rev = "4b2ece2299bd52d6ceda08498fca33821c35fee2" }
+openraft = { git = "https://github.com/mrcroxx/openraft", rev = "ab6d047cb47496598be09586029871c42b71fa2c" }
 parking_lot = "0.12"
 prost = "0.9"
 rand = "0.8.5"

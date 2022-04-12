@@ -10,11 +10,81 @@ message UpdateKeyRangesRequest {
 
 message UpdateKeyRangesResponse {}
 
-message KvRequest {}
+message KvPutRequest {
+  bytes key = 1;
+  bytes value = 2;
+}
 
-message KvResponse {}
+message KvPutResponse {}
+
+message KvGetRequest {
+  bytes key = 1;
+}
+
+message KvGetResponse {
+  bytes value = 1;
+}
+
+message KvDeleteRequest {
+  bytes key = 1;
+}
+
+message KvDeleteResponse {}
+
+message KvOpRequest {
+  oneof op {
+    KvPutRequest put = 1;
+    KvGetRequest get = 2;
+    KvDeleteRequest delete = 3;
+  }
+}
+
+message KvOpResponse {
+  oneof op {
+    KvPutResponse put = 1;
+    KvGetResponse get = 2;
+    KvDeleteResponse delete = 3;
+  }
+}
+
+message KvRequest {
+  repeated KvOpRequest ops = 1;
+}
+
+message KvResponse {
+  repeated KvOpResponse ops = 1;
+}
 
 service WheelService {
   rpc UpdateKeyRanges(UpdateKeyRangesRequest) returns (UpdateKeyRangesResponse);
-  rpc Kv(KvRequest) returns (KvResponse);
+}
+
+message AppendEntriesRequest {
+  bytes data = 1;
+}
+
+message AppendEntriesResponse {
+  bytes data = 1;
+}
+
+message InstallSnapshotRequest {
+  bytes data = 1;
+}
+
+message InstallSnapshotResponse {
+  bytes data = 1;
+}
+
+message VoteRequest {
+  bytes data = 1;
+}
+
+message VoteResponse {
+  bytes data = 1;
+}
+
+service RaftService {
+  rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse);
+  rpc InstallSnapshot(InstallSnapshotRequest) returns (InstallSnapshotResponse);
+  rpc Vote(VoteRequest) returns (VoteResponse);
 }

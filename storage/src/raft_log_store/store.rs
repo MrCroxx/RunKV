@@ -4,7 +4,7 @@ use futures_async_stream::for_await;
 use tracing::trace;
 
 use super::block_cache::BlockCache;
-use super::entry::{Compact, Entry as LogEntry, Kv, RaftLogBatch, Truncate};
+use super::entry::{Compact, Entry as LogEntry, Kv, Mask, RaftLogBatch, Truncate};
 use super::log::{Log, LogOptions, LogRef};
 use super::mem::{EntryIndex, MemStates};
 use crate::error::Result;
@@ -90,6 +90,10 @@ impl RaftLogStore {
                     states.may_add_group(group).await;
                     states.compact(group, index).await?;
                 }
+                LogEntry::Mask(Mask { group, index }) => {
+                    states.may_add_group(group).await;
+                    states.mask(group, index).await?;
+                }
                 LogEntry::Kv(Kv::Put { group, key, value }) => {
                     states.may_add_group(group).await;
                     states.put(group, key, value).await?;
@@ -113,7 +117,7 @@ impl RaftLogStore {
     }
 
     pub async fn add_group(&self, group: u64) -> Result<()> {
-        self.core.states.add_group(group, 0).await
+        self.core.states.add_group(group).await
     }
 
     /// # Safety
@@ -182,11 +186,34 @@ impl RaftLogStore {
         Ok(())
     }
 
+    /// Mask any indices before the given index.
+    ///
+    /// Masked indices are not deleted from the state, but can only be accessed with `unmask` set to
+    /// `true`.
+    pub async fn mask(&self, group: u64, index: u64) -> Result<()> {
+        self.core
+            .log
+            .push(LogEntry::Mask(Mask { group, index }))
+            .await?;
+        self.core.states.mask(group, index).await?;
+        Ok(())
+    }
+
     /// Get raft log entries from [`RaftLogStore`].
     ///
     /// Reeturns empty when given `index` is not valid.
-    pub async fn may_entries(&self, group: u64, index: u64, max_len: usize) -> Result<Vec<Entry>> {
-        let (first_index, indices) = self.core.states.may_entries(group, index, max_len).await?;
+    pub async fn may_entries(
+        &self,
+        group: u64,
+        index: u64,
+        max_len: usize,
+        unmask: bool,
+    ) -> Result<Vec<Entry>> {
+        let (first_index, indices) = self
+            .core
+            .states
+            .may_entries(group, index, max_len, unmask)
+            .await?;
         let mut entries = Vec::with_capacity(indices.len());
         for (i, ei) in indices.into_iter().enumerate() {
             let data = self.entry_data(&ei).await?;
@@ -230,12 +257,20 @@ impl RaftLogStore {
         self.core.states.ctx(group, index).await
     }
 
-    pub async fn first_index(&self, group: u64) -> Result<core::result::Result<u64, u64>> {
-        self.core.states.first_index(group).await
+    pub async fn first_index(
+        &self,
+        group: u64,
+        unmask: bool,
+    ) -> Result<core::result::Result<u64, u64>> {
+        self.core.states.first_index(group, unmask).await
     }
 
-    pub async fn next_index(&self, group: u64) -> Result<core::result::Result<u64, u64>> {
-        self.core.states.next_index(group).await
+    pub async fn next_index(
+        &self,
+        group: u64,
+        unmask: bool,
+    ) -> Result<core::result::Result<u64, u64>> {
+        self.core.states.next_index(group, unmask).await
     }
 
     pub async fn put(&self, group: u64, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
