@@ -1,8 +1,8 @@
+pub mod components;
 pub mod config;
 pub mod error;
 pub mod meta;
 pub mod service;
-pub mod storage;
 pub mod worker;
 
 use std::sync::Arc;
@@ -24,8 +24,8 @@ use tracing::info;
 use worker::heartbeater::{Heartbeater, HeartbeaterOptions};
 use worker::sstable_uploader::{SstableUploader, SstableUploaderOptions};
 
+use crate::components::lsm_tree::{ObjectStoreLsmTree, ObjectStoreLsmTreeOptions};
 use crate::config::WheelConfig;
-use crate::storage::lsm_tree::{ObjectStoreLsmTree, ObjectStoreLsmTreeOptions};
 
 pub async fn bootstrap_wheel(
     config: &WheelConfig,
@@ -74,12 +74,17 @@ pub async fn build_wheel_with_object_store(
 
     let meta_store = build_meta_store()?;
 
-    let version_syncer =
-        build_heartbeater(config, version_manager, meta_store.clone(), channel_pool)?;
+    let version_syncer = build_heartbeater(
+        config,
+        version_manager,
+        meta_store.clone(),
+        channel_pool.clone(),
+    )?;
 
     let options = WheelOptions {
         lsm_tree: lsm_tree.clone(),
         meta_store,
+        channel_pool,
     };
 
     let wheel = Wheel::new(options);

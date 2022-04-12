@@ -3,13 +3,14 @@ use std::io::Cursor;
 use async_trait::async_trait;
 use bytes::{Buf, BufMut};
 use openraft::EffectiveMembership;
+use runkv_proto::wheel::KvResponse;
 use runkv_storage::raft_log_store::entry::RaftLogBatchBuilder;
 use runkv_storage::raft_log_store::RaftLogStore;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tracing::trace;
 
-use super::fsm::Fsm;
-use super::{RaftResponse, RaftTypeConfig};
+use super::fsm::KvFsm;
+use super::RaftTypeConfig;
 use crate::error::{Error, Result};
 
 const VOTE_KEY: &[u8] = b"vote";
@@ -22,13 +23,13 @@ const PRUGE_LOG_ID_KEY: &[u8] = b"purge_log_id";
 const DEFAULT_SNAPSHOT_BUFFER_CAPACITY: usize = 64 << 10;
 
 #[derive(Clone)]
-pub struct RaftGroupLogStore<F: Fsm> {
+pub struct RaftGroupLogStore<F: KvFsm> {
     group: u64,
     core: RaftLogStore,
     fsm: F,
 }
 
-impl<F: Fsm> RaftGroupLogStore<F> {
+impl<F: KvFsm> RaftGroupLogStore<F> {
     pub fn new(group: u64, core: RaftLogStore, fsm: F) -> Self {
         Self { group, core, fsm }
     }
@@ -42,11 +43,11 @@ pub fn storage_io_error(
     openraft::StorageIOError::new(subject, verb, openraft::AnyError::new(&e)).into()
 }
 
-impl<F: Fsm> RaftGroupLogStore<F> {
-    async fn apply(&self, entry: &openraft::Entry<RaftTypeConfig>) -> Result<RaftResponse> {
+impl<F: KvFsm> RaftGroupLogStore<F> {
+    async fn apply(&self, entry: &openraft::Entry<RaftTypeConfig>) -> Result<Option<KvResponse>> {
         let resp = match entry.payload {
-            openraft::EntryPayload::Blank => RaftResponse {},
-            openraft::EntryPayload::Normal(ref request) => self.fsm.apply(request).await?,
+            openraft::EntryPayload::Blank => None,
+            openraft::EntryPayload::Normal(ref request) => Some(self.fsm.apply(request).await?),
             openraft::EntryPayload::Membership(ref membership) => {
                 trace!("save membership: {:?}", membership);
                 let effective_membership =
@@ -56,7 +57,7 @@ impl<F: Fsm> RaftGroupLogStore<F> {
                     .put(self.group, MEMBERSHIP_KEY.to_vec(), value)
                     .await
                     .map_err(Error::storage_err)?;
-                RaftResponse {}
+                None
             }
         };
         Ok(resp)
@@ -64,7 +65,7 @@ impl<F: Fsm> RaftGroupLogStore<F> {
 }
 
 #[async_trait]
-impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
+impl<F: KvFsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
     type SnapshotData = Cursor<Vec<u8>>;
 
     type LogReader = Self;
@@ -215,7 +216,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
 
         // Perform log compact.
         self.core
-            .compact(self.group, log_id.index + 1)
+            .mask(self.group, log_id.index + 1)
             .await
             .map_err(Error::storage_err)
             .map_err(|e| err(e, log_id))?;
@@ -453,7 +454,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
 }
 
 #[async_trait]
-impl<F: Fsm> openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore<F> {
+impl<F: KvFsm> openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore<F> {
     /// Returns the last deleted log id and the last log id.
     ///
     /// The impl should not consider the applied log id in state machine.
@@ -488,7 +489,7 @@ impl<F: Fsm> openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore<F> {
         // Get last log id.
         let next_index = self
             .core
-            .next_index(self.group)
+            .next_index(self.group, false)
             .await
             .map_err(Error::storage_err)
             .map_err(err)?;
@@ -556,7 +557,7 @@ impl<F: Fsm> openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore<F> {
 
         let raw_entries = self
             .core
-            .may_entries(self.group, start, (end - start) as usize)
+            .may_entries(self.group, start, (end - start) as usize, false)
             .await
             .map_err(Error::storage_err)
             .map_err(err)?;
@@ -588,7 +589,7 @@ impl<F: Fsm> openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore<F> {
 }
 
 #[async_trait]
-impl<F: Fsm> openraft::RaftSnapshotBuilder<RaftTypeConfig, Cursor<Vec<u8>>>
+impl<F: KvFsm> openraft::RaftSnapshotBuilder<RaftTypeConfig, Cursor<Vec<u8>>>
     for RaftGroupLogStore<F>
 {
     /// Build snapshot
@@ -645,7 +646,7 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use crate::storage::fsm::MockFsm;
+    use crate::components::fsm::MockKvFsm;
 
     #[test]
     fn test_raft_log_store() {
@@ -669,7 +670,7 @@ mod tests {
             };
             let store = RaftLogStore::open(options).await.unwrap();
             store.add_group(1).await.unwrap();
-            RaftGroupLogStore::new(1, store, MockFsm::default())
+            RaftGroupLogStore::new(1, store, MockKvFsm::default())
         })
         .unwrap();
         drop(tempdir);

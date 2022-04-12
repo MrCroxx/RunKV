@@ -24,6 +24,7 @@ pub struct EntryIndex {
 
 pub struct MemState {
     first_index: u64,
+    mask_index: u64,
     indices: Vec<EntryIndex>,
     kvs: BTreeMap<Vec<u8>, Vec<u8>>,
 }
@@ -42,13 +43,14 @@ impl Default for MemStates {
 }
 
 impl MemStates {
-    pub async fn add_group(&self, group: u64, first_index: u64) -> Result<()> {
+    pub async fn add_group(&self, group: u64) -> Result<()> {
         let mut guard = self.states.write().await;
         match guard.entry(group) {
             Entry::Occupied(_) => return Err(RaftLogStoreError::GroupAlreadyExists(group).into()),
             Entry::Vacant(v) => {
                 v.insert(RwLock::new(MemState {
-                    first_index,
+                    first_index: 0,
+                    mask_index: 0,
                     indices: Vec::with_capacity(DEFAULT_INDICES_INIT_CAPACITY),
                     kvs: BTreeMap::default(),
                 }));
@@ -64,6 +66,7 @@ impl MemStates {
             Entry::Vacant(v) => {
                 v.insert(RwLock::new(MemState {
                     first_index: 0,
+                    mask_index: 0,
                     indices: Vec::with_capacity(DEFAULT_INDICES_INIT_CAPACITY),
                     kvs: BTreeMap::default(),
                 }));
@@ -121,31 +124,54 @@ impl MemStates {
         }
     }
 
-    pub async fn first_index(&self, group: u64) -> Result<core::result::Result<u64, u64>> {
+    pub async fn first_index(
+        &self,
+        group: u64,
+        unmask: bool,
+    ) -> Result<core::result::Result<u64, u64>> {
         let guard = self.states.read().await;
         let state = guard
             .get(&group)
             .ok_or(RaftLogStoreError::GroupNotExists(group))?
             .read()
             .await;
-        if state.indices.is_empty() {
-            Ok(Err(state.first_index))
+
+        let index = if unmask {
+            state.first_index
         } else {
-            Ok(Ok(state.first_index))
+            std::cmp::max(state.first_index, state.mask_index)
+        };
+
+        if state.first_index + state.indices.len() as u64 <= index {
+            Ok(Err(index))
+        } else {
+            Ok(Ok(index))
         }
     }
 
-    pub async fn next_index(&self, group: u64) -> Result<core::result::Result<u64, u64>> {
+    pub async fn next_index(
+        &self,
+        group: u64,
+        unmask: bool,
+    ) -> Result<core::result::Result<u64, u64>> {
         let guard = self.states.read().await;
         let state = guard
             .get(&group)
             .ok_or(RaftLogStoreError::GroupNotExists(group))?
             .read()
             .await;
-        if state.indices.is_empty() {
-            Ok(Err(state.first_index + state.indices.len() as u64))
+
+        let index = if unmask {
+            state.first_index
         } else {
-            Ok(Ok(state.first_index + state.indices.len() as u64))
+            std::cmp::max(state.first_index, state.mask_index)
+        };
+        let next_index = state.first_index + state.indices.len() as u64;
+
+        if next_index <= index {
+            Ok(Err(next_index))
+        } else {
+            Ok(Ok(next_index))
         }
     }
 
@@ -282,11 +308,37 @@ impl MemStates {
         Ok(())
     }
 
+    /// Mask any indices before the given index.
+    ///
+    /// Masked indices are not deleted from the state, but can only be accessed with `unmask` set to
+    /// `true`.
+    pub async fn mask(&self, group: u64, index: u64) -> Result<()> {
+        let guard = self.states.read().await;
+        let mut state = guard
+            .get(&group)
+            .ok_or(RaftLogStoreError::GroupNotExists(group))?
+            .write()
+            .await;
+
+        trace!("mask log before {} of group {}", index, group);
+
+        if index > state.first_index + state.indices.len() as u64 {
+            state.indices.clear();
+            state.first_index = 0;
+            state.mask_index = 0;
+            return Ok(());
+        }
+        state.mask_index = index;
+
+        Ok(())
+    }
+
     pub async fn may_entries(
         &self,
         group: u64,
         index: u64,
         max_len: usize,
+        unmask: bool,
     ) -> Result<(u64, Vec<EntryIndex>)> {
         let guard = self.states.read().await;
         let state = guard
@@ -295,7 +347,14 @@ impl MemStates {
             .read()
             .await;
 
-        let start_index = std::cmp::max(index, state.first_index);
+        let start_index = std::cmp::max(
+            index,
+            if unmask {
+                state.first_index
+            } else {
+                std::cmp::max(state.mask_index, state.first_index)
+            },
+        );
         let end_index = std::cmp::min(
             index + max_len as u64,
             state.first_index + state.indices.len() as u64,
@@ -305,16 +364,18 @@ impl MemStates {
             return Ok((0, vec![]));
         }
 
-        let start = (start_index - state.first_index) as usize;
-        let end = start + (end_index - start_index) as usize;
-
         trace!(
-            "get indices [{}..{}) out of [{}..{})",
-            start as u64 + state.first_index,
-            end as u64 + state.first_index,
+            "get indices [{}..{}) out of [{}..{}), mask at {}, unmask: {}",
+            start_index,
+            end_index,
             state.first_index,
             state.first_index + state.indices.len() as u64,
+            state.mask_index,
+            unmask,
         );
+
+        let start = (start_index - state.first_index) as usize;
+        let end = start + (end_index - start_index) as usize;
 
         let indices = (&state.indices[start..end]).iter().cloned().collect_vec();
         Ok((start_index, indices))
@@ -397,7 +458,7 @@ mod tests {
     async fn test_raft_log() {
         let states = MemStates::default();
 
-        states.add_group(1, 1).await.unwrap();
+        states.add_group(1).await.unwrap();
 
         states.append(1, 1, gen_indices(1, 100)).await.unwrap();
         assert_range(&states, 1, 1..101).await;
@@ -446,7 +507,7 @@ mod tests {
     #[test(tokio::test)]
     async fn test_kv() {
         let states = MemStates::default();
-        states.add_group(1, 1).await.unwrap();
+        states.add_group(1).await.unwrap();
         states.put(1, b"k1".to_vec(), b"v1".to_vec()).await.unwrap();
         assert_eq!(
             states.get(1, b"k1".to_vec()).await.unwrap(),

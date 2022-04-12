@@ -1764,6 +1764,8 @@ dependencies = [
  "bytes",
  "prost",
  "prost-build",
+ "serde",
+ "serde_derive",
  "tonic",
  "tonic-build",
 ]

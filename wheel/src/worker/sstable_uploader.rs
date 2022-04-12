@@ -17,8 +17,8 @@ use runkv_storage::utils::{timestamp, user_key, value};
 use tonic::Request;
 use tracing::{debug, trace, warn};
 
+use crate::components::lsm_tree::ObjectStoreLsmTree;
 use crate::error::{Error, Result};
-use crate::storage::lsm_tree::ObjectStoreLsmTree;
 
 pub struct SstableUploaderOptions {
     pub node_id: u64,
