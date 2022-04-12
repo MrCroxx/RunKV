@@ -277,9 +277,11 @@ pub struct RaftLogBatchBuilder {
 
 impl RaftLogBatchBuilder {
     pub fn add(&mut self, group: u64, term: u64, index: u64, ctx: &[u8], data: &[u8]) {
-        debug_assert_ne!(group, 0);
-        debug_assert_ne!(term, 0);
-        debug_assert_ne!(index, 0);
+        // TODO: For adaptation with openraft, which test suits has log entry with both term and
+        // index equals 0.
+        // debug_assert_ne!(group, 0);
+        // debug_assert_ne!(term, 0);
+        // debug_assert_ne!(index, 0);
 
         self.may_rotate(group, term, index);
 

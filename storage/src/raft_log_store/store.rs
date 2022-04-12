@@ -113,7 +113,7 @@ impl RaftLogStore {
     }
 
     pub async fn add_group(&self, group: u64) -> Result<()> {
-        self.core.states.add_group(group, 1).await
+        self.core.states.add_group(group, 0).await
     }
 
     /// # Safety
@@ -183,9 +183,30 @@ impl RaftLogStore {
     }
 
     /// Get raft log entries from [`RaftLogStore`].
+    ///
+    /// Reeturns empty when given `index` is not valid.
+    pub async fn may_entries(&self, group: u64, index: u64, max_len: usize) -> Result<Vec<Entry>> {
+        let (first_index, indices) = self.core.states.may_entries(group, index, max_len).await?;
+        let mut entries = Vec::with_capacity(indices.len());
+        for (i, ei) in indices.into_iter().enumerate() {
+            let data = self.entry_data(&ei).await?;
+            let entry = Entry {
+                group,
+                term: ei.term,
+                index: first_index + i as u64,
+                ctx: ei.ctx,
+                data,
+            };
+            entries.push(entry);
+        }
+        Ok(entries)
+    }
+
+    /// Get raft log entries from [`RaftLogStore`].
+    ///
+    /// Returns `Err` when given `index` is not valid.
     pub async fn entries(&self, group: u64, index: u64, max_len: usize) -> Result<Vec<Entry>> {
         let indices = self.core.states.entries(group, index, max_len).await?;
-        // TODO: Use concurrent operation?
         let mut entries = Vec::with_capacity(indices.len());
         for (i, ei) in indices.into_iter().enumerate() {
             let data = self.entry_data(&ei).await?;

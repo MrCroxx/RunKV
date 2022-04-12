@@ -2,43 +2,35 @@ use std::io::Cursor;
 
 use async_trait::async_trait;
 use bytes::{Buf, BufMut};
+use openraft::EffectiveMembership;
 use runkv_storage::raft_log_store::entry::RaftLogBatchBuilder;
 use runkv_storage::raft_log_store::RaftLogStore;
-use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tracing::trace;
 
+use super::fsm::Fsm;
+use super::{RaftResponse, RaftTypeConfig};
 use crate::error::{Error, Result};
 
 const VOTE_KEY: &[u8] = b"vote";
 const MEMBERSHIP_KEY: &[u8] = b"membership";
-const APPLIED_STATE_KEY: &[u8] = b"applied_state";
+const APPLIED_LOG_ID_KEY: &[u8] = b"applied_state";
 const SNAPSHOT_META: &[u8] = b"snapshot_meta";
 const SNAPSHOT_DATA: &[u8] = b"snapshot_data";
 const PRUGE_LOG_ID_KEY: &[u8] = b"purge_log_id";
 
 const DEFAULT_SNAPSHOT_BUFFER_CAPACITY: usize = 64 << 10;
 
-pub type RaftNodeId = u64;
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct RaftRequest {}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct RaftResponse {}
-
-openraft::declare_raft_types!(
-    pub RaftTypeConfig: D = RaftRequest, R = RaftResponse, NodeId = RaftNodeId
-);
-
 #[derive(Clone)]
-pub struct RaftGroupLogStore {
+pub struct RaftGroupLogStore<F: Fsm> {
     group: u64,
     core: RaftLogStore,
+    fsm: F,
 }
 
-impl RaftGroupLogStore {
-    pub fn new(group: u64, core: RaftLogStore) -> Self {
-        Self { group, core }
+impl<F: Fsm> RaftGroupLogStore<F> {
+    pub fn new(group: u64, core: RaftLogStore, fsm: F) -> Self {
+        Self { group, core, fsm }
     }
 }
 
@@ -50,17 +42,13 @@ pub fn storage_io_error(
     openraft::StorageIOError::new(subject, verb, openraft::AnyError::new(&e)).into()
 }
 
-impl RaftGroupLogStore {
-    async fn apply(&self, entry: &openraft::raft::Entry<RaftTypeConfig>) -> Result<RaftResponse> {
+impl<F: Fsm> RaftGroupLogStore<F> {
+    async fn apply(&self, entry: &openraft::Entry<RaftTypeConfig>) -> Result<RaftResponse> {
         let resp = match entry.payload {
-            openraft::raft::EntryPayload::Blank => RaftResponse {},
-            openraft::raft::EntryPayload::Normal(ref _request) => {
-                // TODO: impl me!!
-                // TODO: impl me!!
-                // TODO: impl me!!
-                RaftResponse {}
-            }
-            openraft::raft::EntryPayload::Membership(ref membership) => {
+            openraft::EntryPayload::Blank => RaftResponse {},
+            openraft::EntryPayload::Normal(ref request) => self.fsm.apply(request).await?,
+            openraft::EntryPayload::Membership(ref membership) => {
+                trace!("save membership: {:?}", membership);
                 let effective_membership =
                     openraft::EffectiveMembership::new(Some(entry.log_id), membership.to_owned());
                 let value = bincode::serialize(&effective_membership).map_err(Error::serde_err)?;
@@ -76,7 +64,7 @@ impl RaftGroupLogStore {
 }
 
 #[async_trait]
-impl openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore {
+impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
     type SnapshotData = Cursor<Vec<u8>>;
 
     type LogReader = Self;
@@ -115,12 +103,15 @@ impl openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore {
             .await
             .map_err(Error::storage_err)
             .map_err(err)?;
-        match buf {
-            Some(buf) => bincode::deserialize(&buf)
-                .map_err(Error::serde_err)
-                .map_err(err),
-            None => Ok(None),
-        }
+        let vote = match buf {
+            None => None,
+            Some(buf) => Some(
+                bincode::deserialize(&buf)
+                    .map_err(Error::serde_err)
+                    .map_err(err)?,
+            ),
+        };
+        Ok(vote)
     }
 
     /// Get the log reader.
@@ -137,12 +128,14 @@ impl openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore {
     /// determine its location to be written in the log.
     async fn append_to_log(
         &mut self,
-        entries: &[&openraft::raft::Entry<RaftTypeConfig>],
+        entries: &[&openraft::Entry<RaftTypeConfig>],
     ) -> core::result::Result<
         (),
         openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
     > {
         let err = |e| storage_io_error(e, openraft::ErrorSubject::Logs, openraft::ErrorVerb::Write);
+
+        trace!("append to log: {:?}", entries);
 
         let mut builder = RaftLogBatchBuilder::default();
         for entry in entries.iter() {
@@ -158,6 +151,14 @@ impl openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore {
                 &ctx,
                 &data,
             );
+        }
+        let batches = builder.build();
+        for batch in batches {
+            self.core
+                .append(batch)
+                .await
+                .map_err(Error::storage_err)
+                .map_err(err)?;
         }
         Ok(())
     }
@@ -235,20 +236,21 @@ impl openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore {
         ),
         openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
     > {
-        let err =
-            |e| storage_io_error(e, openraft::ErrorSubject::Store, openraft::ErrorVerb::Write);
+        let err = |e| storage_io_error(e, openraft::ErrorSubject::Store, openraft::ErrorVerb::Read);
 
-        let applied_state = self
+        let applied_log_id = self
             .core
-            .get(self.group, APPLIED_STATE_KEY.to_vec())
+            .get(self.group, APPLIED_LOG_ID_KEY.to_vec())
             .await
             .map_err(Error::storage_err)
             .map_err(err)?;
-        let applied_state = match applied_state {
+        let applied_log_id = match applied_log_id {
             None => None,
-            Some(raw) => bincode::deserialize(&raw)
-                .map_err(Error::serde_err)
-                .map_err(err)?,
+            Some(raw) => Some(
+                bincode::deserialize(&raw)
+                    .map_err(Error::serde_err)
+                    .map_err(err)?,
+            ),
         };
 
         let membership = self
@@ -257,16 +259,13 @@ impl openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore {
             .await
             .map_err(Error::storage_err)
             .map_err(err)?;
-        let membership = membership.ok_or_else(|| {
-            err(Error::storage_err(runkv_storage::Error::Other(format!(
-                "membership not found in raft log store, group: {}",
-                self.group
-            ))))
-        })?;
-        let membership = bincode::deserialize(&membership)
-            .map_err(Error::serde_err)
-            .map_err(err)?;
-        Ok((applied_state, membership))
+        let membership = match membership {
+            Some(raw) => bincode::deserialize(&raw)
+                .map_err(Error::serde_err)
+                .map_err(err)?,
+            None => EffectiveMembership::default(),
+        };
+        Ok((applied_log_id, membership))
     }
 
     /// Apply the given payload of entries to the state machine.
@@ -290,7 +289,7 @@ impl openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore {
     // operation pipelining w/o the need to wait for the completion of each operation inline.
     async fn apply_to_state_machine(
         &mut self,
-        entries: &[&openraft::raft::Entry<RaftTypeConfig>],
+        entries: &[&openraft::Entry<RaftTypeConfig>],
     ) -> core::result::Result<
         Vec<<RaftTypeConfig as openraft::RaftTypeConfig>::R>,
         openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
@@ -303,11 +302,11 @@ impl openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore {
             resps.push(resp);
         }
         if let Some(&entry) = entries.last() {
-            let value = bincode::serialize(entry)
+            let value = bincode::serialize(&entry.log_id)
                 .map_err(Error::serde_err)
                 .map_err(err)?;
             self.core
-                .put(self.group, APPLIED_STATE_KEY.to_vec(), value)
+                .put(self.group, APPLIED_LOG_ID_KEY.to_vec(), value)
                 .await
                 .map_err(Error::storage_err)
                 .map_err(err)?;
@@ -362,9 +361,10 @@ impl openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore {
             )
         };
 
-        // TODO: impl me!!
-        // TODO: impl me!!
-        // TODO: impl me!!
+        self.fsm
+            .apply_snapshot(snapshot.as_ref())
+            .await
+            .map_err(err)?;
 
         let buf_meta = bincode::serialize(meta)
             .map_err(Error::serde_err)
@@ -453,7 +453,7 @@ impl openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore {
 }
 
 #[async_trait]
-impl openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore {
+impl<F: Fsm> openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore<F> {
     /// Returns the last deleted log id and the last log id.
     ///
     /// The impl should not consider the applied log id in state machine.
@@ -478,9 +478,11 @@ impl openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore {
             .map_err(err)?;
         let purge_log_id = match purge_log_id {
             None => None,
-            Some(purge_log_id) => bincode::deserialize(&purge_log_id)
-                .map_err(Error::serde_err)
-                .map_err(err)?,
+            Some(purge_log_id) => Some(
+                bincode::deserialize(&purge_log_id)
+                    .map_err(Error::serde_err)
+                    .map_err(err)?,
+            ),
         };
 
         // Get last log id.
@@ -532,16 +534,63 @@ impl openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore {
         RB: std::ops::RangeBounds<u64> + Clone + std::fmt::Debug + Send + Sync,
     >(
         &mut self,
-        _range: RB,
+        range: RB,
     ) -> core::result::Result<
-        Vec<openraft::raft::Entry<RaftTypeConfig>>,
+        Vec<openraft::Entry<RaftTypeConfig>>,
         openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
     > {
-        todo!()
+        let err = |e| storage_io_error(e, openraft::ErrorSubject::Store, openraft::ErrorVerb::Read);
+
+        let start = match range.start_bound() {
+            std::ops::Bound::Included(v) => *v,
+            std::ops::Bound::Excluded(v) => *v + 1,
+            std::ops::Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            std::ops::Bound::Excluded(v) => *v,
+            std::ops::Bound::Included(v) => *v + 1,
+            std::ops::Bound::Unbounded => u64::MAX,
+        };
+
+        trace!("try get log entries: {:?} => [{}..{})", range, start, end);
+
+        let raw_entries = self
+            .core
+            .may_entries(self.group, start, (end - start) as usize)
+            .await
+            .map_err(Error::storage_err)
+            .map_err(err)?;
+
+        trace!("raw entries: {:?}", raw_entries);
+
+        let mut entries = Vec::with_capacity(raw_entries.len());
+        for raw_entry in raw_entries.into_iter() {
+            let payload = bincode::deserialize(&raw_entry.data)
+                .map_err(Error::serde_err)
+                .map_err(err)?;
+            let entry = openraft::Entry {
+                log_id: openraft::LogId {
+                    leader_id: openraft::LeaderId {
+                        term: raw_entry.term,
+                        node_id: (&raw_entry.ctx[..]).get_u64_le(),
+                    },
+                    index: raw_entry.index,
+                },
+                payload,
+            };
+            entries.push(entry);
+        }
+
+        trace!("entries: {:?}", entries);
+
+        Ok(entries)
     }
 }
+
 #[async_trait]
-impl openraft::RaftSnapshotBuilder<RaftTypeConfig, Cursor<Vec<u8>>> for RaftGroupLogStore {
+impl<F: Fsm> openraft::RaftSnapshotBuilder<RaftTypeConfig, Cursor<Vec<u8>>>
+    for RaftGroupLogStore<F>
+{
     /// Build snapshot
     ///
     /// A snapshot has to contain information about exactly all logs up to the last applied.
@@ -556,6 +605,73 @@ impl openraft::RaftSnapshotBuilder<RaftTypeConfig, Cursor<Vec<u8>>> for RaftGrou
         openraft::storage::Snapshot<RaftTypeConfig, Cursor<Vec<u8>>>,
         openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
     > {
-        todo!()
+        let err = |e| storage_io_error(e, openraft::ErrorSubject::Store, openraft::ErrorVerb::Read);
+
+        let applied_log_id = self
+            .core
+            .get(self.group, APPLIED_LOG_ID_KEY.to_vec())
+            .await
+            .map_err(Error::storage_err)
+            .map_err(err)?
+            .unwrap();
+        let applied_log_id: openraft::LogId<u64> = bincode::deserialize(&applied_log_id)
+            .map_err(Error::serde_err)
+            .map_err(err)?;
+        let snapshot_id = format!("snapshot-{}", applied_log_id.index);
+
+        let snapshot_meta = openraft::storage::SnapshotMeta {
+            last_log_id: applied_log_id,
+            snapshot_id,
+        };
+
+        let snapshot_data = self.fsm.build_snapshot().await.map_err(err)?;
+        let snapshot = openraft::storage::Snapshot {
+            meta: snapshot_meta,
+            snapshot: Box::new(snapshot_data),
+        };
+
+        Ok(snapshot)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use openraft::testing::Suite;
+    use rand::distributions::Alphanumeric;
+    use rand::{thread_rng, Rng};
+    use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
+    use test_log::test;
+
+    use super::*;
+    use crate::storage::fsm::MockFsm;
+
+    #[test]
+    fn test_raft_log_store() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let tempdir_ref = &tempdir;
+
+        Suite::test_all(|| async move {
+            let path = Path::new(tempdir_ref.path()).join(
+                thread_rng()
+                    .sample_iter(&Alphanumeric)
+                    .take(16)
+                    .map(char::from)
+                    .collect::<String>(),
+            );
+            trace!("create new raft log store in path: {:?}", path);
+            tokio::fs::create_dir_all(path.clone()).await.unwrap();
+            let options = RaftLogStoreOptions {
+                log_dir_path: path.to_str().unwrap().to_string(),
+                log_file_capacity: 100,
+                block_cache_capacity: 1024,
+            };
+            let store = RaftLogStore::open(options).await.unwrap();
+            store.add_group(1).await.unwrap();
+            RaftGroupLogStore::new(1, store, MockFsm::default())
+        })
+        .unwrap();
+        drop(tempdir);
     }
 }
