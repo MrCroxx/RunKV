@@ -1,13 +1,53 @@
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 use async_trait::async_trait;
+use parking_lot::RwLock;
+use runkv_common::channel_pool::ChannelPool;
+use runkv_proto::wheel::raft_service_client::RaftServiceClient;
+use runkv_proto::wheel::{AppendEntriesRequest, InstallSnapshotRequest, VoteRequest};
+use tonic::transport::Channel;
 
 use super::RaftTypeConfig;
-pub struct RaftNetworkConnection {}
+use crate::error::{Error, Result};
+
+fn append_entries_err(
+    e: Error,
+) -> openraft::error::RPCError<
+    RaftTypeConfig,
+    openraft::error::AppendEntriesError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
+> {
+    openraft::error::RPCError::Network(openraft::error::NetworkError::new(&e))
+}
+
+fn install_snapshot_err(
+    e: Error,
+) -> openraft::error::RPCError<
+    RaftTypeConfig,
+    openraft::error::InstallSnapshotError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
+> {
+    openraft::error::RPCError::Network(openraft::error::NetworkError::new(&e))
+}
+
+fn vote_err(
+    e: Error,
+) -> openraft::error::RPCError<
+    RaftTypeConfig,
+    openraft::error::VoteError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
+> {
+    openraft::error::RPCError::Network(openraft::error::NetworkError::new(&e))
+}
+
+pub struct RaftNetworkConnection {
+    id: u64,
+    client: RaftServiceClient<Channel>,
+}
 
 #[async_trait]
 impl openraft::RaftNetwork<RaftTypeConfig> for RaftNetworkConnection {
     async fn send_append_entries(
         &mut self,
-        _rpc: openraft::raft::AppendEntriesRequest<RaftTypeConfig>,
+        rpc: openraft::raft::AppendEntriesRequest<RaftTypeConfig>,
     ) -> core::result::Result<
         openraft::raft::AppendEntriesResponse<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
         openraft::error::RPCError<
@@ -17,12 +57,25 @@ impl openraft::RaftNetwork<RaftTypeConfig> for RaftNetworkConnection {
             >,
         >,
     > {
-        todo!()
+        let data = bincode::serialize(&rpc)
+            .map_err(Error::serde_err)
+            .map_err(append_entries_err)?;
+        let request = AppendEntriesRequest { id: self.id, data };
+        let response = self
+            .client
+            .append_entries(request)
+            .await
+            .map_err(Error::status)
+            .map_err(append_entries_err)?;
+        let resp = response.into_inner();
+        Ok(bincode::deserialize(&resp.data)
+            .map_err(Error::serde_err)
+            .map_err(append_entries_err)?)
     }
 
     async fn send_install_snapshot(
         &mut self,
-        _rpc: openraft::raft::InstallSnapshotRequest<RaftTypeConfig>,
+        rpc: openraft::raft::InstallSnapshotRequest<RaftTypeConfig>,
     ) -> core::result::Result<
         openraft::raft::InstallSnapshotResponse<
             <RaftTypeConfig as openraft::RaftTypeConfig>::NodeId,
@@ -34,12 +87,25 @@ impl openraft::RaftNetwork<RaftTypeConfig> for RaftNetworkConnection {
             >,
         >,
     > {
-        todo!()
+        let data = bincode::serialize(&rpc)
+            .map_err(Error::serde_err)
+            .map_err(install_snapshot_err)?;
+        let request = InstallSnapshotRequest { id: self.id, data };
+        let response = self
+            .client
+            .install_snapshot(request)
+            .await
+            .map_err(Error::status)
+            .map_err(install_snapshot_err)?;
+        let resp = response.into_inner();
+        Ok(bincode::deserialize(&resp.data)
+            .map_err(Error::serde_err)
+            .map_err(install_snapshot_err)?)
     }
 
     async fn send_vote(
         &mut self,
-        _rpc: openraft::raft::VoteRequest<RaftTypeConfig>,
+        rpc: openraft::raft::VoteRequest<RaftTypeConfig>,
     ) -> core::result::Result<
         openraft::raft::VoteResponse<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
         openraft::error::RPCError<
@@ -47,11 +113,43 @@ impl openraft::RaftNetwork<RaftTypeConfig> for RaftNetworkConnection {
             openraft::error::VoteError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
         >,
     > {
-        todo!()
+        let data = bincode::serialize(&rpc)
+            .map_err(Error::serde_err)
+            .map_err(vote_err)?;
+        let request = VoteRequest { id: self.id, data };
+        let response = self
+            .client
+            .vote(request)
+            .await
+            .map_err(Error::status)
+            .map_err(vote_err)?;
+        let resp = response.into_inner();
+        Ok(bincode::deserialize(&resp.data)
+            .map_err(Error::serde_err)
+            .map_err(vote_err)?)
     }
 }
 
-pub struct RaftNetwork {}
+#[derive(Clone)]
+pub struct RaftNetwork {
+    channel_pool: ChannelPool,
+    proxy: Arc<RwLock<BTreeMap<u64, u64>>>,
+}
+
+impl RaftNetwork {
+    pub fn new(channel_pool: ChannelPool) -> Self {
+        Self {
+            channel_pool,
+            proxy: Arc::new(RwLock::new(BTreeMap::default())),
+        }
+    }
+
+    pub fn update_raft_node(&self, node: u64, raft_node: u64) -> Result<()> {
+        let mut guard = self.proxy.write();
+        guard.insert(raft_node, node);
+        Ok(())
+    }
+}
 
 #[async_trait]
 impl openraft::RaftNetworkFactory<RaftTypeConfig> for RaftNetwork {
@@ -59,9 +157,16 @@ impl openraft::RaftNetworkFactory<RaftTypeConfig> for RaftNetwork {
 
     async fn connect(
         &mut self,
-        _target: <RaftTypeConfig as openraft::RaftTypeConfig>::NodeId,
+        target: <RaftTypeConfig as openraft::RaftTypeConfig>::NodeId,
         _node: Option<&openraft::Node>,
     ) -> Self::Network {
-        todo!()
+        let client = RaftServiceClient::new(
+            self.channel_pool
+                .get(target)
+                .await
+                .map_err(Error::err)
+                .unwrap(),
+        );
+        RaftNetworkConnection { id: target, client }
     }
 }
