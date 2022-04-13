@@ -1,12 +1,14 @@
 pub mod command;
 pub mod fsm;
+pub mod gear;
 pub mod lsm_tree;
 pub mod network;
 pub mod raft_log_store;
+pub mod raft_manager;
 
 use runkv_proto::wheel::{KvRequest, KvResponse};
 
-use self::fsm::Gear;
+use self::gear::Gear;
 use self::network::RaftNetwork;
 use self::raft_log_store::RaftGroupLogStore;
 

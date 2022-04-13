@@ -7,9 +7,13 @@ use runkv_proto::wheel::{
     UpdateKeyRangesRequest, UpdateKeyRangesResponse, VoteRequest, VoteResponse,
 };
 use runkv_storage::raft_log_store::RaftLogStore;
+use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
+use crate::components::command::AsyncCommand;
 use crate::components::lsm_tree::ObjectStoreLsmTree;
+use crate::components::network::RaftNetwork;
+use crate::components::raft_manager::RaftManager;
 use crate::meta::MetaStoreRef;
 
 fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
@@ -21,6 +25,9 @@ pub struct WheelOptions {
     pub meta_store: MetaStoreRef,
     pub channel_pool: ChannelPool,
     pub raft_log_store: RaftLogStore,
+    pub raft_network: RaftNetwork,
+    pub raft_manager: RaftManager,
+    pub gear_receiver: mpsc::UnboundedReceiver<AsyncCommand>,
 }
 
 pub struct Wheel {
@@ -28,6 +35,9 @@ pub struct Wheel {
     meta_store: MetaStoreRef,
     _channel_pool: ChannelPool,
     _raft_log_store: RaftLogStore,
+    _raft_network: RaftNetwork,
+    _raft_manager: RaftManager,
+    _gear_receiver: mpsc::UnboundedReceiver<AsyncCommand>,
 }
 
 impl Wheel {
@@ -37,6 +47,9 @@ impl Wheel {
             meta_store: options.meta_store,
             _channel_pool: options.channel_pool,
             _raft_log_store: options.raft_log_store,
+            _raft_network: options.raft_network,
+            _raft_manager: options.raft_manager,
+            _gear_receiver: options.gear_receiver,
         }
     }
 }

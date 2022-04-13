@@ -60,27 +60,33 @@ service WheelService {
 }
 
 message AppendEntriesRequest {
-  bytes data = 1;
+  uint64 id = 1;
+  bytes data = 2;
 }
 
 message AppendEntriesResponse {
-  bytes data = 1;
+  uint64 id = 1;
+  bytes data = 2;
 }
 
 message InstallSnapshotRequest {
-  bytes data = 1;
+  uint64 id = 1;
+  bytes data = 2;
 }
 
 message InstallSnapshotResponse {
-  bytes data = 1;
+  uint64 id = 1;
+  bytes data = 2;
 }
 
 message VoteRequest {
-  bytes data = 1;
+  uint64 id = 1;
+  bytes data = 2;
 }
 
 message VoteResponse {
-  bytes data = 1;
+  uint64 id = 1;
+  bytes data = 2;
 }
 
 service RaftService {

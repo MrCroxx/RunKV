@@ -12,6 +12,8 @@ pub enum Error {
     RpcStatus(#[from] Status),
     #[error("serde error: {0}")]
     SerdeError(String),
+    #[error("raft error: {0}")]
+    RaftError(#[from] RaftError),
     #[error("other: {0}")]
     Other(String),
 }
@@ -32,6 +34,18 @@ impl Error {
     pub fn serde_err(e: impl Into<Box<dyn std::error::Error>>) -> Error {
         Self::SerdeError(e.into().to_string())
     }
+
+    pub fn status(s: Status) -> Error {
+        Self::RpcStatus(s)
+    }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(thiserror::Error, Debug)]
+pub enum RaftError {
+    #[error("raft node not exists: [group: {group}] [node: {node}]")]
+    RaftNodeNotExists { group: u64, node: u64 },
+    #[error("raft node already exists: [group: {group}] [node: {node}]")]
+    RaftNodeAlreadyExists { group: u64, node: u64 },
+}

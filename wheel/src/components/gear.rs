@@ -1,0 +1,68 @@
+use std::io::Cursor;
+
+use async_trait::async_trait;
+use runkv_proto::wheel::{KvRequest, KvResponse};
+use tokio::sync::{mpsc, oneshot};
+
+use super::command::{AsyncCommand, CommandRequest, CommandResponse};
+use super::fsm::KvFsm;
+use crate::error::{Error, Result};
+
+#[derive(Clone)]
+pub struct Gear {
+    sender: mpsc::UnboundedSender<AsyncCommand>,
+}
+
+impl Gear {
+    pub fn new(sender: mpsc::UnboundedSender<AsyncCommand>) -> Self {
+        Self { sender }
+    }
+}
+
+#[async_trait]
+impl KvFsm for Gear {
+    async fn apply(&self, request: &KvRequest) -> Result<KvResponse> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(AsyncCommand {
+                request: CommandRequest::Kv(request.to_owned()),
+                response: tx,
+            })
+            .map_err(Error::err)?;
+        let res = rx.await.map_err(Error::err)??;
+        match res {
+            CommandResponse::Kv(kv) => Ok(kv),
+            _ => unreachable!(),
+        }
+    }
+
+    async fn build_snapshot(&self) -> Result<Cursor<Vec<u8>>> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(AsyncCommand {
+                request: CommandRequest::BuildSnapshot,
+                response: tx,
+            })
+            .map_err(Error::err)?;
+        let res = rx.await.map_err(Error::err)??;
+        match res {
+            CommandResponse::BuildSnapshot(snapshot) => Ok(Cursor::new(snapshot)),
+            _ => unreachable!(),
+        }
+    }
+
+    async fn install_snapshot(&self, snapshot: &Cursor<Vec<u8>>) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(AsyncCommand {
+                request: CommandRequest::InstallSnapshot(snapshot.to_owned().into_inner()),
+                response: tx,
+            })
+            .map_err(Error::err)?;
+        let res = rx.await.map_err(Error::err)??;
+        match res {
+            CommandResponse::InstallSnapshot => Ok(()),
+            _ => unreachable!(),
+        }
+    }
+}
