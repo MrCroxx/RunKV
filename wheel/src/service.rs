@@ -6,6 +6,7 @@ use runkv_proto::wheel::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     UpdateKeyRangesRequest, UpdateKeyRangesResponse, VoteRequest, VoteResponse,
 };
+use runkv_storage::raft_log_store::RaftLogStore;
 use tonic::{Request, Response, Status};
 
 use crate::components::lsm_tree::ObjectStoreLsmTree;
@@ -19,12 +20,14 @@ pub struct WheelOptions {
     pub lsm_tree: ObjectStoreLsmTree,
     pub meta_store: MetaStoreRef,
     pub channel_pool: ChannelPool,
+    pub raft_log_store: RaftLogStore,
 }
 
 pub struct Wheel {
     _lsm_tree: ObjectStoreLsmTree,
     meta_store: MetaStoreRef,
     _channel_pool: ChannelPool,
+    _raft_log_store: RaftLogStore,
 }
 
 impl Wheel {
@@ -33,6 +36,7 @@ impl Wheel {
             _lsm_tree: options.lsm_tree,
             meta_store: options.meta_store,
             _channel_pool: options.channel_pool,
+            _raft_log_store: options.raft_log_store,
         }
     }
 }

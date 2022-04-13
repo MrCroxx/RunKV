@@ -363,7 +363,7 @@ impl<F: KvFsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
         };
 
         self.fsm
-            .apply_snapshot(snapshot.as_ref())
+            .install_snapshot(snapshot.as_ref())
             .await
             .map_err(err)?;
 
