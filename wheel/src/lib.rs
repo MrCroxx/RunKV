@@ -17,6 +17,8 @@ use runkv_proto::common::Endpoint as PbEndpoint;
 use runkv_proto::wheel::wheel_service_server::WheelServiceServer;
 use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions, SstableStoreRef};
 use runkv_storage::manifest::{VersionManager, VersionManagerOptions};
+use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
+use runkv_storage::raft_log_store::RaftLogStore;
 use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
 use service::{Wheel, WheelOptions};
 use tonic::transport::Server;
@@ -81,10 +83,13 @@ pub async fn build_wheel_with_object_store(
         channel_pool.clone(),
     )?;
 
+    let raft_log_store = build_raft_log_store(config).await?;
+
     let options = WheelOptions {
         lsm_tree: lsm_tree.clone(),
         meta_store,
         channel_pool,
+        raft_log_store,
     };
 
     let wheel = Wheel::new(options);
@@ -242,4 +247,25 @@ fn build_meta_store() -> Result<MetaStoreRef> {
 
 fn build_channel_pool(config: &WheelConfig) -> ChannelPool {
     ChannelPool::with_nodes(vec![config.rudder.clone()])
+}
+
+async fn build_raft_log_store(config: &WheelConfig) -> Result<RaftLogStore> {
+    let raft_log_store_options = RaftLogStoreOptions {
+        log_dir_path: config.raft_log_store.log_dir_path.clone(),
+        log_file_capacity: config
+            .raft_log_store
+            .log_file_capacity
+            .parse::<ByteSize>()
+            .map_err(Error::config_err)?
+            .0 as usize,
+        block_cache_capacity: config
+            .raft_log_store
+            .block_cache_capacity
+            .parse::<ByteSize>()
+            .map_err(Error::config_err)?
+            .0 as usize,
+    };
+    RaftLogStore::open(raft_log_store_options)
+        .await
+        .map_err(Error::storage_err)
 }
