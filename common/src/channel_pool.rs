@@ -5,6 +5,7 @@ use tokio::sync::Mutex;
 use tonic::transport::{Channel, Endpoint};
 
 use crate::config::Node;
+
 struct ChannelPoolCore {
     endpoints: BTreeMap<u64, Endpoint>,
     channels: BTreeMap<u64, Channel>,
