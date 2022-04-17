@@ -11,7 +11,7 @@ const KEYS_PER_TABLE: u64 = 100;
 const RESTART_INTERVAL: usize = 16;
 const BLOCK_CAPACITY: usize = TABLES_PER_SSTABLE as usize * KEYS_PER_TABLE as usize * 64;
 
-async fn block_iter_next(block: Arc<Block>) {
+fn block_iter_next(block: Arc<Block>) {
     let mut iter = BlockIterator::new(block);
     iter.seek(Seek::First).unwrap();
     while iter.is_valid() {
@@ -19,7 +19,7 @@ async fn block_iter_next(block: Arc<Block>) {
     }
 }
 
-async fn block_iter_prev(block: Arc<Block>) {
+fn block_iter_prev(block: Arc<Block>) {
     let mut iter = BlockIterator::new(block);
     iter.seek(Seek::Last).unwrap();
     while iter.is_valid() {
