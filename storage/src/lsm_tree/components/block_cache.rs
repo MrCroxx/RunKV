@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::BufMut;
 use futures::Future;
 use moka::future::Cache;
 
@@ -9,12 +9,12 @@ use crate::lsm_tree::DEFAULT_BLOCK_SIZE;
 use crate::{Error, Result};
 
 pub struct BlockCache {
-    inner: Cache<Bytes, Arc<Block>>,
+    inner: Cache<Vec<u8>, Arc<Block>>,
 }
 
 impl BlockCache {
     pub fn new(capacity: usize) -> Self {
-        let cache: Cache<Bytes, Arc<Block>> = Cache::builder()
+        let cache: Cache<Vec<u8>, Arc<Block>> = Cache::builder()
             .weigher(|_k, v: &Arc<Block>| v.len() as u32)
             .initial_capacity(capacity / DEFAULT_BLOCK_SIZE)
             .max_capacity(capacity as u64)
@@ -49,10 +49,10 @@ impl BlockCache {
         }
     }
 
-    fn key(sst_id: u64, block_idx: usize) -> Bytes {
-        let mut key = BytesMut::with_capacity(16);
+    fn key(sst_id: u64, block_idx: usize) -> Vec<u8> {
+        let mut key = Vec::with_capacity(16);
         key.put_u64_le(sst_id);
         key.put_u64_le(block_idx as u64);
-        key.freeze()
+        key
     }
 }
