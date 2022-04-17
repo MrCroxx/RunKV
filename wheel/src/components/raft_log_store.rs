@@ -2,14 +2,14 @@ use std::io::Cursor;
 
 use async_trait::async_trait;
 use bytes::{Buf, BufMut};
+use itertools::Itertools;
 use openraft::EffectiveMembership;
-use runkv_proto::wheel::KvResponse;
 use runkv_storage::raft_log_store::entry::RaftLogBatchBuilder;
 use runkv_storage::raft_log_store::RaftLogStore;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tracing::trace;
 
-use super::fsm::KvFsm;
+use super::fsm::Fsm;
 use super::RaftTypeConfig;
 use crate::error::{Error, Result};
 
@@ -23,13 +23,13 @@ const PRUGE_LOG_ID_KEY: &[u8] = b"purge_log_id";
 const DEFAULT_SNAPSHOT_BUFFER_CAPACITY: usize = 64 << 10;
 
 #[derive(Clone)]
-pub struct RaftGroupLogStore<F: KvFsm> {
+pub struct RaftGroupLogStore<F: Fsm> {
     group: u64,
     core: RaftLogStore,
     fsm: F,
 }
 
-impl<F: KvFsm> RaftGroupLogStore<F> {
+impl<F: Fsm> RaftGroupLogStore<F> {
     pub fn new(group: u64, core: RaftLogStore, fsm: F) -> Self {
         Self { group, core, fsm }
     }
@@ -43,11 +43,54 @@ pub fn storage_io_error(
     openraft::StorageIOError::new(subject, verb, openraft::AnyError::new(&e)).into()
 }
 
-impl<F: KvFsm> RaftGroupLogStore<F> {
-    async fn apply(&self, entry: &openraft::Entry<RaftTypeConfig>) -> Result<Option<KvResponse>> {
+impl<F: Fsm> RaftGroupLogStore<F> {
+    pub async fn applied_index(&self) -> Result<Option<u64>> {
+        let applied_log_id = match self
+            .core
+            .get(self.group, APPLIED_LOG_ID_KEY.to_vec())
+            .await
+            .map_err(Error::storage_err)?
+        {
+            None => return Ok(None),
+            Some(data) => data,
+        };
+        let applied_log_id: openraft::LogId<u64> =
+            bincode::deserialize(&applied_log_id).map_err(Error::serde_err)?;
+        Ok(Some(applied_log_id.index))
+    }
+
+    pub async fn entries(&self, index: u64, max_len: usize) -> Result<Vec<Vec<u8>>> {
+        let raft_entries = self.core.entries(self.group, index, max_len).await?;
+        let entries = raft_entries.into_iter().map(|re| re.data).collect_vec();
+        Ok(entries)
+    }
+
+    pub async fn put(&self, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+        self.core
+            .put(self.group, key, value)
+            .await
+            .map_err(|e| e.into())
+    }
+
+    pub async fn get(&self, key: Vec<u8>) -> Result<Option<Vec<u8>>> {
+        self.core.get(self.group, key).await.map_err(|e| e.into())
+    }
+
+    pub async fn delete(&self, key: Vec<u8>) -> Result<()> {
+        self.core
+            .delete(self.group, key)
+            .await
+            .map_err(|e| e.into())
+    }
+}
+
+impl<F: Fsm> RaftGroupLogStore<F> {
+    async fn apply(&self, entry: &openraft::Entry<RaftTypeConfig>) -> Result<Option<()>> {
         let resp = match entry.payload {
             openraft::EntryPayload::Blank => None,
-            openraft::EntryPayload::Normal(ref request) => Some(self.fsm.apply(request).await?),
+            openraft::EntryPayload::Normal(ref request) => {
+                Some(self.fsm.apply(entry.log_id.index, request).await?)
+            }
             openraft::EntryPayload::Membership(ref membership) => {
                 trace!("save membership: {:?}", membership);
                 let effective_membership =
@@ -65,7 +108,7 @@ impl<F: KvFsm> RaftGroupLogStore<F> {
 }
 
 #[async_trait]
-impl<F: KvFsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
+impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
     type SnapshotData = Cursor<Vec<u8>>;
 
     type LogReader = Self;
@@ -297,11 +340,20 @@ impl<F: KvFsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
     > {
         let err = |e| storage_io_error(e, openraft::ErrorSubject::Logs, openraft::ErrorVerb::Write);
 
+        if entries.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let range = entries.first().unwrap().log_id.index..entries.last().unwrap().log_id.index + 1;
+
+        self.fsm.pre_apply(range.clone()).await.map_err(err)?;
+
         let mut resps = Vec::with_capacity(entries.len());
         for entry in entries.iter() {
             let resp = self.apply(entry).await.map_err(err)?;
             resps.push(resp);
         }
+
         if let Some(&entry) = entries.last() {
             let value = bincode::serialize(&entry.log_id)
                 .map_err(Error::serde_err)
@@ -312,6 +364,9 @@ impl<F: KvFsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
                 .map_err(Error::storage_err)
                 .map_err(err)?;
         }
+
+        self.fsm.post_apply(range).await.map_err(err)?;
+
         Ok(resps)
     }
 
@@ -363,7 +418,7 @@ impl<F: KvFsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
         };
 
         self.fsm
-            .install_snapshot(snapshot.as_ref())
+            .install_snapshot(meta.last_log_id.index, snapshot.as_ref())
             .await
             .map_err(err)?;
 
@@ -454,7 +509,7 @@ impl<F: KvFsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
 }
 
 #[async_trait]
-impl<F: KvFsm> openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore<F> {
+impl<F: Fsm> openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore<F> {
     /// Returns the last deleted log id and the last log id.
     ///
     /// The impl should not consider the applied log id in state machine.
@@ -589,7 +644,7 @@ impl<F: KvFsm> openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore<F> 
 }
 
 #[async_trait]
-impl<F: KvFsm> openraft::RaftSnapshotBuilder<RaftTypeConfig, Cursor<Vec<u8>>>
+impl<F: Fsm> openraft::RaftSnapshotBuilder<RaftTypeConfig, Cursor<Vec<u8>>>
     for RaftGroupLogStore<F>
 {
     /// Build snapshot
@@ -618,6 +673,8 @@ impl<F: KvFsm> openraft::RaftSnapshotBuilder<RaftTypeConfig, Cursor<Vec<u8>>>
         let applied_log_id: openraft::LogId<u64> = bincode::deserialize(&applied_log_id)
             .map_err(Error::serde_err)
             .map_err(err)?;
+
+        let index = applied_log_id.index;
         let snapshot_id = format!("snapshot-{}", applied_log_id.index);
 
         let snapshot_meta = openraft::storage::SnapshotMeta {
@@ -625,7 +682,7 @@ impl<F: KvFsm> openraft::RaftSnapshotBuilder<RaftTypeConfig, Cursor<Vec<u8>>>
             snapshot_id,
         };
 
-        let snapshot_data = self.fsm.build_snapshot().await.map_err(err)?;
+        let snapshot_data = self.fsm.build_snapshot(index).await.map_err(err)?;
         let snapshot = openraft::storage::Snapshot {
             meta: snapshot_meta,
             snapshot: Box::new(snapshot_data),
