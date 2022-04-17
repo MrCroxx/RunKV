@@ -121,20 +121,38 @@ mod tests {
     use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
     use test_log::test;
     use tokio::sync::mpsc;
+    use tracing::trace;
 
     use super::*;
-    use crate::components::command::AsyncCommand;
+    use crate::components::command::{AsyncCommand, CommandRequest, CommandResponse};
     use crate::service::tests::MockRaftService;
 
     #[test(tokio::test)]
     async fn test_raft() {
         let tempdir = tempfile::tempdir().unwrap();
         let addr_str = "127.0.0.1:12399".to_string();
-        let (manager, _rx) =
+        let (manager, mut rx) =
             build_manager_for_test(tempdir.path().to_str().unwrap(), addr_str.parse().unwrap())
                 .await;
+        let _rx_handle = tokio::spawn(async move {
+            while let Some(cmd) = rx.recv().await {
+                trace!("receive cmd: {:?}", cmd);
+                let rsp = match cmd.request {
+                    CommandRequest::ApplyToExclusive(index) => {
+                        CommandResponse::ApplyToExclusive(index)
+                    }
+                    CommandRequest::BuildSnapshot(index) => {
+                        CommandResponse::BuildSnapshot(index, vec![])
+                    }
+                    CommandRequest::InstallSnapshot(index, _) => {
+                        CommandResponse::InstallSnapshot(index)
+                    }
+                };
+                cmd.response.send(Ok(rsp)).unwrap();
+            }
+        });
         let manager_clone = manager.clone();
-        let _handle = tokio::spawn(MockRaftService::bootstrap(
+        let _raft_service_handle = tokio::spawn(MockRaftService::bootstrap(
             manager_clone,
             addr_str.parse().unwrap(),
         ));

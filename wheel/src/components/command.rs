@@ -1,20 +1,19 @@
-use runkv_proto::wheel::{KvRequest, KvResponse};
 use tokio::sync::oneshot;
 
 use crate::error::Result;
 
 #[derive(Debug)]
 pub enum CommandRequest {
-    Kv(KvRequest),
-    BuildSnapshot,
-    InstallSnapshot(Vec<u8>),
+    ApplyToExclusive(u64),
+    BuildSnapshot(u64),
+    InstallSnapshot(u64, Vec<u8>),
 }
 
 #[derive(Debug)]
 pub enum CommandResponse {
-    Kv(KvResponse),
-    BuildSnapshot(Vec<u8>),
-    InstallSnapshot,
+    ApplyToExclusive(u64),
+    BuildSnapshot(u64, Vec<u8>),
+    InstallSnapshot(u64),
 }
 
 #[derive(Debug)]
