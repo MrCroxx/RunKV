@@ -7,6 +7,8 @@ edition = "2021"
 [dependencies]
 bytes = "1"
 prost = "0.9"
+serde = "1.0"
+serde_derive = "1.0"
 tonic = "0.6.2"
 
 [build-dependencies]

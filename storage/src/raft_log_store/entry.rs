@@ -17,6 +17,7 @@ pub enum Entry {
     RaftLogBatch(RaftLogBatch),
     Truncate(Truncate),
     Compact(Compact),
+    Mask(Mask),
     Kv(Kv),
 }
 
@@ -53,8 +54,12 @@ impl Entry {
                 buf.put_u8(2);
                 compact.encode(buf);
             }
-            Self::Kv(kv) => {
+            Self::Mask(mask) => {
                 buf.put_u8(3);
+                mask.encode(buf);
+            }
+            Self::Kv(kv) => {
+                buf.put_u8(4);
                 kv.encode(buf);
             }
         }
@@ -65,7 +70,8 @@ impl Entry {
             0 => Self::RaftLogBatch(RaftLogBatch::decode(buf)),
             1 => Self::Truncate(Truncate::decode(buf)),
             2 => Self::Compact(Compact::decode(buf)),
-            3 => Self::Kv(Kv::decode(buf)),
+            3 => Self::Mask(Mask::decode(buf)),
+            4 => Self::Kv(Kv::decode(buf)),
             _ => unreachable!(),
         }
     }
@@ -277,9 +283,11 @@ pub struct RaftLogBatchBuilder {
 
 impl RaftLogBatchBuilder {
     pub fn add(&mut self, group: u64, term: u64, index: u64, ctx: &[u8], data: &[u8]) {
-        debug_assert_ne!(group, 0);
-        debug_assert_ne!(term, 0);
-        debug_assert_ne!(index, 0);
+        // TODO: For adaptation with openraft, which test suits has log entry with both term and
+        // index equals 0.
+        // debug_assert_ne!(group, 0);
+        // debug_assert_ne!(term, 0);
+        // debug_assert_ne!(index, 0);
 
         self.may_rotate(group, term, index);
 
@@ -344,6 +352,25 @@ pub struct Compact {
 }
 
 impl Compact {
+    pub fn encode(&self, buf: &mut Vec<u8>) {
+        buf.put_u64_le(self.group);
+        buf.put_u64_le(self.index);
+    }
+
+    pub fn decode(buf: &mut &[u8]) -> Self {
+        let group = buf.get_u64_le();
+        let index = buf.get_u64_le();
+        Self { group, index }
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct Mask {
+    pub group: u64,
+    pub index: u64,
+}
+
+impl Mask {
     pub fn encode(&self, buf: &mut Vec<u8>) {
         buf.put_u64_le(self.group);
         buf.put_u64_le(self.index);

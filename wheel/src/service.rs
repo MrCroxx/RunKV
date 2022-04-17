@@ -1,10 +1,20 @@
 use async_trait::async_trait;
+use runkv_common::channel_pool::ChannelPool;
+use runkv_proto::wheel::raft_service_server::RaftService;
 use runkv_proto::wheel::wheel_service_server::WheelService;
-use runkv_proto::wheel::{KvRequest, KvResponse, UpdateKeyRangesRequest, UpdateKeyRangesResponse};
+use runkv_proto::wheel::{
+    AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
+    UpdateKeyRangesRequest, UpdateKeyRangesResponse, VoteRequest, VoteResponse,
+};
+use runkv_storage::raft_log_store::RaftLogStore;
+use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
+use crate::components::command::AsyncCommand;
+use crate::components::lsm_tree::ObjectStoreLsmTree;
+use crate::components::network::RaftNetwork;
+use crate::components::raft_manager::RaftManager;
 use crate::meta::MetaStoreRef;
-use crate::storage::lsm_tree::ObjectStoreLsmTree;
 
 fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
     Status::internal(e.into().to_string())
@@ -13,20 +23,33 @@ fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
 pub struct WheelOptions {
     pub lsm_tree: ObjectStoreLsmTree,
     pub meta_store: MetaStoreRef,
+    pub channel_pool: ChannelPool,
+    pub raft_log_store: RaftLogStore,
+    pub raft_network: RaftNetwork,
+    pub raft_manager: RaftManager,
+    pub gear_receiver: mpsc::UnboundedReceiver<AsyncCommand>,
 }
 
 pub struct Wheel {
-    _options: WheelOptions,
     _lsm_tree: ObjectStoreLsmTree,
     meta_store: MetaStoreRef,
+    _channel_pool: ChannelPool,
+    _raft_log_store: RaftLogStore,
+    _raft_network: RaftNetwork,
+    _raft_manager: RaftManager,
+    _gear_receiver: mpsc::UnboundedReceiver<AsyncCommand>,
 }
 
 impl Wheel {
     pub fn new(options: WheelOptions) -> Self {
         Self {
-            _lsm_tree: options.lsm_tree.clone(),
-            meta_store: options.meta_store.clone(),
-            _options: options,
+            _lsm_tree: options.lsm_tree,
+            meta_store: options.meta_store,
+            _channel_pool: options.channel_pool,
+            _raft_log_store: options.raft_log_store,
+            _raft_network: options.raft_network,
+            _raft_manager: options.raft_manager,
+            _gear_receiver: options.gear_receiver,
         }
     }
 }
@@ -45,8 +68,25 @@ impl WheelService for Wheel {
         let rsp = UpdateKeyRangesResponse::default();
         Ok(Response::new(rsp))
     }
+}
 
-    async fn kv(&self, _request: Request<KvRequest>) -> Result<Response<KvResponse>, Status> {
+#[async_trait]
+impl RaftService for Wheel {
+    async fn append_entries(
+        &self,
+        _request: Request<AppendEntriesRequest>,
+    ) -> Result<Response<AppendEntriesResponse>, Status> {
+        todo!()
+    }
+
+    async fn install_snapshot(
+        &self,
+        _request: Request<InstallSnapshotRequest>,
+    ) -> Result<Response<InstallSnapshotResponse>, Status> {
+        todo!()
+    }
+
+    async fn vote(&self, _request: Request<VoteRequest>) -> Result<Response<VoteResponse>, Status> {
         todo!()
     }
 }

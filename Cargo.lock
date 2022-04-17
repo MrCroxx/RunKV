@@ -1466,7 +1466,7 @@ checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 [[package]]
 name = "openraft"
 version = "0.6.4"
-source = "git+https://github.com/datafuselabs/openraft?rev=8d3d1285aa93ed00722da4a898adf390ea6f1e82#8d3d1285aa93ed00722da4a898adf390ea6f1e82"
+source = "git+https://github.com/mrcroxx/openraft?rev=ab6d047cb47496598be09586029871c42b71fa2c#ab6d047cb47496598be09586029871c42b71fa2c"
 dependencies = [
  "anyerror",
  "async-trait",
@@ -1950,6 +1950,8 @@ dependencies = [
  "bytes",
  "prost",
  "prost-build",
+ "serde",
+ "serde_derive",
  "tonic",
  "tonic-build",
 ]
@@ -2042,11 +2044,13 @@ dependencies = [
  "openraft",
  "parking_lot 0.12.0",
  "prost",
+ "rand",
  "runkv-common",
  "runkv-proto",
  "runkv-storage",
  "serde",
  "serde_derive",
+ "tempfile",
  "test-log",
  "thiserror",
  "tokio",
@@ -2344,6 +2348,7 @@ dependencies = [
  "runkv-rudder",
  "runkv-storage",
  "runkv-wheel",
+ "tempfile",
  "test-log",
  "tokio",
  "toml",

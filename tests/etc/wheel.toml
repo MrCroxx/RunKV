@@ -23,3 +23,8 @@ write_buffer_capacity = "64 KiB"
 [cache]
 block_cache_capacity = "64 KiB"
 meta_cache_capacity = "1 KiB"
+
+[raft_log_store]
+log_dir_path = "/path/to/log/dir"
+log_file_capacity = "64 MiB"
+block_cache_capacity = "256 MiB"

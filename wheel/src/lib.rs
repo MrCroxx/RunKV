@@ -1,13 +1,16 @@
+pub mod components;
 pub mod config;
 pub mod error;
 pub mod meta;
 pub mod service;
-pub mod storage;
 pub mod worker;
 
 use std::sync::Arc;
 
 use bytesize::ByteSize;
+use components::gear::Gear;
+use components::network::RaftNetwork;
+use components::raft_manager::{RaftManager, RaftManagerOptions};
 use error::{Error, Result};
 use meta::mem::MemoryMetaStore;
 use meta::MetaStoreRef;
@@ -17,15 +20,18 @@ use runkv_proto::common::Endpoint as PbEndpoint;
 use runkv_proto::wheel::wheel_service_server::WheelServiceServer;
 use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions, SstableStoreRef};
 use runkv_storage::manifest::{VersionManager, VersionManagerOptions};
+use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
+use runkv_storage::raft_log_store::RaftLogStore;
 use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
 use service::{Wheel, WheelOptions};
+use tokio::sync::mpsc;
 use tonic::transport::Server;
 use tracing::info;
 use worker::heartbeater::{Heartbeater, HeartbeaterOptions};
 use worker::sstable_uploader::{SstableUploader, SstableUploaderOptions};
 
+use crate::components::lsm_tree::{ObjectStoreLsmTree, ObjectStoreLsmTreeOptions};
 use crate::config::WheelConfig;
-use crate::storage::lsm_tree::{ObjectStoreLsmTree, ObjectStoreLsmTreeOptions};
 
 pub async fn bootstrap_wheel(
     config: &WheelConfig,
@@ -74,12 +80,33 @@ pub async fn build_wheel_with_object_store(
 
     let meta_store = build_meta_store()?;
 
-    let version_syncer =
-        build_heartbeater(config, version_manager, meta_store.clone(), channel_pool)?;
+    let version_syncer = build_heartbeater(
+        config,
+        version_manager,
+        meta_store.clone(),
+        channel_pool.clone(),
+    )?;
+
+    let (tx, rx) = mpsc::unbounded_channel();
+    let gear = Gear::new(tx);
+
+    let raft_log_store = build_raft_log_store(config).await?;
+    let raft_network = build_raft_network(channel_pool.clone());
+    let raft_manager = build_raft_manager(
+        config,
+        raft_log_store.clone(),
+        raft_network.clone(),
+        gear.clone(),
+    );
 
     let options = WheelOptions {
         lsm_tree: lsm_tree.clone(),
         meta_store,
+        channel_pool,
+        raft_log_store,
+        raft_network,
+        raft_manager,
+        gear_receiver: rx,
     };
 
     let wheel = Wheel::new(options);
@@ -237,4 +264,44 @@ fn build_meta_store() -> Result<MetaStoreRef> {
 
 fn build_channel_pool(config: &WheelConfig) -> ChannelPool {
     ChannelPool::with_nodes(vec![config.rudder.clone()])
+}
+
+async fn build_raft_log_store(config: &WheelConfig) -> Result<RaftLogStore> {
+    let raft_log_store_options = RaftLogStoreOptions {
+        log_dir_path: config.raft_log_store.log_dir_path.clone(),
+        log_file_capacity: config
+            .raft_log_store
+            .log_file_capacity
+            .parse::<ByteSize>()
+            .map_err(Error::config_err)?
+            .0 as usize,
+        block_cache_capacity: config
+            .raft_log_store
+            .block_cache_capacity
+            .parse::<ByteSize>()
+            .map_err(Error::config_err)?
+            .0 as usize,
+    };
+    RaftLogStore::open(raft_log_store_options)
+        .await
+        .map_err(Error::storage_err)
+}
+
+fn build_raft_network(channel_pool: ChannelPool) -> RaftNetwork {
+    RaftNetwork::new(channel_pool)
+}
+
+fn build_raft_manager(
+    config: &WheelConfig,
+    raft_log_store: RaftLogStore,
+    raft_network: RaftNetwork,
+    gear: Gear,
+) -> RaftManager {
+    let raft_manager_options = RaftManagerOptions {
+        node: config.id,
+        raft_log_store,
+        raft_network,
+        gear,
+    };
+    RaftManager::new(raft_manager_options)
 }
