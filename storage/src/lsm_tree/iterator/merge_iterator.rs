@@ -191,14 +191,14 @@ mod tests {
 
     use super::*;
     use crate::components::{Block, BlockBuilder, BlockBuilderOptions};
-    use crate::iterator::BlockIterator;
+    use crate::iterator::tests::AsyncBlockIterator;
     use crate::utils::full_key;
 
     fn build_iterator_for_test() -> MergeIterator {
         MergeIterator::new(vec![
-            Box::new(BlockIterator::new(build_block_for_test(&[1, 5, 9]))),
-            Box::new(BlockIterator::new(build_block_for_test(&[2, 6, 10]))),
-            Box::new(BlockIterator::new(build_block_for_test(&[3, 7, 11]))),
+            Box::new(AsyncBlockIterator::new(build_block_for_test(&[1, 5, 9]))),
+            Box::new(AsyncBlockIterator::new(build_block_for_test(&[2, 6, 10]))),
+            Box::new(AsyncBlockIterator::new(build_block_for_test(&[3, 7, 11]))),
         ])
     }
 

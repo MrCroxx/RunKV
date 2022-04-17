@@ -43,5 +43,12 @@ tokio = { version = "1", features = [
 tracing = "0.1"
 
 [dev-dependencies]
+criterion = "0.3"
 env_logger = "*"
 test-log = "0.2.10"
+
+[[bench]]
+name = "bench_block_iter"
+harness = false
+# Uncomment this line if you are generating flame graph.
+# debug = true

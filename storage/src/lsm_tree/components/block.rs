@@ -323,11 +323,11 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use crate::lsm_tree::iterator::{BlockIterator, Iterator, Seek};
+    use crate::lsm_tree::iterator::{BlockIterator, Seek};
     use crate::utils::full_key;
 
-    #[test(tokio::test)]
-    async fn test_block_enc_dec() {
+    #[test]
+    fn test_block_enc_dec() {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
         builder.add(&full_key(b"k1", 1), b"v01");
@@ -338,32 +338,32 @@ mod tests {
         let block = Arc::new(Block::decode(&buf).unwrap());
         let mut bi = BlockIterator::new(block);
 
-        bi.seek(Seek::First).await.unwrap();
+        bi.seek(Seek::First).unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k1", 1)[..], bi.key());
         assert_eq!(b"v01", bi.value());
 
-        bi.next().await.unwrap();
+        bi.next().unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k2", 2)[..], bi.key());
         assert_eq!(b"v02", bi.value());
 
-        bi.next().await.unwrap();
+        bi.next().unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k3", 3)[..], bi.key());
         assert_eq!(b"v03", bi.value());
 
-        bi.next().await.unwrap();
+        bi.next().unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k4", 4)[..], bi.key());
         assert_eq!(b"v04", bi.value());
 
-        bi.next().await.unwrap();
+        bi.next().unwrap();
         assert!(!bi.is_valid());
     }
 
-    #[test(tokio::test)]
-    async fn test_compressed_block_enc_dec() {
+    #[test]
+    fn test_compressed_block_enc_dec() {
         let options = BlockBuilderOptions {
             compression_algorithm: CompressionAlgorithm::Lz4,
             ..Default::default()
@@ -377,32 +377,32 @@ mod tests {
         let block = Arc::new(Block::decode(&buf).unwrap());
         let mut bi = BlockIterator::new(block);
 
-        bi.seek(Seek::First).await.unwrap();
+        bi.seek(Seek::First).unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k1", 1)[..], bi.key());
         assert_eq!(b"v01", bi.value());
 
-        bi.next().await.unwrap();
+        bi.next().unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k2", 2)[..], bi.key());
         assert_eq!(b"v02", bi.value());
 
-        bi.next().await.unwrap();
+        bi.next().unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k3", 3)[..], bi.key());
         assert_eq!(b"v03", bi.value());
 
-        bi.next().await.unwrap();
+        bi.next().unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k4", 4)[..], bi.key());
         assert_eq!(b"v04", bi.value());
 
-        bi.next().await.unwrap();
+        bi.next().unwrap();
         assert!(!bi.is_valid());
     }
 
-    #[test(tokio::test)]
-    async fn test_asc() {
+    #[test]
+    fn test_asc() {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
         builder.add(&full_key(b"k1", u64::MAX / 2), b"v11");
@@ -413,27 +413,27 @@ mod tests {
         let block = Arc::new(Block::decode(&buf).unwrap());
         let mut bi = BlockIterator::new(block);
 
-        bi.seek(Seek::First).await.unwrap();
+        bi.seek(Seek::First).unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k1", u64::MAX / 2)[..], bi.key());
         assert_eq!(b"v11", bi.value());
 
-        bi.next().await.unwrap();
+        bi.next().unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k1", u64::MAX / 2 - 1)[..], bi.key());
         assert_eq!(b"v12", bi.value());
 
-        bi.next().await.unwrap();
+        bi.next().unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k2", u64::MAX / 2)[..], bi.key());
         assert_eq!(b"v21", bi.value());
 
-        bi.next().await.unwrap();
+        bi.next().unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k20000", u64::MAX)[..], bi.key());
         assert_eq!(b"v22", bi.value());
 
-        bi.next().await.unwrap();
+        bi.next().unwrap();
         assert!(!bi.is_valid());
     }
 }

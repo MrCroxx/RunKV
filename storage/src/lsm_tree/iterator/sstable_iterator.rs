@@ -44,7 +44,7 @@ impl SstableIterator {
     /// Note: Ensure that the current state is valid.
     async fn next_inner(&mut self) -> Result<()> {
         let iter = self.iter.as_mut().unwrap();
-        iter.next().await?;
+        iter.next()?;
         if !iter.is_valid() {
             if self.offset + 1 < self.sstable.blocks_len() {
                 self.offset += 1;
@@ -53,7 +53,7 @@ impl SstableIterator {
                     .block(&self.sstable, self.offset, self.cache_policy)
                     .await?;
                 self.iter = Some(BlockIterator::new(block));
-                self.iter.as_mut().unwrap().seek(Seek::First).await?;
+                self.iter.as_mut().unwrap().seek(Seek::First)?;
             } else {
                 self.invalid();
             }
@@ -64,7 +64,7 @@ impl SstableIterator {
     /// Note: Ensure that the current state is valid.
     async fn prev_inner(&mut self) -> Result<()> {
         let iter = self.iter.as_mut().unwrap();
-        iter.prev().await?;
+        iter.prev()?;
         if !iter.is_valid() {
             if self.offset > 0 {
                 self.offset -= 1;
@@ -73,7 +73,7 @@ impl SstableIterator {
                     .block(&self.sstable, self.offset, self.cache_policy)
                     .await?;
                 self.iter = Some(BlockIterator::new(block));
-                self.iter.as_mut().unwrap().seek(Seek::Last).await?;
+                self.iter.as_mut().unwrap().seek(Seek::Last)?;
             } else {
                 self.invalid();
             }
@@ -101,7 +101,7 @@ impl SstableIterator {
                 .block(&self.sstable, mid, self.cache_policy)
                 .await?;
             let mut iter = BlockIterator::new(block);
-            iter.seek(Seek::RandomForward(key)).await?;
+            iter.seek(Seek::RandomForward(key))?;
             let cmp = if iter.is_valid() {
                 compare_full_key(iter.key(), key)
             } else {
@@ -128,7 +128,7 @@ impl SstableIterator {
             .block(&self.sstable, offset, self.cache_policy)
             .await?;
         let mut iter = BlockIterator::new(block);
-        iter.seek(Seek::RandomForward(key)).await?;
+        iter.seek(Seek::RandomForward(key))?;
         if iter.is_valid() {
             self.offset = offset;
             self.iter = Some(iter)
@@ -141,7 +141,7 @@ impl SstableIterator {
                     .block(&self.sstable, self.offset, self.cache_policy)
                     .await?;
                 let mut iter = BlockIterator::new(block);
-                iter.seek(Seek::RandomForward(key)).await?;
+                iter.seek(Seek::RandomForward(key))?;
                 self.iter = Some(iter)
             } else {
                 // No more valid entry, set invalid state.
@@ -187,7 +187,7 @@ impl Iterator for SstableIterator {
                     .block(&self.sstable, self.offset, self.cache_policy)
                     .await?;
                 self.iter = Some(BlockIterator::new(block));
-                self.iter.as_mut().unwrap().seek(Seek::First).await?;
+                self.iter.as_mut().unwrap().seek(Seek::First)?;
                 self.is_valid()
             }
             Seek::Last => {
@@ -197,7 +197,7 @@ impl Iterator for SstableIterator {
                     .block(&self.sstable, self.offset, self.cache_policy)
                     .await?;
                 self.iter = Some(BlockIterator::new(block));
-                self.iter.as_mut().unwrap().seek(Seek::Last).await?;
+                self.iter.as_mut().unwrap().seek(Seek::Last)?;
                 self.is_valid()
             }
             Seek::RandomForward(key) => {

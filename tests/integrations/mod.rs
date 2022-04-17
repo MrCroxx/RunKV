@@ -1,4 +1,5 @@
 use std::fs::read_to_string;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,6 +27,13 @@ const LSM_TREE_CONFIG_PATH: &str = "etc/lsm_tree.toml";
 
 #[test(tokio::test)]
 async fn test_concurrent_put_get() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let raft_log_dir_path = Path::new(tempdir.path())
+        .join("raft")
+        .to_str()
+        .unwrap()
+        .to_string();
+
     let object_store = Arc::new(MemObjectStore::default());
 
     let rudder_config: RudderConfig =
@@ -35,8 +43,12 @@ async fn test_concurrent_put_get() {
             .await
             .unwrap();
 
-    let wheel_config: WheelConfig =
-        toml::from_str(&concat_toml(WHEEL_CONFIG_PATH, LSM_TREE_CONFIG_PATH)).unwrap();
+    let wheel_config: WheelConfig = {
+        let mut config: WheelConfig =
+            toml::from_str(&concat_toml(WHEEL_CONFIG_PATH, LSM_TREE_CONFIG_PATH)).unwrap();
+        config.raft_log_store.log_dir_path = raft_log_dir_path;
+        config
+    };
     let (wheel, lsmtree, wheel_workers) =
         build_wheel_with_object_store(&wheel_config, object_store.clone())
             .await
@@ -112,6 +124,8 @@ async fn test_concurrent_put_get() {
     while lsmtree.get_oldest_immutable_memtable().is_some() {
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
+
+    drop(tempdir)
 }
 
 fn key(i: u64) -> Bytes {
