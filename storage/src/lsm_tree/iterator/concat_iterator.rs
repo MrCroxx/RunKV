@@ -189,41 +189,8 @@ mod tests {
 
     use super::*;
     use crate::components::{Block, BlockBuilder, BlockBuilderOptions};
-    use crate::iterator::BlockIterator;
+    use crate::iterator::tests::AsyncBlockIterator;
     use crate::utils::full_key;
-    pub struct AsyncBlockIterator(BlockIterator);
-
-    impl AsyncBlockIterator {
-        pub fn new(block: Arc<Block>) -> Self {
-            AsyncBlockIterator(BlockIterator::new(block))
-        }
-    }
-    #[async_trait]
-    impl Iterator for AsyncBlockIterator {
-        async fn next(&mut self) -> Result<()> {
-            self.0.next()
-        }
-
-        async fn prev(&mut self) -> Result<()> {
-            self.0.prev()
-        }
-
-        fn key(&self) -> &[u8] {
-            self.0.key()
-        }
-
-        fn value(&self) -> &[u8] {
-            self.0.value()
-        }
-
-        fn is_valid(&self) -> bool {
-            self.0.is_valid()
-        }
-
-        async fn seek<'s>(&mut self, seek: Seek<'s>) -> Result<bool> {
-            self.0.seek(seek)
-        }
-    }
 
     fn build_iterator_for_test() -> ConcatIterator {
         ConcatIterator::new(vec![
