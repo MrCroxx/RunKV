@@ -14,6 +14,7 @@ use crate::components::command::AsyncCommand;
 use crate::components::lsm_tree::ObjectStoreLsmTree;
 use crate::components::network::RaftNetwork;
 use crate::components::raft_manager::RaftManager;
+use crate::error::Error;
 use crate::meta::MetaStoreRef;
 
 fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
@@ -36,7 +37,7 @@ pub struct Wheel {
     _channel_pool: ChannelPool,
     _raft_log_store: RaftLogStore,
     _raft_network: RaftNetwork,
-    _raft_manager: RaftManager,
+    raft_manager: RaftManager,
     _gear_receiver: mpsc::UnboundedReceiver<AsyncCommand>,
 }
 
@@ -48,7 +49,7 @@ impl Wheel {
             _channel_pool: options.channel_pool,
             _raft_log_store: options.raft_log_store,
             _raft_network: options.raft_network,
-            _raft_manager: options.raft_manager,
+            raft_manager: options.raft_manager,
             _gear_receiver: options.gear_receiver,
         }
     }
@@ -74,19 +75,198 @@ impl WheelService for Wheel {
 impl RaftService for Wheel {
     async fn append_entries(
         &self,
-        _request: Request<AppendEntriesRequest>,
+        request: Request<AppendEntriesRequest>,
     ) -> Result<Response<AppendEntriesResponse>, Status> {
-        todo!()
+        let req = request.into_inner();
+        let raft = self
+            .raft_manager
+            .get_raft_node(req.id)
+            .await
+            .map_err(internal)?;
+        let req_data = bincode::deserialize(&req.data)
+            .map_err(Error::serde_err)
+            .map_err(internal)?;
+        let rsp = raft
+            .append_entries(req_data)
+            .await
+            .map_err(Error::raft_err)
+            .map_err(internal)?;
+        let rsp_data = bincode::serialize(&rsp)
+            .map_err(Error::serde_err)
+            .map_err(internal)?;
+        let response = AppendEntriesResponse {
+            id: req.id,
+            data: rsp_data,
+        };
+        Ok(Response::new(response))
     }
 
     async fn install_snapshot(
         &self,
-        _request: Request<InstallSnapshotRequest>,
+        request: Request<InstallSnapshotRequest>,
     ) -> Result<Response<InstallSnapshotResponse>, Status> {
-        todo!()
+        let req = request.into_inner();
+        let raft = self
+            .raft_manager
+            .get_raft_node(req.id)
+            .await
+            .map_err(internal)?;
+        let req_data = bincode::deserialize(&req.data)
+            .map_err(Error::serde_err)
+            .map_err(internal)?;
+        let rsp = raft
+            .install_snapshot(req_data)
+            .await
+            .map_err(Error::raft_err)
+            .map_err(internal)?;
+        let rsp_data = bincode::serialize(&rsp)
+            .map_err(Error::serde_err)
+            .map_err(internal)?;
+        let response = InstallSnapshotResponse {
+            id: req.id,
+            data: rsp_data,
+        };
+        Ok(Response::new(response))
     }
 
-    async fn vote(&self, _request: Request<VoteRequest>) -> Result<Response<VoteResponse>, Status> {
-        todo!()
+    async fn vote(&self, request: Request<VoteRequest>) -> Result<Response<VoteResponse>, Status> {
+        let req = request.into_inner();
+        let raft = self
+            .raft_manager
+            .get_raft_node(req.id)
+            .await
+            .map_err(internal)?;
+        let req_data = bincode::deserialize(&req.data)
+            .map_err(Error::serde_err)
+            .map_err(internal)?;
+        let rsp = raft
+            .vote(req_data)
+            .await
+            .map_err(Error::raft_err)
+            .map_err(internal)?;
+        let rsp_data = bincode::serialize(&rsp)
+            .map_err(Error::serde_err)
+            .map_err(internal)?;
+        let response = VoteResponse {
+            id: req.id,
+            data: rsp_data,
+        };
+        Ok(Response::new(response))
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+
+    use std::net::SocketAddr;
+
+    use runkv_proto::wheel::raft_service_server::RaftServiceServer;
+    use tonic::transport::Server;
+    use tracing::trace;
+
+    use super::*;
+
+    pub struct MockRaftService {
+        raft_manager: RaftManager,
+    }
+
+    impl MockRaftService {
+        pub async fn bootstrap(raft_manager: RaftManager, addr: SocketAddr) {
+            let service = Self { raft_manager };
+            trace!("Bootstrap mock raft service on {}", addr);
+            Server::builder()
+                .add_service(RaftServiceServer::new(service))
+                .serve(addr)
+                .await
+                .map_err(Error::err)
+                .unwrap();
+        }
+    }
+
+    #[async_trait]
+    impl RaftService for MockRaftService {
+        async fn append_entries(
+            &self,
+            request: Request<AppendEntriesRequest>,
+        ) -> Result<Response<AppendEntriesResponse>, Status> {
+            let req = request.into_inner();
+            let raft = self
+                .raft_manager
+                .get_raft_node(req.id)
+                .await
+                .map_err(internal)?;
+            let req_data = bincode::deserialize(&req.data)
+                .map_err(Error::serde_err)
+                .map_err(internal)?;
+            let rsp = raft
+                .append_entries(req_data)
+                .await
+                .map_err(Error::raft_err)
+                .map_err(internal)?;
+            let rsp_data = bincode::serialize(&rsp)
+                .map_err(Error::serde_err)
+                .map_err(internal)?;
+            let response = AppendEntriesResponse {
+                id: req.id,
+                data: rsp_data,
+            };
+            Ok(Response::new(response))
+        }
+
+        async fn install_snapshot(
+            &self,
+            request: Request<InstallSnapshotRequest>,
+        ) -> Result<Response<InstallSnapshotResponse>, Status> {
+            let req = request.into_inner();
+            let raft = self
+                .raft_manager
+                .get_raft_node(req.id)
+                .await
+                .map_err(internal)?;
+            let req_data = bincode::deserialize(&req.data)
+                .map_err(Error::serde_err)
+                .map_err(internal)?;
+            let rsp = raft
+                .install_snapshot(req_data)
+                .await
+                .map_err(Error::raft_err)
+                .map_err(internal)?;
+            let rsp_data = bincode::serialize(&rsp)
+                .map_err(Error::serde_err)
+                .map_err(internal)?;
+            let response = InstallSnapshotResponse {
+                id: req.id,
+                data: rsp_data,
+            };
+            Ok(Response::new(response))
+        }
+
+        async fn vote(
+            &self,
+            request: Request<VoteRequest>,
+        ) -> Result<Response<VoteResponse>, Status> {
+            let req = request.into_inner();
+            let raft = self
+                .raft_manager
+                .get_raft_node(req.id)
+                .await
+                .map_err(internal)?;
+            let req_data = bincode::deserialize(&req.data)
+                .map_err(Error::serde_err)
+                .map_err(internal)?;
+            let rsp = raft
+                .vote(req_data)
+                .await
+                .map_err(Error::raft_err)
+                .map_err(internal)?;
+            let rsp_data = bincode::serialize(&rsp)
+                .map_err(Error::serde_err)
+                .map_err(internal)?;
+            let response = VoteResponse {
+                id: req.id,
+                data: rsp_data,
+            };
+            Ok(Response::new(response))
+        }
     }
 }
