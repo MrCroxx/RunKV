@@ -46,6 +46,7 @@ pub async fn bootstrap_wheel(
 
     Server::builder()
         .add_service(WheelServiceServer::new(wheel))
+        // .add_service(RaftServiceServer::new(wheel))
         .serve(addr_str.parse().map_err(Error::err)?)
         .await
         .map_err(Error::err)

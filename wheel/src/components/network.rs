@@ -160,13 +160,16 @@ impl openraft::RaftNetworkFactory<RaftTypeConfig> for RaftNetwork {
         target: <RaftTypeConfig as openraft::RaftTypeConfig>::NodeId,
         _node: Option<&openraft::Node>,
     ) -> Self::Network {
-        let client = RaftServiceClient::new(
-            self.channel_pool
-                .get(target)
-                .await
-                .map_err(Error::err)
-                .unwrap(),
-        );
-        RaftNetworkConnection { id: target, client }
+        let raft_node = target;
+        let node = *self
+            .proxy
+            .read()
+            .get(&raft_node)
+            .unwrap_or_else(|| panic!("proxy to {} not found", raft_node));
+        let client = RaftServiceClient::new(self.channel_pool.get(node).await.unwrap());
+        RaftNetworkConnection {
+            id: raft_node,
+            client,
+        }
     }
 }

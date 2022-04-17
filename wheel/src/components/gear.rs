@@ -3,6 +3,7 @@ use std::io::Cursor;
 use async_trait::async_trait;
 use runkv_proto::wheel::{KvRequest, KvResponse};
 use tokio::sync::{mpsc, oneshot};
+use tracing::trace;
 
 use super::command::{AsyncCommand, CommandRequest, CommandResponse};
 use super::fsm::KvFsm;
@@ -22,6 +23,7 @@ impl Gear {
 #[async_trait]
 impl KvFsm for Gear {
     async fn apply(&self, request: &KvRequest) -> Result<KvResponse> {
+        trace!("apply: {:?}", request);
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(AsyncCommand {
@@ -37,6 +39,7 @@ impl KvFsm for Gear {
     }
 
     async fn build_snapshot(&self) -> Result<Cursor<Vec<u8>>> {
+        trace!("build snapshot");
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(AsyncCommand {
@@ -52,6 +55,7 @@ impl KvFsm for Gear {
     }
 
     async fn install_snapshot(&self, snapshot: &Cursor<Vec<u8>>) -> Result<()> {
+        trace!("install snapshot: {:?}", snapshot);
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(AsyncCommand {
