@@ -86,6 +86,8 @@ pub struct RaftLogBatch {
     ctxs: Vec<Vec<u8>>,
     data_len: usize,
     /// Note: Only used for encoding.
+    raw: Vec<u8>,
+    /// Note: Only used for encoding.
     data: Vec<u8>,
 }
 
@@ -109,6 +111,7 @@ impl Default for RaftLogBatch {
             offsets: vec![],
             ctxs: vec![],
             data_len: 0,
+            raw: Vec::with_capacity(DEFAULT_LOG_BATCH_SIZE),
             data: Vec::with_capacity(DEFAULT_LOG_BATCH_SIZE),
         }
     }
@@ -160,6 +163,12 @@ impl RaftLogBatch {
         &self.ctxs[index]
     }
 
+    pub fn take_raw(&mut self) -> Vec<u8> {
+        let mut buf = vec![];
+        std::mem::swap(&mut self.raw, &mut buf);
+        buf
+    }
+
     /// Convert raw data to encoded data.
     ///
     /// Format:
@@ -171,11 +180,11 @@ impl RaftLogBatch {
         let mut buf = {
             let mut encoder = lz4::EncoderBuilder::new()
                 .level(4)
-                .build(Vec::with_capacity(self.data.len()).writer())
+                .build(Vec::with_capacity(self.raw.len()).writer())
                 .map_err(RaftLogStoreError::encode_error)
                 .unwrap();
             encoder
-                .write(&self.data[..])
+                .write(&self.raw[..])
                 .map_err(RaftLogStoreError::encode_error)
                 .unwrap();
             let (writer, result) = encoder.finish();
@@ -186,7 +195,7 @@ impl RaftLogBatch {
         let checksum = crc32sum(&buf);
         buf.put_u32_le(checksum);
         self.data = buf;
-        self.data_len = self.data.len()
+        self.data_len = self.data.len();
     }
 
     /// Format:
@@ -240,6 +249,7 @@ impl RaftLogBatch {
             offsets,
             ctxs,
             data_len: data_segment_len,
+            raw: vec![],
             data: vec![],
         }
     }
@@ -296,15 +306,16 @@ impl RaftLogBatchBuilder {
             self.current.term = term;
             self.current.first_index = index;
         }
-        self.current.offsets.push(self.current.data.len());
+        self.current.offsets.push(self.current.raw.len());
         self.current.ctxs.push(ctx.to_vec());
-        self.current.data.put_slice(data);
+        self.current.raw.put_slice(data);
     }
 
+    /// Build [`RaftLogBatch`]s.
     pub fn build(mut self) -> Vec<RaftLogBatch> {
         self.may_rotate(0, 0, 0);
         for batch in self.batches.iter_mut() {
-            batch.encode_data()
+            batch.encode_data();
         }
         self.batches
     }
@@ -318,7 +329,7 @@ impl RaftLogBatchBuilder {
             || self.current.first_index + self.current.offsets.len() as u64 != index
         {
             // Phantom offset.
-            self.current.offsets.push(self.current.data.len());
+            self.current.offsets.push(self.current.raw.len());
             let mut current = RaftLogBatch::default();
             std::mem::swap(&mut self.current, &mut current);
             self.batches.push(current);
