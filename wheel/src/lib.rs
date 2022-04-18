@@ -8,7 +8,6 @@ pub mod worker;
 use std::sync::Arc;
 
 use bytesize::ByteSize;
-use components::gear::Gear;
 use components::network::RaftNetwork;
 use components::raft_manager::{RaftManager, RaftManagerOptions};
 use error::{Error, Result};
@@ -25,7 +24,6 @@ use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
 use runkv_storage::raft_log_store::RaftLogStore;
 use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
 use service::{Wheel, WheelOptions};
-use tokio::sync::mpsc;
 use tonic::transport::Server;
 use tracing::info;
 use worker::heartbeater::{Heartbeater, HeartbeaterOptions};
@@ -89,16 +87,13 @@ pub async fn build_wheel_with_object_store(
         channel_pool.clone(),
     )?;
 
-    let (tx, rx) = mpsc::unbounded_channel();
-    let gear = Gear::new(tx);
-
     let raft_log_store = build_raft_log_store(config).await?;
     let raft_network = build_raft_network(channel_pool.clone());
     let raft_manager = build_raft_manager(
         config,
+        lsm_tree.clone(),
         raft_log_store.clone(),
         raft_network.clone(),
-        gear.clone(),
     );
 
     let options = WheelOptions {
@@ -108,7 +103,6 @@ pub async fn build_wheel_with_object_store(
         raft_log_store,
         raft_network,
         raft_manager,
-        gear_receiver: rx,
     };
 
     let wheel = Wheel::new(options);
@@ -295,15 +289,15 @@ fn build_raft_network(channel_pool: ChannelPool) -> RaftNetwork {
 
 fn build_raft_manager(
     config: &WheelConfig,
+    lsm_tree: ObjectStoreLsmTree,
     raft_log_store: RaftLogStore,
     raft_network: RaftNetwork,
-    gear: Gear,
 ) -> RaftManager {
     let raft_manager_options = RaftManagerOptions {
         node: config.id,
+        lsm_tree,
         raft_log_store,
         raft_network,
-        gear,
     };
     RaftManager::new(raft_manager_options)
 }

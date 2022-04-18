@@ -9,10 +9,8 @@ use runkv_proto::wheel::{
     UpdateKeyRangesRequest, UpdateKeyRangesResponse, VoteRequest, VoteResponse,
 };
 use runkv_storage::raft_log_store::RaftLogStore;
-use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
-use crate::components::command::AsyncCommand;
 use crate::components::lsm_tree::ObjectStoreLsmTree;
 use crate::components::network::RaftNetwork;
 use crate::components::raft_manager::RaftManager;
@@ -30,7 +28,6 @@ pub struct WheelOptions {
     pub raft_log_store: RaftLogStore,
     pub raft_network: RaftNetwork,
     pub raft_manager: RaftManager,
-    pub gear_receiver: mpsc::UnboundedReceiver<AsyncCommand>,
 }
 
 struct WheelInner {
@@ -40,7 +37,6 @@ struct WheelInner {
     _raft_log_store: RaftLogStore,
     _raft_network: RaftNetwork,
     raft_manager: RaftManager,
-    _gear_receiver: mpsc::UnboundedReceiver<AsyncCommand>,
 }
 
 #[derive(Clone)]
@@ -58,7 +54,6 @@ impl Wheel {
                 _raft_log_store: options.raft_log_store,
                 _raft_network: options.raft_network,
                 raft_manager: options.raft_manager,
-                _gear_receiver: options.gear_receiver,
             }),
         }
     }

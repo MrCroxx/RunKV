@@ -88,9 +88,11 @@ impl<F: Fsm> RaftGroupLogStore<F> {
     async fn apply(&self, entry: &openraft::Entry<RaftTypeConfig>) -> Result<Option<()>> {
         let resp = match entry.payload {
             openraft::EntryPayload::Blank => None,
-            openraft::EntryPayload::Normal(ref request) => {
-                Some(self.fsm.apply(entry.log_id.index, request).await?)
-            }
+            openraft::EntryPayload::Normal(ref request) => Some(
+                self.fsm
+                    .apply(self.group, entry.log_id.index, request)
+                    .await?,
+            ),
             openraft::EntryPayload::Membership(ref membership) => {
                 trace!("save membership: {:?}", membership);
                 let effective_membership =
@@ -346,7 +348,10 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
 
         let range = entries.first().unwrap().log_id.index..entries.last().unwrap().log_id.index + 1;
 
-        self.fsm.pre_apply(range.clone()).await.map_err(err)?;
+        self.fsm
+            .pre_apply(self.group, range.clone())
+            .await
+            .map_err(err)?;
 
         let mut resps = Vec::with_capacity(entries.len());
         for entry in entries.iter() {
@@ -365,7 +370,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
                 .map_err(err)?;
         }
 
-        self.fsm.post_apply(range).await.map_err(err)?;
+        self.fsm.post_apply(self.group, range).await.map_err(err)?;
 
         Ok(resps)
     }
@@ -418,7 +423,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
         };
 
         self.fsm
-            .install_snapshot(meta.last_log_id.index, snapshot.as_ref())
+            .install_snapshot(self.group, meta.last_log_id.index, snapshot.as_ref())
             .await
             .map_err(err)?;
 
@@ -682,7 +687,11 @@ impl<F: Fsm> openraft::RaftSnapshotBuilder<RaftTypeConfig, Cursor<Vec<u8>>>
             snapshot_id,
         };
 
-        let snapshot_data = self.fsm.build_snapshot(index).await.map_err(err)?;
+        let snapshot_data = self
+            .fsm
+            .build_snapshot(self.group, index)
+            .await
+            .map_err(err)?;
         let snapshot = openraft::storage::Snapshot {
             meta: snapshot_meta,
             snapshot: Box::new(snapshot_data),
@@ -703,7 +712,7 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use crate::components::fsm::MockKvFsm;
+    use crate::components::fsm::tests::MockFsm;
 
     #[test]
     fn test_raft_log_store() {
@@ -727,7 +736,7 @@ mod tests {
             };
             let store = RaftLogStore::open(options).await.unwrap();
             store.add_group(1).await.unwrap();
-            RaftGroupLogStore::new(1, store, MockKvFsm::default())
+            RaftGroupLogStore::new(1, store, MockFsm::default())
         })
         .unwrap();
         drop(tempdir);

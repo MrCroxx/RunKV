@@ -2041,6 +2041,7 @@ dependencies = [
  "humantime",
  "humantime-serde",
  "itertools",
+ "moka",
  "openraft",
  "parking_lot 0.12.0",
  "prost",

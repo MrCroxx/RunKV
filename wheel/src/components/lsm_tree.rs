@@ -228,3 +228,46 @@ impl ObjectStoreLsmTree {
         self.inner.drop_oldest_immutable_memtable()
     }
 }
+
+#[cfg(test)]
+pub mod tests {
+    use std::sync::Arc;
+
+    use runkv_common::coding::CompressionAlgorithm;
+    use runkv_common::config::LevelOptions;
+    use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions};
+    use runkv_storage::manifest::VersionManagerOptions;
+    use runkv_storage::MemObjectStore;
+
+    use super::*;
+
+    pub fn build_test_lsm_tree() -> ObjectStoreLsmTree {
+        let object_store = Arc::new(MemObjectStore::default());
+        let block_cache = BlockCache::new(16 << 10);
+        let sstable_store = Arc::new(SstableStore::new(SstableStoreOptions {
+            path: "path".to_string(),
+            object_store,
+            block_cache,
+            meta_cache_capacity: 4 << 10,
+        }));
+        let version_manager = VersionManager::new(VersionManagerOptions {
+            levels_options: vec![
+                LevelOptions {
+                    compaction_strategy: LevelCompactionStrategy::Overlap,
+                    compression_algorithm: CompressionAlgorithm::None,
+                },
+                LevelOptions {
+                    compaction_strategy: LevelCompactionStrategy::NonOverlap,
+                    compression_algorithm: CompressionAlgorithm::None,
+                },
+            ],
+            levels: vec![vec![]; 2],
+            sstable_store: sstable_store.clone(),
+        });
+        ObjectStoreLsmTree::new(ObjectStoreLsmTreeOptions {
+            sstable_store,
+            write_buffer_capacity: 4 << 10,
+            version_manager,
+        })
+    }
+}

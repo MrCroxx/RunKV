@@ -161,6 +161,9 @@ impl RaftLogStore {
             index.block_len = block_len;
         }
 
+        // TODO: Fill block cache. Code refactor is needed, at this point, data in log bath has
+        // already been encoded.
+
         self.core.states.append(group, first_index, indices).await?;
 
         Ok(())
