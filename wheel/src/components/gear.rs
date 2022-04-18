@@ -1,5 +1,4 @@
 use std::io::Cursor;
-use std::ops::Range;
 
 use async_trait::async_trait;
 use tokio::sync::{mpsc, oneshot};
@@ -22,54 +21,63 @@ impl Gear {
 
 #[async_trait]
 impl Fsm for Gear {
-    async fn apply(&self, _index: u64, _request: &[u8]) -> Result<()> {
-        Ok(())
-    }
-
-    async fn post_apply(&self, range: Range<u64>) -> Result<()> {
-        trace!("notify apply to (exclusive): {}", range.end);
+    async fn apply(&self, group: u64, index: u64, request: &[u8]) -> Result<()> {
+        trace!(group = group, index = index, "notify apply:");
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(AsyncCommand {
-                request: CommandRequest::ApplyToExclusive(range.end),
+                request: CommandRequest::Data {
+                    group,
+                    index,
+                    data: request.to_vec(),
+                },
                 response: tx,
             })
             .map_err(Error::err)?;
         let res = rx.await.map_err(Error::err)??;
         match res {
-            CommandResponse::ApplyToExclusive(_) => Ok(()),
+            CommandResponse::Data { .. } => Ok(()),
             _ => unreachable!(),
         }
     }
 
-    async fn build_snapshot(&self, index: u64) -> Result<Cursor<Vec<u8>>> {
+    async fn build_snapshot(&self, group: u64, index: u64) -> Result<Cursor<Vec<u8>>> {
         trace!("build snapshot");
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(AsyncCommand {
-                request: CommandRequest::BuildSnapshot(index),
+                request: CommandRequest::BuildSnapshot { group, index },
                 response: tx,
             })
             .map_err(Error::err)?;
         let res = rx.await.map_err(Error::err)??;
         match res {
-            CommandResponse::BuildSnapshot(_, snapshot) => Ok(Cursor::new(snapshot)),
+            CommandResponse::BuildSnapshot { snapshot, .. } => Ok(Cursor::new(snapshot)),
             _ => unreachable!(),
         }
     }
 
-    async fn install_snapshot(&self, index: u64, snapshot: &Cursor<Vec<u8>>) -> Result<()> {
+    async fn install_snapshot(
+        &self,
+        group: u64,
+        index: u64,
+        snapshot: &Cursor<Vec<u8>>,
+    ) -> Result<()> {
         trace!("install snapshot: {:?}", snapshot);
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(AsyncCommand {
-                request: CommandRequest::InstallSnapshot(index, snapshot.to_owned().into_inner()),
+                request: CommandRequest::InstallSnapshot {
+                    group,
+                    index,
+                    snapshot: snapshot.to_owned().into_inner(),
+                },
                 response: tx,
             })
             .map_err(Error::err)?;
         let res = rx.await.map_err(Error::err)??;
         match res {
-            CommandResponse::InstallSnapshot(_) => Ok(()),
+            CommandResponse::InstallSnapshot { .. } => Ok(()),
             _ => unreachable!(),
         }
     }

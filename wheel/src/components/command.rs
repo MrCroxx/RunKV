@@ -4,16 +4,37 @@ use crate::error::Result;
 
 #[derive(Debug)]
 pub enum CommandRequest {
-    ApplyToExclusive(u64),
-    BuildSnapshot(u64),
-    InstallSnapshot(u64, Vec<u8>),
+    Data {
+        group: u64,
+        index: u64,
+        data: Vec<u8>,
+    },
+    BuildSnapshot {
+        group: u64,
+        index: u64,
+    },
+    InstallSnapshot {
+        group: u64,
+        index: u64,
+        snapshot: Vec<u8>,
+    },
 }
 
 #[derive(Debug)]
 pub enum CommandResponse {
-    ApplyToExclusive(u64),
-    BuildSnapshot(u64, Vec<u8>),
-    InstallSnapshot(u64),
+    Data {
+        group: u64,
+        index: u64,
+    },
+    BuildSnapshot {
+        group: u64,
+        index: u64,
+        snapshot: Vec<u8>,
+    },
+    InstallSnapshot {
+        group: u64,
+        index: u64,
+    },
 }
 
 #[derive(Debug)]
