@@ -99,7 +99,7 @@ impl Block {
         &self.data[range]
     }
 
-    #[cfg(test)]
+    // #[cfg(test)]
     pub fn data(&self) -> &[u8] {
         &self.data
     }

@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::ops::Range;
 use std::sync::Arc;
 
 use super::Seek;
@@ -17,7 +18,8 @@ pub struct BlockIterator {
     /// Current key.
     key: Vec<u8>,
     /// Current value.
-    value: Vec<u8>,
+    // value: Vec<u8>,
+    value_range: Range<usize>,
     /// Current entry len.
     entry_len: usize,
 }
@@ -29,7 +31,7 @@ impl BlockIterator {
             offset: usize::MAX,
             restart_point_index: usize::MAX,
             key: Vec::default(),
-            value: Vec::default(),
+            value_range: 0..0,
             entry_len: 0,
         }
     }
@@ -39,7 +41,7 @@ impl BlockIterator {
         self.offset = self.block.len();
         self.restart_point_index = self.block.restart_point_len();
         self.key.clear();
-        self.value.clear();
+        self.value_range = 0..0;
         self.entry_len = 0;
     }
 
@@ -56,7 +58,7 @@ impl BlockIterator {
         self.key.truncate(prefix.overlap_len());
         self.key
             .extend_from_slice(self.block.slice(prefix.diff_key_range()));
-        self.value = self.block.slice(prefix.value_range()).to_vec();
+        self.value_range = prefix.value_range();
         self.offset = offset;
         self.entry_len = prefix.entry_len();
         if self.restart_point_index + 1 < self.block.restart_point_len()
@@ -134,7 +136,7 @@ impl BlockIterator {
         let offset = self.block.restart_point(index) as usize;
         let prefix = self.decode_prefix_at(offset);
         self.key = self.block.slice(prefix.diff_key_range()).to_vec();
-        self.value = self.block.slice(prefix.value_range()).to_vec();
+        self.value_range = prefix.value_range();
         self.offset = offset;
         self.entry_len = prefix.entry_len();
         self.restart_point_index = index;
@@ -160,7 +162,7 @@ impl BlockIterator {
 
     pub fn value(&self) -> &[u8] {
         assert!(self.is_valid());
-        &self.value[..]
+        &self.block.data()[self.value_range.clone()]
     }
 
     pub fn is_valid(&self) -> bool {
