@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::ops::Range;
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use parking_lot::RwLock;
 
 use super::ObjectStore;
@@ -10,26 +9,26 @@ use crate::{ObjectStoreError, Result};
 
 #[derive(Default)]
 pub struct MemObjectStore {
-    objects: RwLock<BTreeMap<String, Bytes>>,
+    objects: RwLock<BTreeMap<String, Vec<u8>>>,
 }
 
 #[async_trait]
 impl ObjectStore for MemObjectStore {
-    async fn put(&self, path: &str, obj: Bytes) -> Result<()> {
+    async fn put(&self, path: &str, obj: Vec<u8>) -> Result<()> {
         let mut objects = self.objects.write();
         objects.insert(path.to_string(), obj);
         Ok(())
     }
 
-    async fn get(&self, path: &str) -> Result<Option<Bytes>> {
+    async fn get(&self, path: &str) -> Result<Option<Vec<u8>>> {
         let objects = self.objects.read();
         let obj = objects.get(path).cloned();
         Ok(obj)
     }
 
-    async fn get_range(&self, path: &str, range: Range<usize>) -> Result<Option<Bytes>> {
+    async fn get_range(&self, path: &str, range: Range<usize>) -> Result<Option<Vec<u8>>> {
         let objects = self.objects.read();
-        let obj = objects.get(path).map(|obj| obj.slice(range));
+        let obj = objects.get(path).map(|obj| obj[range].to_vec());
         Ok(obj)
     }
 

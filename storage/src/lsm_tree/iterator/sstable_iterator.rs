@@ -221,7 +221,6 @@ impl Iterator for SstableIterator {
 mod tests {
     use std::sync::Arc;
 
-    use bytes::Bytes;
     use runkv_common::coding::CompressionAlgorithm;
     use test_log::test;
 
@@ -234,7 +233,7 @@ mod tests {
     use crate::utils::full_key;
     use crate::MemObjectStore;
 
-    fn build_sstable_for_test() -> (SstableMeta, Bytes) {
+    fn build_sstable_for_test() -> (SstableMeta, Vec<u8>) {
         let options = SstableBuilderOptions {
             capacity: 1024,
             block_capacity: 32,

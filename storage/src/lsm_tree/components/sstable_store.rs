@@ -1,7 +1,6 @@
 use std::mem::size_of;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use moka::future::Cache;
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
@@ -42,7 +41,7 @@ impl SstableStore {
         }
     }
 
-    pub async fn put(&self, sst: &Sstable, data: Bytes, policy: CachePolicy) -> Result<()> {
+    pub async fn put(&self, sst: &Sstable, data: Vec<u8>, policy: CachePolicy) -> Result<()> {
         let data_path = self.data_path(sst.id());
         self.object_store.put(&data_path, data.clone()).await?;
 
@@ -55,7 +54,7 @@ impl SstableStore {
 
         if let CachePolicy::Fill = policy {
             for (block_idx, meta) in sst.block_metas_iter().enumerate() {
-                let block = Arc::new(Block::decode(data.slice(meta.data_range()))?);
+                let block = Arc::new(Block::decode(&data[meta.data_range()])?);
                 self.block_cache.insert(sst.id(), block_idx, block).await
             }
         }
@@ -85,7 +84,7 @@ impl SstableStore {
                 .ok_or(Error::ObjectStoreError(ObjectStoreError::ObjectNotFound(
                     data_path,
                 )))?;
-            let block = Block::decode(block_data)?;
+            let block = Block::decode(&block_data)?;
             Ok(Arc::new(block))
         };
 
@@ -120,7 +119,7 @@ impl SstableStore {
             .ok_or(Error::ObjectStoreError(ObjectStoreError::ObjectNotFound(
                 path,
             )))?;
-        let meta = Arc::new(SstableMeta::decode(buf));
+        let meta = Arc::new(SstableMeta::decode(&mut &buf[..]));
         self.meta_cache.insert(sst_id, meta.clone()).await;
         Ok(meta)
     }
@@ -151,7 +150,7 @@ mod tests {
     use crate::lsm_tree::TEST_DEFAULT_RESTART_INTERVAL;
     use crate::MemObjectStore;
 
-    fn build_sstable_for_test() -> (SstableMeta, Bytes) {
+    fn build_sstable_for_test() -> (SstableMeta, Vec<u8>) {
         let options = SstableBuilderOptions {
             capacity: 1024,
             block_capacity: 32,
@@ -194,7 +193,7 @@ mod tests {
                 .block(&sst, block_idx, CachePolicy::Fill)
                 .await
                 .unwrap();
-            let origin_block = Block::decode(data.slice(block_meta.data_range())).unwrap();
+            let origin_block = Block::decode(&data[block_meta.data_range()]).unwrap();
             assert_eq!(origin_block.data(), block.data());
         }
         // Test fetch from object store.
@@ -203,7 +202,7 @@ mod tests {
                 .block(&sst, block_idx, CachePolicy::Disable)
                 .await
                 .unwrap();
-            let origin_block = Block::decode(data.slice(block_meta.data_range())).unwrap();
+            let origin_block = Block::decode(&data[block_meta.data_range()]).unwrap();
             assert_eq!(origin_block.data(), block.data());
         }
     }

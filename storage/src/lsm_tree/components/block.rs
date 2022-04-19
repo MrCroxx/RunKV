@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::io::{Read, Write};
 use std::ops::Range;
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut};
 use lz4::Decoder;
 use runkv_common::coding::CompressionAlgorithm;
 
@@ -16,13 +16,13 @@ use crate::{Error, Result};
 
 pub struct Block {
     /// Uncompressed entries data.
-    data: Bytes,
+    data: Vec<u8>,
     /// Restart points.
     restart_points: Vec<u32>,
 }
 
 impl Block {
-    pub fn decode(buf: Bytes) -> Result<Self> {
+    pub fn decode(buf: &[u8]) -> Result<Self> {
         // Verify checksum.
         let crc32sum = (&buf[buf.len() - 4..]).get_u32_le();
         if !crc32check(&buf[..buf.len() - 4], crc32sum) {
@@ -33,7 +33,7 @@ impl Block {
         let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 5..buf.len() - 4])
             .map_err(Error::decode_error)?;
         let buf = match compression {
-            CompressionAlgorithm::None => buf.slice(..buf.len() - 5),
+            CompressionAlgorithm::None => buf[..buf.len() - 5].to_vec(),
             CompressionAlgorithm::Lz4 => {
                 let mut decoder = Decoder::new(buf.reader())
                     .map_err(Error::decode_error)
@@ -43,7 +43,7 @@ impl Block {
                     .read_to_end(&mut decoded)
                     .map_err(Error::decode_error)
                     .unwrap();
-                Bytes::from(decoded)
+                decoded
             }
         };
 
@@ -57,7 +57,7 @@ impl Block {
         }
 
         Ok(Block {
-            data: buf.slice(..data_len),
+            data: buf[..data_len].to_vec(),
             restart_points,
         })
     }
@@ -99,8 +99,7 @@ impl Block {
         &self.data[range]
     }
 
-    #[cfg(test)]
-    pub fn data(&self) -> &Bytes {
+    pub fn data(&self) -> &[u8] {
         &self.data
     }
 }
@@ -192,13 +191,13 @@ impl Default for BlockBuilderOptions {
 /// [`BlockWriter`] encode and append block to a buffer.
 pub struct BlockBuilder {
     /// Write buffer.
-    buf: BytesMut,
+    buf: Vec<u8>,
     /// Entry interval between restart points.
     restart_count: usize,
     /// Restart points.
     restart_points: Vec<u32>,
     /// Last key.
-    last_key: Bytes,
+    last_key: Vec<u8>,
     /// Count of entries in current block.
     entry_count: usize,
     /// Compression algorithm.
@@ -208,12 +207,12 @@ pub struct BlockBuilder {
 impl BlockBuilder {
     pub fn new(options: BlockBuilderOptions) -> Self {
         Self {
-            buf: BytesMut::with_capacity(options.capacity),
+            buf: Vec::with_capacity(options.capacity),
             restart_count: options.restart_interval,
             restart_points: Vec::with_capacity(
                 options.capacity / DEFAULT_ENTRY_SIZE / options.restart_interval + 1,
             ),
-            last_key: Bytes::default(),
+            last_key: Vec::default(),
             entry_count: 0,
             compression_algorithm: options.compression_algorithm,
         }
@@ -247,7 +246,7 @@ impl BlockBuilder {
         // Update restart point if needed and calculate diff key.
         let diff_key = if self.entry_count % self.restart_count == 0 {
             self.restart_points.push(self.buf.len() as u32);
-            self.last_key = key.to_vec().into();
+            self.last_key = key.to_vec();
             key
         } else {
             key_diff(&self.last_key, key)
@@ -264,7 +263,7 @@ impl BlockBuilder {
         self.buf.put_slice(diff_key);
         self.buf.put_slice(value);
 
-        self.last_key = key.to_vec().into();
+        self.last_key = key.to_vec();
         self.entry_count += 1;
     }
 
@@ -280,7 +279,7 @@ impl BlockBuilder {
     /// # Panics
     ///
     /// Panic if there is compression error.
-    pub fn build(mut self) -> Bytes {
+    pub fn build(mut self) -> Vec<u8> {
         assert!(self.entry_count > 0);
         for restart_point in &self.restart_points {
             self.buf.put_u32_le(*restart_point);
@@ -291,7 +290,7 @@ impl BlockBuilder {
             CompressionAlgorithm::Lz4 => {
                 let mut encoder = lz4::EncoderBuilder::new()
                     .level(4)
-                    .build(BytesMut::with_capacity(self.buf.len()).writer())
+                    .build(Vec::with_capacity(self.buf.len()).writer())
                     .map_err(Error::encode_error)
                     .unwrap();
                 encoder
@@ -306,7 +305,7 @@ impl BlockBuilder {
         self.compression_algorithm.encode(&mut buf);
         let checksum = crc32sum(&buf);
         buf.put_u32_le(checksum);
-        buf.freeze()
+        buf
     }
 
     /// Approximate block len (uncompressed).
@@ -335,7 +334,7 @@ mod tests {
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
         let buf = builder.build();
-        let block = Arc::new(Block::decode(buf).unwrap());
+        let block = Arc::new(Block::decode(&buf).unwrap());
         let mut bi = BlockIterator::new(block);
 
         bi.seek(Seek::First).unwrap();
@@ -374,7 +373,7 @@ mod tests {
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
         let buf = builder.build();
-        let block = Arc::new(Block::decode(buf).unwrap());
+        let block = Arc::new(Block::decode(&buf).unwrap());
         let mut bi = BlockIterator::new(block);
 
         bi.seek(Seek::First).unwrap();
@@ -410,7 +409,7 @@ mod tests {
         builder.add(&full_key(b"k2", u64::MAX / 2), b"v21");
         builder.add(&full_key(b"k20000", u64::MAX), b"v22");
         let buf = builder.build();
-        let block = Arc::new(Block::decode(buf).unwrap());
+        let block = Arc::new(Block::decode(&buf).unwrap());
         let mut bi = BlockIterator::new(block);
 
         bi.seek(Seek::First).unwrap();

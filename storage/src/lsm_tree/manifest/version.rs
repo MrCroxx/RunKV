@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 use std::ops::{Range, RangeInclusive};
 use std::sync::Arc;
 
-use bytes::Bytes;
 use runkv_common::coding::CompressionAlgorithm;
 use runkv_common::config::{LevelCompactionStrategy, LevelOptions};
 use runkv_proto::manifest::{SstableOp, VersionDiff};
@@ -315,12 +314,12 @@ impl VersionManagerCore {
         if sst_ids.is_empty() {
             return Ok(vec![]);
         }
-        let mut first_user_key = Bytes::default();
-        let mut last_user_key = Bytes::default();
+        let mut first_user_key = Vec::default();
+        let mut last_user_key = Vec::default();
         for sst_id in sst_ids {
             let sst = self.sstable_store.sstable(sst_id).await?;
-            let sst_first_user_key = Bytes::copy_from_slice(user_key(sst.first_key()));
-            let sst_last_user_key = Bytes::copy_from_slice(user_key(sst.last_key()));
+            let sst_first_user_key = (user_key(sst.first_key())).to_vec();
+            let sst_last_user_key = (user_key(sst.last_key())).to_vec();
             if first_user_key.is_empty() || sst_first_user_key < first_user_key {
                 first_user_key = sst_first_user_key;
             }
@@ -494,7 +493,6 @@ impl VersionManager {
 mod tests {
     use std::assert_matches::assert_matches;
 
-    use bytes::Bytes;
     use itertools::Itertools;
     use runkv_proto::manifest::SstableDiff;
     use test_log::test;
@@ -827,8 +825,8 @@ mod tests {
     async fn ingest_meta(
         sstable_store: &SstableStoreRef,
         sst_id: u64,
-        first_key: Bytes,
-        last_key: Bytes,
+        first_key: Vec<u8>,
+        last_key: Vec<u8>,
     ) {
         sstable_store
             .put(
@@ -845,7 +843,7 @@ mod tests {
                         data_size: 0,
                     }),
                 ),
-                Bytes::default(),
+                Vec::default(),
                 // Disable block cache, inserting block cache need to decode block data, which is
                 // empty for test.
                 CachePolicy::Disable,
@@ -924,11 +922,11 @@ mod tests {
         VersionManagerCore::new(version_manager_options)
     }
 
-    fn fkey(s: &'static [u8]) -> Bytes {
+    fn fkey(s: &'static [u8]) -> Vec<u8> {
         full_key(s, 1)
     }
 
-    fn key(s: &'static [u8]) -> Bytes {
-        Bytes::from_static(s)
+    fn key(s: &'static [u8]) -> Vec<u8> {
+        s.to_vec()
     }
 }

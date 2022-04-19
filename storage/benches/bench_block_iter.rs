@@ -88,7 +88,7 @@ fn build_block(t: u32, i: u64) -> Block {
         }
     }
     let data = builder.build();
-    Block::decode(data).unwrap()
+    Block::decode(&data[..]).unwrap()
 }
 
 fn key(t: u32, i: u64) -> Vec<u8> {

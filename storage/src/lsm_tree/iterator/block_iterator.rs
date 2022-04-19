@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
+use std::ops::Range;
 use std::sync::Arc;
-
-use bytes::{Bytes, BytesMut};
 
 use super::Seek;
 use crate::components::{Block, KeyPrefix};
@@ -17,9 +16,10 @@ pub struct BlockIterator {
     /// Current offset.
     offset: usize,
     /// Current key.
-    key: BytesMut,
+    key: Vec<u8>,
     /// Current value.
-    value: Bytes,
+    // value: Vec<u8>,
+    value_range: Range<usize>,
     /// Current entry len.
     entry_len: usize,
 }
@@ -30,8 +30,8 @@ impl BlockIterator {
             block,
             offset: usize::MAX,
             restart_point_index: usize::MAX,
-            key: BytesMut::default(),
-            value: Bytes::default(),
+            key: Vec::default(),
+            value_range: 0..0,
             entry_len: 0,
         }
     }
@@ -41,7 +41,7 @@ impl BlockIterator {
         self.offset = self.block.len();
         self.restart_point_index = self.block.restart_point_len();
         self.key.clear();
-        self.value.clear();
+        self.value_range = 0..0;
         self.entry_len = 0;
     }
 
@@ -58,7 +58,7 @@ impl BlockIterator {
         self.key.truncate(prefix.overlap_len());
         self.key
             .extend_from_slice(self.block.slice(prefix.diff_key_range()));
-        self.value = Bytes::copy_from_slice(self.block.slice(prefix.value_range()));
+        self.value_range = prefix.value_range();
         self.offset = offset;
         self.entry_len = prefix.entry_len();
         if self.restart_point_index + 1 < self.block.restart_point_len()
@@ -135,8 +135,8 @@ impl BlockIterator {
     fn seek_restart_point_by_index(&mut self, index: usize) {
         let offset = self.block.restart_point(index) as usize;
         let prefix = self.decode_prefix_at(offset);
-        self.key = BytesMut::from(self.block.slice(prefix.diff_key_range()));
-        self.value = Bytes::copy_from_slice(self.block.slice(prefix.value_range()));
+        self.key = self.block.slice(prefix.diff_key_range()).to_vec();
+        self.value_range = prefix.value_range();
         self.offset = offset;
         self.entry_len = prefix.entry_len();
         self.restart_point_index = index;
@@ -162,7 +162,7 @@ impl BlockIterator {
 
     pub fn value(&self) -> &[u8] {
         assert!(self.is_valid());
-        &self.value[..]
+        &self.block.data()[self.value_range.clone()]
     }
 
     pub fn is_valid(&self) -> bool {
@@ -252,7 +252,7 @@ pub mod tests {
         builder.add(&full_key(b"k04", 4), b"v04");
         builder.add(&full_key(b"k05", 5), b"v05");
         let buf = builder.build();
-        BlockIterator::new(Arc::new(Block::decode(buf).unwrap()))
+        BlockIterator::new(Arc::new(Block::decode(&buf).unwrap()))
     }
 
     #[test]

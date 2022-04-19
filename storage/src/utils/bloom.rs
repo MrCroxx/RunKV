@@ -2,7 +2,7 @@
 
 // TODO: Refactor this in rusty style.
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::BufMut;
 
 pub trait BitSlice {
     fn get_bit(&self, idx: usize) -> bool;
@@ -63,7 +63,7 @@ impl<'a> Bloom<'a> {
     }
 
     /// Build bloom filter from key hashes
-    pub fn build_from_key_hashes(keys: &[u32], bits_per_key: usize) -> Bytes {
+    pub fn build_from_key_hashes(keys: &[u32], bits_per_key: usize) -> Vec<u8> {
         // 0.69 is approximately ln(2)
         let k = ((bits_per_key as f64) * 0.69) as u32;
         // limit k in [1, 30]
@@ -73,7 +73,7 @@ impl<'a> Bloom<'a> {
         let nbytes = (nbits + 7) / 8;
         // nbits is always multiplication of 8
         let nbits = nbytes * 8;
-        let mut filter = BytesMut::with_capacity(nbytes + 1);
+        let mut filter = Vec::with_capacity(nbytes + 1);
         filter.resize(nbytes, 0);
         for h in keys {
             let mut h = *h;
@@ -85,7 +85,7 @@ impl<'a> Bloom<'a> {
             }
         }
         filter.put_u8(k as u8);
-        filter.freeze()
+        filter
     }
 
     /// Check if a bloom filter may contain some data
