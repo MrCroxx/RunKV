@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use futures::Future;
 use moka::future::Cache;
+use tracing::trace;
 
 use super::error::RaftLogStoreError;
 use super::DEFAULT_LOG_BATCH_SIZE;
@@ -28,10 +29,21 @@ impl BlockCache {
     }
 
     pub fn get(&self, file_id: u64, offset: usize) -> Option<Arc<Vec<u8>>> {
+        trace!(
+            file_id = file_id,
+            offset = offset,
+            "try get from block cache:"
+        );
         self.inner.get(&BlockIndex { file_id, offset })
     }
 
     pub async fn insert(&self, file_id: u64, offset: usize, block: Arc<Vec<u8>>) {
+        trace!(
+            file_id = file_id,
+            offset = offset,
+            len = block.len(),
+            "insert to block cache:"
+        );
         self.inner
             .insert(BlockIndex { file_id, offset }, block)
             .await
@@ -46,6 +58,11 @@ impl BlockCache {
     where
         F: Future<Output = Result<Arc<Vec<u8>>>>,
     {
+        trace!(
+            file_id = file_id,
+            offset = offset,
+            "get or insert block cache"
+        );
         match self
             .inner
             .get_or_try_insert_with(BlockIndex { file_id, offset }, f)

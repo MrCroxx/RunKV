@@ -129,7 +129,7 @@ impl RaftLogStore {
     }
 
     /// Append raft log batch to [`RaftLogStore`].
-    pub async fn append(&self, batch: RaftLogBatch) -> Result<()> {
+    pub async fn append(&self, mut batch: RaftLogBatch) -> Result<()> {
         let (data_segment_offset, data_segment_len) = batch.data_segment_location();
         let group = batch.group();
         let term = batch.term();
@@ -150,6 +150,7 @@ impl RaftLogStore {
             indices.push(index);
         }
 
+        let raw = batch.take_raw();
         let entry = LogEntry::RaftLogBatch(batch);
         let (file_id, write_offset, _write_len) = self.core.log.push(entry).await?;
 
@@ -160,6 +161,11 @@ impl RaftLogStore {
             index.block_offset = block_offset;
             index.block_len = block_len;
         }
+
+        self.core
+            .block_cache
+            .insert(file_id, block_offset, Arc::new(raw))
+            .await;
 
         self.core.states.append(group, first_index, indices).await?;
 

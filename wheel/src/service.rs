@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use runkv_common::channel_pool::ChannelPool;
 use runkv_proto::wheel::raft_service_server::RaftService;
@@ -7,10 +9,8 @@ use runkv_proto::wheel::{
     UpdateKeyRangesRequest, UpdateKeyRangesResponse, VoteRequest, VoteResponse,
 };
 use runkv_storage::raft_log_store::RaftLogStore;
-use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
-use crate::components::command::AsyncCommand;
 use crate::components::lsm_tree::ObjectStoreLsmTree;
 use crate::components::network::RaftNetwork;
 use crate::components::raft_manager::RaftManager;
@@ -28,29 +28,33 @@ pub struct WheelOptions {
     pub raft_log_store: RaftLogStore,
     pub raft_network: RaftNetwork,
     pub raft_manager: RaftManager,
-    pub gear_receiver: mpsc::UnboundedReceiver<AsyncCommand>,
 }
 
-pub struct Wheel {
+struct WheelInner {
     _lsm_tree: ObjectStoreLsmTree,
     meta_store: MetaStoreRef,
     _channel_pool: ChannelPool,
     _raft_log_store: RaftLogStore,
     _raft_network: RaftNetwork,
     raft_manager: RaftManager,
-    _gear_receiver: mpsc::UnboundedReceiver<AsyncCommand>,
+}
+
+#[derive(Clone)]
+pub struct Wheel {
+    inner: Arc<WheelInner>,
 }
 
 impl Wheel {
     pub fn new(options: WheelOptions) -> Self {
         Self {
-            _lsm_tree: options.lsm_tree,
-            meta_store: options.meta_store,
-            _channel_pool: options.channel_pool,
-            _raft_log_store: options.raft_log_store,
-            _raft_network: options.raft_network,
-            raft_manager: options.raft_manager,
-            _gear_receiver: options.gear_receiver,
+            inner: Arc::new(WheelInner {
+                _lsm_tree: options.lsm_tree,
+                meta_store: options.meta_store,
+                _channel_pool: options.channel_pool,
+                _raft_log_store: options.raft_log_store,
+                _raft_network: options.raft_network,
+                raft_manager: options.raft_manager,
+            }),
         }
     }
 }
@@ -62,7 +66,8 @@ impl WheelService for Wheel {
         request: Request<UpdateKeyRangesRequest>,
     ) -> core::result::Result<Response<UpdateKeyRangesResponse>, Status> {
         let req = request.into_inner();
-        self.meta_store
+        self.inner
+            .meta_store
             .update_key_ranges(req.key_ranges)
             .await
             .map_err(internal)?;
@@ -79,6 +84,7 @@ impl RaftService for Wheel {
     ) -> Result<Response<AppendEntriesResponse>, Status> {
         let req = request.into_inner();
         let raft = self
+            .inner
             .raft_manager
             .get_raft_node(req.id)
             .await
@@ -107,6 +113,7 @@ impl RaftService for Wheel {
     ) -> Result<Response<InstallSnapshotResponse>, Status> {
         let req = request.into_inner();
         let raft = self
+            .inner
             .raft_manager
             .get_raft_node(req.id)
             .await
@@ -132,6 +139,7 @@ impl RaftService for Wheel {
     async fn vote(&self, request: Request<VoteRequest>) -> Result<Response<VoteResponse>, Status> {
         let req = request.into_inner();
         let raft = self
+            .inner
             .raft_manager
             .get_raft_node(req.id)
             .await
