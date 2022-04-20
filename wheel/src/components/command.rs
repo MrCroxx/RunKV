@@ -1,44 +1,24 @@
+use std::ops::Range;
+
 use tokio::sync::oneshot;
 
-use crate::error::Result;
-
 #[derive(Debug)]
-pub enum CommandRequest {
-    Data {
-        group: u64,
-        index: u64,
-        data: Vec<u8>,
-    },
-    BuildSnapshot {
-        group: u64,
-        index: u64,
-    },
-    InstallSnapshot {
-        group: u64,
-        index: u64,
-        snapshot: Vec<u8>,
-    },
+pub struct Apply {
+    pub group: u64,
+    pub range: Range<u64>,
 }
 
 #[derive(Debug)]
-pub enum CommandResponse {
-    Data {
+pub enum Snapshot {
+    Build {
         group: u64,
         index: u64,
+        notifier: oneshot::Sender<Vec<u8>>,
     },
-    BuildSnapshot {
+    Install {
         group: u64,
         index: u64,
         snapshot: Vec<u8>,
+        notifier: oneshot::Sender<()>,
     },
-    InstallSnapshot {
-        group: u64,
-        index: u64,
-    },
-}
-
-#[derive(Debug)]
-pub struct AsyncCommand {
-    pub request: CommandRequest,
-    pub response: oneshot::Sender<Result<CommandResponse>>,
 }
