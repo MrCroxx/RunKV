@@ -10,8 +10,8 @@ use super::lsm_tree::ObjectStoreLsmTree;
 use super::network::RaftNetwork;
 use super::raft_log_store::RaftGroupLogStore;
 use super::Raft;
-use crate::error::{RaftError, Result};
-use crate::worker::kv::{KvWorker, KvWorkerOptions};
+use crate::error::{Error, RaftError, Result};
+use crate::worker::kv::{KvWorker, KvWorkerOptions, DONE_INDEX_KEY};
 
 const RAFT_GROUP_NAME_PREFIX: &str = "raft-group-";
 
@@ -71,9 +71,10 @@ impl RaftManager {
 
         let network = self.raft_network.clone();
         self.raft_log_store.add_group(raft_node).await?;
-        let (tx, rx) = mpsc::unbounded_channel();
-        let gear = Gear::new(tx);
-        let storage = RaftGroupLogStore::new(group, self.raft_log_store.clone(), gear);
+        let (apply_tx, apply_rx) = mpsc::unbounded_channel();
+        let (snapshot_tx, snapshot_rx) = mpsc::unbounded_channel();
+        let gear = Gear::new(apply_tx, snapshot_tx);
+        let raft_group_log_store = RaftGroupLogStore::new(group, self.raft_log_store.clone(), gear);
         let config = openraft::Config {
             cluster_name: raft_group_name(group),
             // election_timeout_min: todo!(),
@@ -90,14 +91,23 @@ impl RaftManager {
         let config = config.validate().map_err(RaftError::err)?;
         let config = Arc::new(config);
 
-        let raft = Raft::new(raft_node, config, network, storage);
+        let raft = Raft::new(raft_node, config, network, raft_group_log_store.clone());
+        let done_index = match raft_group_log_store.get(DONE_INDEX_KEY.to_vec()).await? {
+            Some(raw) => bincode::deserialize(&raw).map_err(Error::serde_err)?,
+            None => 0,
+        };
+        let available_index = raft_group_log_store.applied_index().await?.unwrap_or(0);
 
         let mut kv_worker = KvWorker::new(KvWorkerOptions {
             group,
             raft_node,
+            available_index,
+            done_index,
+            raft_group_log_store,
             lsm_tree: self.lsm_tree.clone(),
             raft: raft.clone(),
-            rx,
+            apply_rx,
+            snapshot_rx,
         });
 
         // TODO: Hold the handle for gracefully shutdown.
