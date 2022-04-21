@@ -1,3 +1,4 @@
+use runkv_proto::meta::KeyRange;
 use tonic::Status;
 
 #[derive(thiserror::Error, Debug)]
@@ -14,6 +15,8 @@ pub enum Error {
     SerdeError(String),
     #[error("raft error: {0}")]
     RaftError(#[from] RaftError),
+    #[error("meta error: {0}")]
+    MetaError(#[from] MetaError),
     #[error("other: {0}")]
     Other(String),
 }
@@ -64,4 +67,10 @@ impl RaftError {
     pub fn err(e: impl Into<Box<dyn std::error::Error>>) -> Self {
         Self::Other(e.into().to_string())
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum MetaError {
+    #[error("key range overlaps: {r1:?} {r2:?}")]
+    KeyRangeOverlaps { r1: KeyRange, r2: KeyRange },
 }

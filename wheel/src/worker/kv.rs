@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use runkv_common::Worker;
-use runkv_proto::kv::{BytesSerde, TxnRequest};
+use runkv_proto::kv::{BytesSerde, TxnRequest, TxnResponse};
 use tokio::sync::mpsc;
 use tracing::{trace, warn};
 
@@ -248,5 +248,9 @@ impl Applier {
 
             self.done_index.store(done, Ordering::Release);
         }
+    }
+
+    async fn txn(&self) -> Result<TxnResponse> {
+        todo!()
     }
 }

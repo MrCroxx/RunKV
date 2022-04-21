@@ -1,12 +1,22 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use runkv_common::channel_pool::ChannelPool;
+use runkv_common::config::Node;
+use runkv_proto::common::Endpoint;
+use runkv_proto::kv::kv_service_server::KvService;
+use runkv_proto::kv::{
+    kv_op_request, kv_op_response, BytesSerde, DeleteRequest, DeleteResponse, GetRequest,
+    GetResponse, KvOpRequest, PutRequest, PutResponse, TxnRequest, TxnResponse,
+};
 use runkv_proto::wheel::raft_service_server::RaftService;
 use runkv_proto::wheel::wheel_service_server::WheelService;
 use runkv_proto::wheel::{
-    AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
-    UpdateKeyRangesRequest, UpdateKeyRangesResponse, VoteRequest, VoteResponse,
+    AddEndpointsRequest, AddEndpointsResponse, AddKeyRangeRequest, AddKeyRangeResponse,
+    AppendEntriesRequest, AppendEntriesResponse, InitializeRaftGroupRequest,
+    InitializeRaftGroupResponse, InstallSnapshotRequest, InstallSnapshotResponse, VoteRequest,
+    VoteResponse,
 };
 use runkv_storage::raft_log_store::RaftLogStore;
 use tonic::{Request, Response, Status};
@@ -14,7 +24,7 @@ use tonic::{Request, Response, Status};
 use crate::components::lsm_tree::ObjectStoreLsmTree;
 use crate::components::network::RaftNetwork;
 use crate::components::raft_manager::RaftManager;
-use crate::error::Error;
+use crate::error::{Error, Result};
 use crate::meta::MetaStoreRef;
 
 fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
@@ -33,7 +43,7 @@ pub struct WheelOptions {
 struct WheelInner {
     _lsm_tree: ObjectStoreLsmTree,
     meta_store: MetaStoreRef,
-    _channel_pool: ChannelPool,
+    channel_pool: ChannelPool,
     _raft_log_store: RaftLogStore,
     _raft_network: RaftNetwork,
     raft_manager: RaftManager,
@@ -50,7 +60,7 @@ impl Wheel {
             inner: Arc::new(WheelInner {
                 _lsm_tree: options.lsm_tree,
                 meta_store: options.meta_store,
-                _channel_pool: options.channel_pool,
+                channel_pool: options.channel_pool,
                 _raft_log_store: options.raft_log_store,
                 _raft_network: options.raft_network,
                 raft_manager: options.raft_manager,
@@ -59,29 +69,130 @@ impl Wheel {
     }
 }
 
+impl Wheel {
+    async fn get_inner(&self, request: GetRequest) -> Result<GetResponse> {
+        let req = TxnRequest {
+            ops: vec![KvOpRequest {
+                request: Some(kv_op_request::Request::Get(request)),
+            }],
+        };
+        let mut rsp = self.txn_inner(req).await?;
+        let response = match rsp.ops.remove(0).response.unwrap() {
+            kv_op_response::Response::Get(response) => response,
+            _ => unreachable!(),
+        };
+        Ok(response)
+    }
+
+    async fn put_inner(&self, request: PutRequest) -> Result<PutResponse> {
+        let req = TxnRequest {
+            ops: vec![KvOpRequest {
+                request: Some(kv_op_request::Request::Put(request)),
+            }],
+        };
+        let mut rsp = self.txn_inner(req).await?;
+        let response = match rsp.ops.remove(0).response.unwrap() {
+            kv_op_response::Response::Put(response) => response,
+            _ => unreachable!(),
+        };
+        Ok(response)
+    }
+
+    async fn delete_inner(&self, request: DeleteRequest) -> Result<DeleteResponse> {
+        let req = TxnRequest {
+            ops: vec![KvOpRequest {
+                request: Some(kv_op_request::Request::Delete(request)),
+            }],
+        };
+        let mut rsp = self.txn_inner(req).await?;
+        let response = match rsp.ops.remove(0).response.unwrap() {
+            kv_op_response::Response::Delete(response) => response,
+            _ => unreachable!(),
+        };
+        Ok(response)
+    }
+
+    async fn txn_inner(&self, request: TxnRequest) -> Result<TxnResponse> {
+        let _buf = request.to_vec().map_err(Error::serde_err)?;
+        todo!()
+    }
+}
+
 #[async_trait]
 impl WheelService for Wheel {
-    async fn update_key_ranges(
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn add_endpoints(
         &self,
-        request: Request<UpdateKeyRangesRequest>,
-    ) -> core::result::Result<Response<UpdateKeyRangesResponse>, Status> {
+        request: Request<AddEndpointsRequest>,
+    ) -> core::result::Result<Response<AddEndpointsResponse>, Status> {
+        let req = request.into_inner();
+        for (node, Endpoint { host, port }) in req.endpoints.iter() {
+            let node = Node {
+                id: *node,
+                host: host.to_owned(),
+                port: *port as u16,
+            };
+            self.inner.channel_pool.put_node(node).await;
+        }
+        Ok(Response::new(AddEndpointsResponse::default()))
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn add_key_range(
+        &self,
+        request: Request<AddKeyRangeRequest>,
+    ) -> core::result::Result<Response<AddKeyRangeResponse>, Status> {
         let req = request.into_inner();
         self.inner
             .meta_store
-            .update_key_ranges(req.key_ranges)
+            .add_key_range(req.key_range.unwrap(), req.group, &req.raft_nodes)
             .await
             .map_err(internal)?;
-        let rsp = UpdateKeyRangesResponse::default();
+
+        self.inner
+            .raft_manager
+            .update_routers(BTreeMap::from_iter(
+                req.nodes
+                    .iter()
+                    .map(|(&raft_node, &node)| (raft_node, node)),
+            ))
+            .await
+            .map_err(internal)?;
+
+        for raft_node in req.raft_nodes.iter() {
+            self.inner
+                .raft_manager
+                .add_raft_node(req.group, *raft_node)
+                .await
+                .map_err(internal)?;
+        }
+
+        let rsp = AddKeyRangeResponse::default();
         Ok(Response::new(rsp))
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn initialize_raft_group(
+        &self,
+        request: Request<InitializeRaftGroupRequest>,
+    ) -> core::result::Result<Response<InitializeRaftGroupResponse>, Status> {
+        let req = request.into_inner();
+        self.inner
+            .raft_manager
+            .initialize_raft_group(req.leader, &req.raft_nodes)
+            .await
+            .map_err(internal)?;
+        Ok(Response::new(InitializeRaftGroupResponse::default()))
     }
 }
 
 #[async_trait]
 impl RaftService for Wheel {
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn append_entries(
         &self,
         request: Request<AppendEntriesRequest>,
-    ) -> Result<Response<AppendEntriesResponse>, Status> {
+    ) -> core::result::Result<Response<AppendEntriesResponse>, Status> {
         let req = request.into_inner();
         let raft = self
             .inner
@@ -107,10 +218,11 @@ impl RaftService for Wheel {
         Ok(Response::new(response))
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn install_snapshot(
         &self,
         request: Request<InstallSnapshotRequest>,
-    ) -> Result<Response<InstallSnapshotResponse>, Status> {
+    ) -> core::result::Result<Response<InstallSnapshotResponse>, Status> {
         let req = request.into_inner();
         let raft = self
             .inner
@@ -136,7 +248,11 @@ impl RaftService for Wheel {
         Ok(Response::new(response))
     }
 
-    async fn vote(&self, request: Request<VoteRequest>) -> Result<Response<VoteResponse>, Status> {
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn vote(
+        &self,
+        request: Request<VoteRequest>,
+    ) -> core::result::Result<Response<VoteResponse>, Status> {
         let req = request.into_inner();
         let raft = self
             .inner
@@ -160,6 +276,49 @@ impl RaftService for Wheel {
             data: rsp_data,
         };
         Ok(Response::new(response))
+    }
+}
+
+#[async_trait]
+impl KvService for Wheel {
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn get(
+        &self,
+        request: Request<GetRequest>,
+    ) -> core::result::Result<Response<GetResponse>, Status> {
+        let req = request.into_inner();
+        let rsp = self.get_inner(req).await.map_err(internal)?;
+        Ok(Response::new(rsp))
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn put(
+        &self,
+        request: Request<PutRequest>,
+    ) -> core::result::Result<Response<PutResponse>, Status> {
+        let req = request.into_inner();
+        let rsp = self.put_inner(req).await.map_err(internal)?;
+        Ok(Response::new(rsp))
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn delete(
+        &self,
+        request: Request<DeleteRequest>,
+    ) -> core::result::Result<Response<DeleteResponse>, Status> {
+        let req = request.into_inner();
+        let rsp = self.delete_inner(req).await.map_err(internal)?;
+        Ok(Response::new(rsp))
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn txn(
+        &self,
+        request: Request<TxnRequest>,
+    ) -> core::result::Result<Response<TxnResponse>, Status> {
+        let req = request.into_inner();
+        let rsp = self.txn_inner(req).await.map_err(internal)?;
+        Ok(Response::new(rsp))
     }
 }
 
@@ -196,7 +355,7 @@ pub mod tests {
         async fn append_entries(
             &self,
             request: Request<AppendEntriesRequest>,
-        ) -> Result<Response<AppendEntriesResponse>, Status> {
+        ) -> core::result::Result<Response<AppendEntriesResponse>, Status> {
             let req = request.into_inner();
             let raft = self
                 .raft_manager
@@ -224,7 +383,7 @@ pub mod tests {
         async fn install_snapshot(
             &self,
             request: Request<InstallSnapshotRequest>,
-        ) -> Result<Response<InstallSnapshotResponse>, Status> {
+        ) -> core::result::Result<Response<InstallSnapshotResponse>, Status> {
             let req = request.into_inner();
             let raft = self
                 .raft_manager
@@ -252,7 +411,7 @@ pub mod tests {
         async fn vote(
             &self,
             request: Request<VoteRequest>,
-        ) -> Result<Response<VoteResponse>, Status> {
+        ) -> core::result::Result<Response<VoteResponse>, Status> {
             let req = request.into_inner();
             let raft = self
                 .raft_manager
