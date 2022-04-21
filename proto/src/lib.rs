@@ -41,3 +41,22 @@ pub mod exhauster {
     #![allow(clippy::all)]
     tonic::include_proto!("exhauster");
 }
+
+pub mod kv {
+    #![allow(clippy::all)]
+    tonic::include_proto!("kv");
+
+    pub trait BytesSerde<'de>: serde::Serialize + serde::Deserialize<'de> + Sized {
+        fn to_vec(&self) -> anyhow::Result<Vec<u8>> {
+            bincode::serialize(self).map_err(|e| anyhow::anyhow!("bincode serialize error: {}", e))
+        }
+
+        fn from_slice(slice: &'de [u8]) -> anyhow::Result<Self> {
+            bincode::deserialize(slice)
+                .map_err(|e| anyhow::anyhow!("bincode deserialize error: {}", e))
+        }
+    }
+
+    impl<'de> BytesSerde<'de> for TxnRequest {}
+    impl<'de> BytesSerde<'de> for TxnResponse {}
+}

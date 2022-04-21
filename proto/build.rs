@@ -9,6 +9,7 @@ fn main() {
                 "src/proto/rudder.proto",
                 "src/proto/wheel.proto",
                 "src/proto/exhauster.proto",
+                "src/proto/kv.proto",
             ],
             &["src/proto"],
         )

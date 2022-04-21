@@ -71,9 +71,8 @@ impl RaftManager {
 
         let network = self.raft_network.clone();
         self.raft_log_store.add_group(raft_node).await?;
-        let (apply_tx, apply_rx) = mpsc::unbounded_channel();
-        let (snapshot_tx, snapshot_rx) = mpsc::unbounded_channel();
-        let gear = Gear::new(apply_tx, snapshot_tx);
+        let (tx, rx) = mpsc::unbounded_channel();
+        let gear = Gear::new(tx);
         let raft_group_log_store = RaftGroupLogStore::new(group, self.raft_log_store.clone(), gear);
         let config = openraft::Config {
             cluster_name: raft_group_name(group),
@@ -106,8 +105,7 @@ impl RaftManager {
             raft_group_log_store,
             lsm_tree: self.lsm_tree.clone(),
             raft: raft.clone(),
-            apply_rx,
-            snapshot_rx,
+            rx,
         });
 
         // TODO: Hold the handle for gracefully shutdown.
@@ -146,6 +144,7 @@ mod tests {
 
     use runkv_common::channel_pool::ChannelPool;
     use runkv_common::config::Node;
+    use runkv_proto::kv::{BytesSerde, TxnRequest};
     use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
     use test_log::test;
 
@@ -194,9 +193,11 @@ mod tests {
         assert!(follower1.is_leader().await.is_err());
         assert!(follower2.is_leader().await.is_err());
 
+        let txn = TxnRequest { ops: vec![] };
+
         let index = leader
             .client_write(openraft::raft::ClientWriteRequest::new(
-                openraft::EntryPayload::Normal(b"data-1".to_vec()),
+                openraft::EntryPayload::Normal(txn.to_vec().unwrap()),
             ))
             .await
             .unwrap()
@@ -210,7 +211,7 @@ mod tests {
             openraft::EntryPayload::Normal(data) => data,
             _ => unimplemented!(),
         };
-        assert_eq!(b"data-1", &data[..]);
+        assert_eq!(txn.to_vec().unwrap(), data);
     }
 
     async fn build_manager_for_test(path: &str, addr: SocketAddr) -> (RaftManager, RaftLogStore) {
