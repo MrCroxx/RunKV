@@ -2,18 +2,38 @@ syntax = "proto3";
 
 package wheel;
 
+import "common.proto";
 import "meta.proto";
 
 // ***** inner service *****
 
-message UpdateKeyRangesRequest {
-  repeated meta.KeyRange key_ranges = 1;
+message AddEndpointsRequest {
+  map<uint64, common.Endpoint> endpoints = 1;
 }
 
-message UpdateKeyRangesResponse {}
+message AddEndpointsResponse {}
+
+message AddKeyRangeRequest {
+  meta.KeyRange key_range = 1;
+  uint64 group = 2;
+  repeated uint64 raft_nodes = 3;
+  // { raft node -> node }
+  map<uint64, uint64> nodes = 4;
+}
+
+message AddKeyRangeResponse {}
+
+message InitializeRaftGroupRequest {
+  uint64 leader = 1;
+  repeated uint64 raft_nodes = 2;
+}
+
+message InitializeRaftGroupResponse {}
 
 service WheelService {
-  rpc UpdateKeyRanges(UpdateKeyRangesRequest) returns (UpdateKeyRangesResponse);
+  rpc AddKeyRange(AddKeyRangeRequest) returns (AddKeyRangeResponse);
+  rpc AddEndpoints(AddEndpointsRequest) returns (AddEndpointsResponse);
+  rpc InitializeRaftGroup(InitializeRaftGroupRequest) returns (InitializeRaftGroupResponse);
 }
 
 // ***** raft service *****

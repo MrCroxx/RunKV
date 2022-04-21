@@ -1,4 +1,5 @@
 use std::collections::btree_map::BTreeMap;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use runkv_common::Worker;
@@ -125,6 +126,24 @@ impl RaftManager {
             }
             .into()
         })
+    }
+
+    pub async fn initialize_raft_group(&self, leader: u64, raft_nodes: &[u64]) -> Result<()> {
+        let inner = self.inner.read().await;
+        let raft = match inner.rafts.get(&leader) {
+            None => {
+                return Err(RaftError::RaftNodeNotExists {
+                    raft_node: leader,
+                    node: self.node,
+                }
+                .into())
+            }
+            Some(raft) => raft,
+        };
+        raft.initialize(BTreeSet::from_iter(raft_nodes.iter().copied()))
+            .await
+            .map_err(Error::raft_err)?;
+        Ok(())
     }
 }
 

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs::read_to_string;
 use std::path::Path;
 use std::sync::Arc;
@@ -9,8 +10,10 @@ use itertools::Itertools;
 use rand::{thread_rng, Rng};
 use runkv_exhauster::config::ExhausterConfig;
 use runkv_exhauster::{bootstrap_exhauster, build_exhauster_with_object_store};
+use runkv_proto::common::Endpoint;
 use runkv_proto::meta::KeyRange;
 use runkv_proto::wheel::wheel_service_client::WheelServiceClient;
+use runkv_proto::wheel::{AddEndpointsRequest, AddKeyRangeRequest, InitializeRaftGroupRequest};
 use runkv_rudder::config::RudderConfig;
 use runkv_rudder::{bootstrap_rudder, build_rudder_with_object_store};
 use runkv_storage::MemObjectStore;
@@ -81,12 +84,36 @@ async fn test_concurrent_put_get() {
     .await
     .unwrap();
     wheel_client
-        .update_key_ranges(Request::new(runkv_proto::wheel::UpdateKeyRangesRequest {
-            key_ranges: vec![KeyRange {
+        .add_endpoints(AddEndpointsRequest {
+            endpoints: HashMap::from_iter([(
+                1,
+                Endpoint {
+                    host: wheel_config.host.to_owned(),
+                    port: wheel_config.port as u32,
+                },
+            )]),
+        })
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    wheel_client
+        .add_key_range(Request::new(AddKeyRangeRequest {
+            key_range: Some(KeyRange {
                 start_key: b"k".to_vec(),
                 end_key: b"kz".to_vec(),
-            }],
+            }),
+            group: 1,
+            raft_nodes: vec![1, 2, 3],
+            nodes: HashMap::from_iter([(1, 1), (2, 1), (3, 1)]),
         }))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    wheel_client
+        .initialize_raft_group(InitializeRaftGroupRequest {
+            leader: 1,
+            raft_nodes: vec![1, 2, 3],
+        })
         .await
         .unwrap();
     tokio::time::sleep(Duration::from_secs(3)).await;
