@@ -228,7 +228,7 @@ mod tests {
         .unwrap()
         {
             openraft::EntryPayload::Normal(data) => data,
-            _ => unimplemented!(),
+            _ => unreachable!(),
         };
         assert_eq!(txn.to_vec().unwrap(), data);
     }

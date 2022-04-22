@@ -45,6 +45,7 @@ pub struct RaftNetworkConnection {
 
 #[async_trait]
 impl openraft::RaftNetwork<RaftTypeConfig> for RaftNetworkConnection {
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn send_append_entries(
         &mut self,
         rpc: openraft::raft::AppendEntriesRequest<RaftTypeConfig>,
@@ -73,6 +74,7 @@ impl openraft::RaftNetwork<RaftTypeConfig> for RaftNetworkConnection {
             .map_err(append_entries_err)?)
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn send_install_snapshot(
         &mut self,
         rpc: openraft::raft::InstallSnapshotRequest<RaftTypeConfig>,
@@ -103,6 +105,7 @@ impl openraft::RaftNetwork<RaftTypeConfig> for RaftNetworkConnection {
             .map_err(install_snapshot_err)?)
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn send_vote(
         &mut self,
         rpc: openraft::raft::VoteRequest<RaftTypeConfig>,
@@ -155,6 +158,7 @@ impl RaftNetwork {
 impl openraft::RaftNetworkFactory<RaftTypeConfig> for RaftNetwork {
     type Network = RaftNetworkConnection;
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn connect(
         &mut self,
         target: <RaftTypeConfig as openraft::RaftTypeConfig>::NodeId,

@@ -56,7 +56,7 @@ impl Worker for KvWorker {
             group: self.group,
             raft_node: self.raft_node,
             raft_group_log_store: self.raft_group_log_store.clone(),
-            lsm_tree: self.lsm_tree.clone(),
+            _lsm_tree: self.lsm_tree.clone(),
             raft: self.raft.clone(),
             available_index: self.available_index.clone(),
             done_index: self.done_index.clone(),
@@ -159,33 +159,13 @@ impl KvWorker {
         self.snapshotting.store(0, Ordering::Release);
         Ok(())
     }
-
-    async fn write_next_apply_index(&self, index: u64) -> Result<()> {
-        let buf = bincode::serialize(&index).map_err(Error::serde_err)?;
-        self.raft_group_log_store
-            .put(DONE_INDEX_KEY.to_vec(), buf)
-            .await?;
-        Ok(())
-    }
-
-    async fn read_next_apply_index(&self) -> Result<Option<u64>> {
-        let raw = self
-            .raft_group_log_store
-            .get(DONE_INDEX_KEY.to_vec())
-            .await?;
-        let index = match raw {
-            Some(raw) => bincode::deserialize(&raw).map_err(Error::serde_err)?,
-            None => None,
-        };
-        Ok(index)
-    }
 }
 
 struct Applier {
     group: u64,
     raft_node: u64,
     raft_group_log_store: RaftGroupLogStore<Gear>,
-    lsm_tree: ObjectStoreLsmTree,
+    _lsm_tree: ObjectStoreLsmTree,
     raft: Raft<Gear>,
 
     available_index: Arc<AtomicU64>,
@@ -229,9 +209,16 @@ impl Applier {
                 .raft_group_log_store
                 .entries(done + 1, APPLIER_MAX_BATCH_SIZE)
                 .await?;
+            trace!(
+                group = self.group,
+                raft_node = self.raft_node,
+                "apply raft log: [{}..{})",
+                done + 1,
+                done + 1 + entries.len() as u64
+            );
             let done = done + entries.len() as u64;
 
-            let mut txns = Vec::with_capacity(entries.len());
+            let mut txn_reqs = Vec::with_capacity(entries.len());
             for entry in entries {
                 let data =
                     match bincode::deserialize::<openraft::EntryPayload<RaftTypeConfig>>(&entry)
@@ -240,17 +227,46 @@ impl Applier {
                         openraft::EntryPayload::Normal(data) => data,
                         _ => continue,
                     };
-                let txn = TxnRequest::from_slice(&data).map_err(Error::serde_err)?;
-                txns.push(txn);
+                let txn_req = TxnRequest::from_slice(&data).map_err(Error::serde_err)?;
+                txn_reqs.push(txn_req);
             }
 
-            // TODO: Handle txns.
+            // TODO: Handle txns responses.
+            let mut txn_rsps = Vec::with_capacity(txn_reqs.len());
+            for req in txn_reqs {
+                let rsp = self.txn(req).await?;
+                txn_rsps.push(rsp);
+            }
 
             self.done_index.store(done, Ordering::Release);
+            self.write_done_index(done).await?;
         }
     }
 
-    async fn txn(&self) -> Result<TxnResponse> {
-        todo!()
+    async fn txn(&self, _request: TxnRequest) -> Result<TxnResponse> {
+        // TODO: Impl me.
+        // TODO: Impl me.
+        // TODO: Impl me.
+        Ok(TxnResponse::default())
+    }
+
+    async fn write_done_index(&self, index: u64) -> Result<()> {
+        let buf = bincode::serialize(&index).map_err(Error::serde_err)?;
+        self.raft_group_log_store
+            .put(DONE_INDEX_KEY.to_vec(), buf)
+            .await?;
+        Ok(())
+    }
+
+    async fn _read_done_index(&self) -> Result<Option<u64>> {
+        let raw = self
+            .raft_group_log_store
+            .get(DONE_INDEX_KEY.to_vec())
+            .await?;
+        let index = match raw {
+            Some(raw) => bincode::deserialize(&raw).map_err(Error::serde_err)?,
+            None => None,
+        };
+        Ok(index)
     }
 }

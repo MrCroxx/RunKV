@@ -114,7 +114,10 @@ impl Wheel {
 
     async fn txn_inner(&self, request: TxnRequest) -> Result<TxnResponse> {
         let _buf = request.to_vec().map_err(Error::serde_err)?;
-        todo!()
+        // TODO: Impl me.
+        // TODO: Impl me.
+        // TODO: Impl me.
+        Ok(TxnResponse::default())
     }
 }
 

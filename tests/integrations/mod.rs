@@ -86,7 +86,7 @@ async fn test_concurrent_put_get() {
     wheel_client
         .add_endpoints(AddEndpointsRequest {
             endpoints: HashMap::from_iter([(
-                1,
+                wheel_config.id,
                 Endpoint {
                     host: wheel_config.host.to_owned(),
                     port: wheel_config.port as u32,
@@ -104,7 +104,11 @@ async fn test_concurrent_put_get() {
             }),
             group: 1,
             raft_nodes: vec![1, 2, 3],
-            nodes: HashMap::from_iter([(1, 1), (2, 1), (3, 1)]),
+            nodes: HashMap::from_iter([
+                (1, wheel_config.id),
+                (2, wheel_config.id),
+                (3, wheel_config.id),
+            ]),
         }))
         .await
         .unwrap();
