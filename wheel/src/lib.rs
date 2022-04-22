@@ -16,6 +16,7 @@ use meta::MetaStoreRef;
 use runkv_common::channel_pool::ChannelPool;
 use runkv_common::BoxedWorker;
 use runkv_proto::common::Endpoint as PbEndpoint;
+use runkv_proto::kv::kv_service_server::KvServiceServer;
 use runkv_proto::wheel::raft_service_server::RaftServiceServer;
 use runkv_proto::wheel::wheel_service_server::WheelServiceServer;
 use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions, SstableStoreRef};
@@ -45,7 +46,8 @@ pub async fn bootstrap_wheel(
 
     Server::builder()
         .add_service(WheelServiceServer::new(wheel.clone()))
-        .add_service(RaftServiceServer::new(wheel))
+        .add_service(RaftServiceServer::new(wheel.clone()))
+        .add_service(KvServiceServer::new(wheel))
         .serve(addr_str.parse().map_err(Error::err)?)
         .await
         .map_err(Error::err)
