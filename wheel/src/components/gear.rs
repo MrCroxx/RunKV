@@ -5,17 +5,17 @@ use async_trait::async_trait;
 use tokio::sync::{mpsc, oneshot};
 use tracing::trace;
 
-use super::command::Command;
+use super::command::GearCommand;
 use super::fsm::Fsm;
 use crate::error::{Error, Result};
 
 #[derive(Clone)]
 pub struct Gear {
-    tx: mpsc::UnboundedSender<Command>,
+    tx: mpsc::UnboundedSender<GearCommand>,
 }
 
 impl Gear {
-    pub fn new(tx: mpsc::UnboundedSender<Command>) -> Self {
+    pub fn new(tx: mpsc::UnboundedSender<GearCommand>) -> Self {
         Self { tx }
     }
 }
@@ -34,7 +34,7 @@ impl Fsm for Gear {
             range.end
         );
         self.tx
-            .send(Command::Apply { group, range })
+            .send(GearCommand::Apply { group, range })
             .map_err(Error::err)?;
         Ok(())
     }
@@ -43,7 +43,7 @@ impl Fsm for Gear {
         trace!("build snapshot");
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(Command::BuildSnapshot {
+            .send(GearCommand::BuildSnapshot {
                 group,
                 index,
                 notifier: tx,
@@ -62,7 +62,7 @@ impl Fsm for Gear {
         trace!("install snapshot: {:?}", snapshot);
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(Command::InstallSnapshot {
+            .send(GearCommand::InstallSnapshot {
                 group,
                 index,
                 snapshot: snapshot.to_owned().into_inner(),

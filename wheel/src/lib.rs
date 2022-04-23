@@ -14,9 +14,11 @@ use error::{Error, Result};
 use meta::mem::MemoryMetaStore;
 use meta::MetaStoreRef;
 use runkv_common::channel_pool::ChannelPool;
+use runkv_common::notify_pool::NotifyPool;
 use runkv_common::BoxedWorker;
 use runkv_proto::common::Endpoint as PbEndpoint;
 use runkv_proto::kv::kv_service_server::KvServiceServer;
+use runkv_proto::kv::TxnResponse;
 use runkv_proto::wheel::raft_service_server::RaftServiceServer;
 use runkv_proto::wheel::wheel_service_server::WheelServiceServer;
 use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions, SstableStoreRef};
@@ -98,6 +100,8 @@ pub async fn build_wheel_with_object_store(
         raft_network.clone(),
     );
 
+    let txn_notify_pool = build_txn_notify_pool();
+
     let options = WheelOptions {
         lsm_tree: lsm_tree.clone(),
         meta_store,
@@ -105,6 +109,7 @@ pub async fn build_wheel_with_object_store(
         raft_log_store,
         raft_network,
         raft_manager,
+        txn_notify_pool,
     };
 
     let wheel = Wheel::new(options);
@@ -302,4 +307,8 @@ fn build_raft_manager(
         raft_network,
     };
     RaftManager::new(raft_manager_options)
+}
+
+fn build_txn_notify_pool() -> NotifyPool<u64, Result<TxnResponse>> {
+    NotifyPool::default()
 }

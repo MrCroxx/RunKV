@@ -1,9 +1,19 @@
 use std::ops::Range;
 
+use runkv_proto::kv::{BytesSerde, TxnRequest};
+use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
-#[derive(Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum Command {
+    TxnRequest(TxnRequest),
+    CompactRaftLog(u64),
+}
+
+impl<'de> BytesSerde<'de> for Command {}
+
+#[derive(Debug)]
+pub enum GearCommand {
     Apply {
         group: u64,
         range: Range<u64>,

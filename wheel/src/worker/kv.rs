@@ -9,7 +9,7 @@ use runkv_proto::kv::{BytesSerde, TxnRequest, TxnResponse};
 use tokio::sync::mpsc;
 use tracing::{trace, warn};
 
-use crate::components::command::Command;
+use crate::components::command::{Command, GearCommand};
 use crate::components::gear::Gear;
 use crate::components::lsm_tree::ObjectStoreLsmTree;
 use crate::components::raft_log_store::RaftGroupLogStore;
@@ -32,7 +32,7 @@ pub struct KvWorkerOptions {
     pub raft_group_log_store: RaftGroupLogStore<Gear>,
     pub lsm_tree: ObjectStoreLsmTree,
     pub raft: Raft<Gear>,
-    pub rx: mpsc::UnboundedReceiver<Command>,
+    pub rx: mpsc::UnboundedReceiver<GearCommand>,
 }
 
 pub struct KvWorker {
@@ -46,7 +46,7 @@ pub struct KvWorker {
     done_index: Arc<AtomicU64>,
     snapshotting: Arc<AtomicU64>,
 
-    rx: mpsc::UnboundedReceiver<Command>,
+    rx: mpsc::UnboundedReceiver<GearCommand>,
 }
 
 #[async_trait]
@@ -99,10 +99,10 @@ impl KvWorker {
                 cmd
             );
             match cmd {
-                Command::Apply { group, range } => {
+                GearCommand::Apply { group, range } => {
                     self.handle_apply(group, range).await?;
                 }
-                Command::BuildSnapshot {
+                GearCommand::BuildSnapshot {
                     group,
                     index,
                     notifier,
@@ -112,7 +112,7 @@ impl KvWorker {
                         Error::Other("error raised to notify build snapshot".to_string())
                     })?;
                 }
-                Command::InstallSnapshot {
+                GearCommand::InstallSnapshot {
                     group,
                     index,
                     snapshot,
@@ -218,7 +218,7 @@ impl Applier {
             );
             let done = done + entries.len() as u64;
 
-            let mut txn_reqs = Vec::with_capacity(entries.len());
+            let mut cmds = Vec::with_capacity(entries.len());
             for entry in entries {
                 let data =
                     match bincode::deserialize::<openraft::EntryPayload<RaftTypeConfig>>(&entry)
@@ -227,15 +227,22 @@ impl Applier {
                         openraft::EntryPayload::Normal(data) => data,
                         _ => continue,
                     };
-                let txn_req = TxnRequest::from_slice(&data).map_err(Error::serde_err)?;
-                txn_reqs.push(txn_req);
+                let cmd = Command::decode(&data).map_err(Error::serde_err)?;
+                cmds.push(cmd);
             }
 
             // TODO: Handle txns responses.
-            let mut txn_rsps = Vec::with_capacity(txn_reqs.len());
-            for req in txn_reqs {
-                let rsp = self.txn(req).await?;
-                txn_rsps.push(rsp);
+            let mut txns = Vec::with_capacity(cmds.len());
+            for cmd in cmds {
+                match cmd {
+                    Command::TxnRequest(req) => {
+                        let rsp = self.txn(req).await?;
+                        txns.push(rsp);
+                    }
+                    Command::CompactRaftLog(index) => {
+                        self.compact_raft_log(index).await?;
+                    }
+                }
             }
 
             self.done_index.store(done, Ordering::Release);
@@ -248,6 +255,10 @@ impl Applier {
         // TODO: Impl me.
         // TODO: Impl me.
         Ok(TxnResponse::default())
+    }
+
+    async fn compact_raft_log(&self, index: u64) -> Result<()> {
+        self.raft_group_log_store.compact(index).await
     }
 
     async fn write_done_index(&self, index: u64) -> Result<()> {

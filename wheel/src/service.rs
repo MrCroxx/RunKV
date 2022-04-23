@@ -4,6 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use runkv_common::channel_pool::ChannelPool;
 use runkv_common::config::Node;
+use runkv_common::notify_pool::NotifyPool;
 use runkv_proto::common::Endpoint;
 use runkv_proto::kv::kv_service_server::KvService;
 use runkv_proto::kv::{
@@ -21,6 +22,7 @@ use runkv_proto::wheel::{
 use runkv_storage::raft_log_store::RaftLogStore;
 use tonic::{Request, Response, Status};
 
+use crate::components::command::Command;
 use crate::components::lsm_tree::ObjectStoreLsmTree;
 use crate::components::network::RaftNetwork;
 use crate::components::raft_manager::RaftManager;
@@ -38,6 +40,7 @@ pub struct WheelOptions {
     pub raft_log_store: RaftLogStore,
     pub raft_network: RaftNetwork,
     pub raft_manager: RaftManager,
+    pub txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
 }
 
 struct WheelInner {
@@ -47,6 +50,7 @@ struct WheelInner {
     _raft_log_store: RaftLogStore,
     _raft_network: RaftNetwork,
     raft_manager: RaftManager,
+    _txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
 }
 
 #[derive(Clone)]
@@ -64,6 +68,7 @@ impl Wheel {
                 _raft_log_store: options.raft_log_store,
                 _raft_network: options.raft_network,
                 raft_manager: options.raft_manager,
+                _txn_notify_pool: options.txn_notify_pool,
             }),
         }
     }
@@ -113,7 +118,8 @@ impl Wheel {
     }
 
     async fn txn_inner(&self, request: TxnRequest) -> Result<TxnResponse> {
-        let _buf = request.to_vec().map_err(Error::serde_err)?;
+        let cmd = Command::TxnRequest(request);
+        let _buf = cmd.encode_to_vec().map_err(Error::serde_err)?;
         // TODO: Impl me.
         // TODO: Impl me.
         // TODO: Impl me.

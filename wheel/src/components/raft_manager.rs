@@ -168,6 +168,7 @@ mod tests {
     use test_log::test;
 
     use super::*;
+    use crate::components::command::Command;
     use crate::components::lsm_tree::tests::build_test_lsm_tree;
     use crate::components::RaftTypeConfig;
     use crate::service::tests::MockRaftService;
@@ -212,11 +213,11 @@ mod tests {
         assert!(follower1.is_leader().await.is_err());
         assert!(follower2.is_leader().await.is_err());
 
-        let txn = TxnRequest { ops: vec![] };
+        let cmd = Command::TxnRequest(TxnRequest { ops: vec![] });
 
         let index = leader
             .client_write(openraft::raft::ClientWriteRequest::new(
-                openraft::EntryPayload::Normal(txn.to_vec().unwrap()),
+                openraft::EntryPayload::Normal(cmd.encode_to_vec().unwrap()),
             ))
             .await
             .unwrap()
@@ -230,7 +231,7 @@ mod tests {
             openraft::EntryPayload::Normal(data) => data,
             _ => unreachable!(),
         };
-        assert_eq!(txn.to_vec().unwrap(), data);
+        assert_eq!(cmd.encode_to_vec().unwrap(), data);
     }
 
     async fn build_manager_for_test(path: &str, addr: SocketAddr) -> (RaftManager, RaftLogStore) {
