@@ -82,6 +82,13 @@ impl<F: Fsm> RaftGroupLogStore<F> {
             .await
             .map_err(|e| e.into())
     }
+
+    pub async fn compact(&self, index: u64) -> Result<()> {
+        self.core
+            .compact(self.group, index)
+            .await
+            .map_err(Error::storage_err)
+    }
 }
 
 impl<F: Fsm> RaftGroupLogStore<F> {

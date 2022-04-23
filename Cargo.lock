@@ -1906,6 +1906,7 @@ dependencies = [
  "humantime",
  "humantime-serde",
  "itertools",
+ "parking_lot 0.12.0",
  "serde",
  "serde_derive",
  "test-log",
