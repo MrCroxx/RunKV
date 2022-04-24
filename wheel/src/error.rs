@@ -17,6 +17,8 @@ pub enum Error {
     RaftError(#[from] RaftError),
     #[error("meta error: {0}")]
     MetaError(#[from] MetaError),
+    #[error("kv error: {0}")]
+    KvError(#[from] KvError),
     #[error("other: {0}")]
     Other(String),
 }
@@ -73,4 +75,12 @@ impl RaftError {
 pub enum MetaError {
     #[error("key range overlaps: {r1:?} {r2:?}")]
     KeyRangeOverlaps { r1: KeyRange, r2: KeyRange },
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum KvError {
+    #[error("ops include invalid shard or ops cross multiple shards: {0}")]
+    InvalidShard(String),
+    #[error("no valid leader in raft group {0}")]
+    NoValidLeader(u64),
 }

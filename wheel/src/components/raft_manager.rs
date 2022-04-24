@@ -2,7 +2,9 @@ use std::collections::btree_map::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use runkv_common::notify_pool::NotifyPool;
 use runkv_common::Worker;
+use runkv_proto::kv::TxnResponse;
 use runkv_storage::raft_log_store::RaftLogStore;
 use tokio::sync::{mpsc, RwLock};
 
@@ -21,6 +23,7 @@ pub struct RaftManagerOptions {
     pub lsm_tree: ObjectStoreLsmTree,
     pub raft_log_store: RaftLogStore,
     pub raft_network: RaftNetwork,
+    pub txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
 }
 
 struct RaftManagerInner {
@@ -34,6 +37,7 @@ pub struct RaftManager {
     lsm_tree: ObjectStoreLsmTree,
     raft_log_store: RaftLogStore,
     raft_network: RaftNetwork,
+    txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
     inner: Arc<RwLock<RaftManagerInner>>,
 }
 
@@ -44,6 +48,7 @@ impl RaftManager {
             lsm_tree: options.lsm_tree,
             raft_log_store: options.raft_log_store,
             raft_network: options.raft_network,
+            txn_notify_pool: options.txn_notify_pool,
             inner: Arc::new(RwLock::new(RaftManagerInner {
                 rafts: BTreeMap::default(),
             })),
@@ -107,6 +112,7 @@ impl RaftManager {
             lsm_tree: self.lsm_tree.clone(),
             raft: raft.clone(),
             rx,
+            txn_notify_pool: self.txn_notify_pool.clone(),
         });
 
         // TODO: Hold the handle for gracefully shutdown.
@@ -177,7 +183,7 @@ mod tests {
     async fn test_raft_basic() {
         let tempdir = tempfile::tempdir().unwrap();
         let addr_str = "127.0.0.1:12399".to_string();
-        let (manager, raft_log_store) =
+        let (manager, raft_log_store, txn_notify_pool) =
             build_manager_for_test(tempdir.path().to_str().unwrap(), addr_str.parse().unwrap())
                 .await;
         let manager_clone = manager.clone();
@@ -213,7 +219,11 @@ mod tests {
         assert!(follower1.is_leader().await.is_err());
         assert!(follower2.is_leader().await.is_err());
 
-        let cmd = Command::TxnRequest(TxnRequest { ops: vec![] });
+        let rx = txn_notify_pool.register(1).unwrap();
+        let cmd = Command::TxnRequest {
+            id: 1,
+            request: TxnRequest { ops: vec![] },
+        };
 
         let index = leader
             .client_write(openraft::raft::ClientWriteRequest::new(
@@ -223,6 +233,9 @@ mod tests {
             .unwrap()
             .log_id
             .index;
+
+        rx.await.unwrap().unwrap();
+
         let data = match bincode::deserialize::<openraft::EntryPayload<RaftTypeConfig>>(
             &raft_log_store.entries(1, index, 1).await.unwrap()[0].data[..],
         )
@@ -234,8 +247,16 @@ mod tests {
         assert_eq!(cmd.encode_to_vec().unwrap(), data);
     }
 
-    async fn build_manager_for_test(path: &str, addr: SocketAddr) -> (RaftManager, RaftLogStore) {
+    async fn build_manager_for_test(
+        path: &str,
+        addr: SocketAddr,
+    ) -> (
+        RaftManager,
+        RaftLogStore,
+        NotifyPool<u64, Result<TxnResponse>>,
+    ) {
         let channel_pool = ChannelPool::default();
+        let txn_notify_pool = NotifyPool::default();
         let node = Node {
             id: 1,
             host: addr.ip().to_string(),
@@ -256,8 +277,9 @@ mod tests {
             lsm_tree,
             raft_log_store: raft_log_store.clone(),
             raft_network,
+            txn_notify_pool: txn_notify_pool.clone(),
         };
         let manager = RaftManager::new(options);
-        (manager, raft_log_store)
+        (manager, raft_log_store, txn_notify_pool)
     }
 }

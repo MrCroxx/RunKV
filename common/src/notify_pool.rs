@@ -14,6 +14,14 @@ pub struct NotifyPool<I: Eq + Hash + Copy + Clone + Display, R> {
     core: Arc<Mutex<NotifyPoolCore<I, R>>>,
 }
 
+impl<I: Eq + Hash + Copy + Clone + Display, R> Clone for NotifyPool<I, R> {
+    fn clone(&self) -> Self {
+        Self {
+            core: self.core.clone(),
+        }
+    }
+}
+
 impl<I: Eq + Hash + Copy + Clone + Display, R> Default for NotifyPool<I, R> {
     fn default() -> Self {
         Self {

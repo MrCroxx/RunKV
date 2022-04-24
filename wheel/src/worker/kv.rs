@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use runkv_common::notify_pool::NotifyPool;
 use runkv_common::Worker;
 use runkv_proto::kv::{BytesSerde, TxnRequest, TxnResponse};
 use tokio::sync::mpsc;
@@ -33,6 +34,7 @@ pub struct KvWorkerOptions {
     pub lsm_tree: ObjectStoreLsmTree,
     pub raft: Raft<Gear>,
     pub rx: mpsc::UnboundedReceiver<GearCommand>,
+    pub txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
 }
 
 pub struct KvWorker {
@@ -45,6 +47,7 @@ pub struct KvWorker {
     available_index: Arc<AtomicU64>,
     done_index: Arc<AtomicU64>,
     snapshotting: Arc<AtomicU64>,
+    txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
 
     rx: mpsc::UnboundedReceiver<GearCommand>,
 }
@@ -58,6 +61,7 @@ impl Worker for KvWorker {
             raft_group_log_store: self.raft_group_log_store.clone(),
             _lsm_tree: self.lsm_tree.clone(),
             raft: self.raft.clone(),
+            txn_notify_pool: self.txn_notify_pool.clone(),
             available_index: self.available_index.clone(),
             done_index: self.done_index.clone(),
             snapshotting: self.snapshotting.clone(),
@@ -87,6 +91,7 @@ impl KvWorker {
             done_index: Arc::new(AtomicU64::new(options.done_index)),
             snapshotting: Arc::new(AtomicU64::new(0)),
             rx: options.rx,
+            txn_notify_pool: options.txn_notify_pool,
         }
     }
 
@@ -167,6 +172,7 @@ struct Applier {
     raft_group_log_store: RaftGroupLogStore<Gear>,
     _lsm_tree: ObjectStoreLsmTree,
     raft: Raft<Gear>,
+    txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
 
     available_index: Arc<AtomicU64>,
     done_index: Arc<AtomicU64>,
@@ -232,12 +238,13 @@ impl Applier {
             }
 
             // TODO: Handle txns responses.
-            let mut txns = Vec::with_capacity(cmds.len());
             for cmd in cmds {
                 match cmd {
-                    Command::TxnRequest(req) => {
-                        let rsp = self.txn(req).await?;
-                        txns.push(rsp);
+                    Command::TxnRequest { id, request: req } => {
+                        let rsp = self.txn(req).await;
+                        if let Err(e) = self.txn_notify_pool.notify(id, rsp) {
+                            warn!("error raised when notify txn result: {}", e);
+                        }
                     }
                     Command::CompactRaftLog(index) => {
                         self.compact_raft_log(index).await?;
