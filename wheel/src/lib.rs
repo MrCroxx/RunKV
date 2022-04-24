@@ -91,6 +91,8 @@ pub async fn build_wheel_with_object_store(
         channel_pool.clone(),
     )?;
 
+    let txn_notify_pool = build_txn_notify_pool();
+
     let raft_log_store = build_raft_log_store(config).await?;
     let raft_network = build_raft_network(channel_pool.clone());
     let raft_manager = build_raft_manager(
@@ -98,9 +100,8 @@ pub async fn build_wheel_with_object_store(
         lsm_tree.clone(),
         raft_log_store.clone(),
         raft_network.clone(),
+        txn_notify_pool.clone(),
     );
-
-    let txn_notify_pool = build_txn_notify_pool();
 
     let options = WheelOptions {
         lsm_tree: lsm_tree.clone(),
@@ -299,12 +300,14 @@ fn build_raft_manager(
     lsm_tree: ObjectStoreLsmTree,
     raft_log_store: RaftLogStore,
     raft_network: RaftNetwork,
+    txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
 ) -> RaftManager {
     let raft_manager_options = RaftManagerOptions {
         node: config.id,
         lsm_tree,
         raft_log_store,
         raft_network,
+        txn_notify_pool,
     };
     RaftManager::new(raft_manager_options)
 }

@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use runkv_common::channel_pool::ChannelPool;
 use runkv_common::config::Node;
 use runkv_common::notify_pool::NotifyPool;
@@ -21,12 +23,15 @@ use runkv_proto::wheel::{
 };
 use runkv_storage::raft_log_store::RaftLogStore;
 use tonic::{Request, Response, Status};
+use tracing::trace;
 
 use crate::components::command::Command;
+use crate::components::gear::Gear;
 use crate::components::lsm_tree::ObjectStoreLsmTree;
 use crate::components::network::RaftNetwork;
 use crate::components::raft_manager::RaftManager;
-use crate::error::{Error, Result};
+use crate::components::Raft;
+use crate::error::{Error, KvError, RaftError, Result};
 use crate::meta::MetaStoreRef;
 
 fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
@@ -50,7 +55,8 @@ struct WheelInner {
     _raft_log_store: RaftLogStore,
     _raft_network: RaftNetwork,
     raft_manager: RaftManager,
-    _txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
+    txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
+    request_id: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -68,7 +74,8 @@ impl Wheel {
                 _raft_log_store: options.raft_log_store,
                 _raft_network: options.raft_network,
                 raft_manager: options.raft_manager,
-                _txn_notify_pool: options.txn_notify_pool,
+                txn_notify_pool: options.txn_notify_pool,
+                request_id: AtomicU64::new(0),
             }),
         }
     }
@@ -118,12 +125,74 @@ impl Wheel {
     }
 
     async fn txn_inner(&self, request: TxnRequest) -> Result<TxnResponse> {
-        let cmd = Command::TxnRequest(request);
-        let _buf = cmd.encode_to_vec().map_err(Error::serde_err)?;
-        // TODO: Impl me.
-        // TODO: Impl me.
-        // TODO: Impl me.
-        Ok(TxnResponse::default())
+        // Pick raft leader of the request.
+        let raft = match self.leader(&request).await? {
+            (group, None) => return Err(KvError::NoValidLeader(group).into()),
+            (_, Some(raft)) => raft,
+        };
+
+        // Register request.
+        let id = self.inner.request_id.fetch_add(1, Ordering::SeqCst) + 1;
+        let rx = self
+            .inner
+            .txn_notify_pool
+            .register(id)
+            .map_err(Error::err)?;
+
+        // Propose cmd with raft leader.
+        let cmd = Command::TxnRequest { id, request };
+        let buf = cmd.encode_to_vec().map_err(Error::serde_err)?;
+        raft.client_write(openraft::raft::ClientWriteRequest::new(
+            openraft::EntryPayload::Normal(buf),
+        ))
+        .await
+        .map_err(RaftError::err)?;
+
+        // Wait for resposne.
+        let response = rx.await.map_err(Error::err)?;
+        response
+    }
+
+    async fn leader<'a>(&self, request: &'a TxnRequest) -> Result<(u64, Option<Raft<Gear>>)> {
+        assert!(!request.ops.is_empty());
+
+        let key = |req: &'a kv_op_request::Request| -> &'a [u8] {
+            match req {
+                kv_op_request::Request::Get(GetRequest { key }) => key,
+                kv_op_request::Request::Put(PutRequest { key, .. }) => key,
+                kv_op_request::Request::Delete(DeleteRequest { key }) => key,
+            }
+        };
+
+        let keys = request
+            .ops
+            .iter()
+            .map(|op| key(op.request.as_ref().unwrap()))
+            .collect_vec();
+
+        let (range, group, raft_nodes) = self
+            .inner
+            .meta_store
+            .all_in_range(&keys)
+            .await?
+            .ok_or_else(|| KvError::InvalidShard(format!("request {:?}", request)))?;
+
+        trace!(
+            range = ?range,
+            group = group,
+            raft_nodes = ?raft_nodes,
+            "request {:?} in:",
+            request
+        );
+
+        for raft_node in raft_nodes {
+            let raft = self.inner.raft_manager.get_raft_node(raft_node).await?;
+            if raft.is_leader().await.is_ok() {
+                return Ok((group, Some(raft)));
+            }
+        }
+
+        Ok((group, None))
     }
 }
 

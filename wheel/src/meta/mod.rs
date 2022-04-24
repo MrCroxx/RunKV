@@ -21,6 +21,8 @@ pub trait MetaStore: Send + Sync + 'static {
     async fn key_ranges(&self) -> Result<Vec<KeyRange>>;
 
     async fn in_range(&self, key: &[u8]) -> Result<Option<(KeyRange, u64, Vec<u64>)>>;
+
+    async fn all_in_range(&self, keys: &[&[u8]]) -> Result<Option<(KeyRange, u64, Vec<u64>)>>;
 }
 
 pub type MetaStoreRef = Arc<dyn MetaStore>;

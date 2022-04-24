@@ -59,4 +59,28 @@ impl MetaStore for MemoryMetaStore {
         }
         Ok(None)
     }
+
+    async fn all_in_range(&self, keys: &[&[u8]]) -> Result<Option<(KeyRange, u64, Vec<u64>)>> {
+        if keys.is_empty() {
+            return Ok(None);
+        }
+        let guard = self.inner.read();
+        let mut result = None;
+        for (r, (group, raft_nodes)) in guard.key_ranges.iter() {
+            if in_range(keys[0], r) {
+                result = Some((r.to_owned(), *group, raft_nodes.to_owned()));
+                break;
+            }
+        }
+        if result.is_none() {
+            return Ok(None);
+        }
+        let (range, group, raft_nodes) = result.unwrap();
+        for key in &keys[1..] {
+            if !in_range(key, &range) {
+                return Ok(None);
+            }
+        }
+        Ok(Some((range, group, raft_nodes)))
+    }
 }
