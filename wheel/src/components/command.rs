@@ -6,8 +6,15 @@ use tokio::sync::oneshot;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Command {
-    TxnRequest { id: u64, request: TxnRequest },
-    CompactRaftLog(u64),
+    TxnRequest {
+        request_id: u64,
+        sequence: u64,
+        request: TxnRequest,
+    },
+    CompactRaftLog {
+        index: u64,
+        sequence: u64,
+    },
 }
 
 impl<'de> BytesSerde<'de> for Command {}

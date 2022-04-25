@@ -11,7 +11,8 @@ use runkv_proto::common::Endpoint;
 use runkv_proto::kv::kv_service_server::KvService;
 use runkv_proto::kv::{
     kv_op_request, kv_op_response, BytesSerde, DeleteRequest, DeleteResponse, GetRequest,
-    GetResponse, KvOpRequest, PutRequest, PutResponse, TxnRequest, TxnResponse,
+    GetResponse, KvOpRequest, PutRequest, PutResponse, SnapshotRequest, SnapshotResponse,
+    TxnRequest, TxnResponse,
 };
 use runkv_proto::wheel::raft_service_server::RaftService;
 use runkv_proto::wheel::wheel_service_server::WheelService;
@@ -120,11 +121,38 @@ impl Wheel {
         Ok(response)
     }
 
+    async fn snapshot_inner(&self, request: SnapshotRequest) -> Result<SnapshotResponse> {
+        let req = TxnRequest {
+            ops: vec![KvOpRequest {
+                request: Some(kv_op_request::Request::Snapshot(request)),
+            }],
+        };
+        let mut rsp = self.txn_inner(req).await?;
+        let response = match rsp.ops.remove(0).response.unwrap() {
+            kv_op_response::Response::Snapshot(response) => response,
+            _ => unreachable!(),
+        };
+        Ok(response)
+    }
+
     async fn txn_inner(&self, request: TxnRequest) -> Result<TxnResponse> {
         // Pick raft leader of the request.
-        let raft = match self.leader(&request).await? {
-            (group, None) => return Err(KvError::NoValidLeader(group).into()),
-            (_, Some(raft)) => raft,
+        let (raft_node, raft) = match self.leader(&request).await? {
+            (group, _, None) => return Err(KvError::NoValidLeader(group).into()),
+            (_, raft_node, Some(raft)) => (raft_node, raft),
+        };
+
+        let read_only = request.ops.iter().all(|op| {
+            matches!(
+                op.request,
+                Some(kv_op_request::Request::Snapshot(_)) | Some(kv_op_request::Request::Get(_))
+            )
+        });
+        let sequence = self.inner.raft_manager.get_sequence(raft_node).await?;
+        let sequence = if read_only {
+            sequence.load(Ordering::Acquire)
+        } else {
+            sequence.fetch_add(1, Ordering::SeqCst) + 1
         };
 
         // Register request.
@@ -136,7 +164,11 @@ impl Wheel {
             .map_err(Error::err)?;
 
         // Propose cmd with raft leader.
-        let cmd = Command::TxnRequest { id, request };
+        let cmd = Command::TxnRequest {
+            request_id: id,
+            sequence,
+            request,
+        };
         let buf = cmd.encode_to_vec().map_err(Error::serde_err)?;
         raft.client_write(openraft::raft::ClientWriteRequest::new(
             openraft::EntryPayload::Normal(buf),
@@ -149,14 +181,16 @@ impl Wheel {
         response
     }
 
-    async fn leader<'a>(&self, request: &'a TxnRequest) -> Result<(u64, Option<Raft<Gear>>)> {
+    /// Returns `(group, raft node, Option<Raft>)`.
+    async fn leader<'a>(&self, request: &'a TxnRequest) -> Result<(u64, u64, Option<Raft<Gear>>)> {
         assert!(!request.ops.is_empty());
 
         let key = |req: &'a kv_op_request::Request| -> &'a [u8] {
             match req {
-                kv_op_request::Request::Get(GetRequest { key }) => key,
+                kv_op_request::Request::Get(GetRequest { key, .. }) => key,
                 kv_op_request::Request::Put(PutRequest { key, .. }) => key,
                 kv_op_request::Request::Delete(DeleteRequest { key }) => key,
+                kv_op_request::Request::Snapshot(SnapshotRequest { key }) => key,
             }
         };
 
@@ -184,11 +218,11 @@ impl Wheel {
         for raft_node in raft_nodes {
             let raft = self.inner.raft_manager.get_raft_node(raft_node).await?;
             if raft.is_leader().await.is_ok() {
-                return Ok((group, Some(raft)));
+                return Ok((group, raft_node, Some(raft)));
             }
         }
 
-        Ok((group, None))
+        Ok((group, 0, None))
     }
 }
 
@@ -382,6 +416,16 @@ impl KvService for Wheel {
     ) -> core::result::Result<Response<DeleteResponse>, Status> {
         let req = request.into_inner();
         let rsp = self.delete_inner(req).await.map_err(internal)?;
+        Ok(Response::new(rsp))
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn snapshot(
+        &self,
+        request: Request<SnapshotRequest>,
+    ) -> core::result::Result<Response<SnapshotResponse>, Status> {
+        let req = request.into_inner();
+        let rsp = self.snapshot_inner(req).await.map_err(internal)?;
         Ok(Response::new(rsp))
     }
 

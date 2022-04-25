@@ -26,6 +26,7 @@ pub struct ObjectStoreLsmTreeOptions {
 pub struct MemtableWithCtx {
     pub table: Memtable,
     pub max_applied_index: u64,
+    pub max_sequence: u64,
 }
 
 impl MemtableWithCtx {
@@ -33,6 +34,7 @@ impl MemtableWithCtx {
         Self {
             table: Memtable::new(capacity),
             max_applied_index: 0,
+            max_sequence: 0,
         }
     }
 }
@@ -195,8 +197,20 @@ impl ObjectStoreLsmTreeCore {
             guard.immutable_memtables.push_front(imm);
         }
         guard.memtable.table.put(key, value, sequence);
+        trace!(
+            "apply index: {}, max applied index: {}",
+            apply_index,
+            guard.memtable.max_applied_index,
+        );
         assert!(apply_index >= guard.memtable.max_applied_index);
         guard.memtable.max_applied_index = apply_index;
+        trace!(
+            "sequence: {}, max sequence: {}",
+            sequence,
+            guard.memtable.max_sequence,
+        );
+        assert!(sequence >= guard.memtable.max_sequence);
+        guard.memtable.max_sequence = sequence;
         drop(guard);
 
         Ok(())
