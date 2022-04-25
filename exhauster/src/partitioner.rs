@@ -2,7 +2,7 @@ use bytes::Bytes;
 
 pub trait Partitioner: Send + Sync + 'static {
     /// Finish building current sstable if returns true.
-    fn partition(&mut self, key: &[u8], value: Option<&[u8]>, timestamp: u64) -> bool;
+    fn partition(&mut self, key: &[u8], value: Option<&[u8]>, sequence: u64) -> bool;
 }
 
 pub type BoxedPartitioner = Box<dyn Partitioner>;
@@ -23,7 +23,7 @@ impl DefaultPartitioner {
 }
 
 impl Partitioner for DefaultPartitioner {
-    fn partition(&mut self, key: &[u8], _value: Option<&[u8]>, _timestamp: u64) -> bool {
+    fn partition(&mut self, key: &[u8], _value: Option<&[u8]>, _sequence: u64) -> bool {
         if self.offset >= self.partition_points.len() {
             return false;
         }
@@ -39,7 +39,7 @@ impl Partitioner for DefaultPartitioner {
 pub struct NoPartitioner;
 
 impl Partitioner for NoPartitioner {
-    fn partition(&mut self, _key: &[u8], _value: Option<&[u8]>, _timestamp: u64) -> bool {
+    fn partition(&mut self, _key: &[u8], _value: Option<&[u8]>, _sequence: u64) -> bool {
         false
     }
 }

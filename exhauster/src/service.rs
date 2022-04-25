@@ -12,7 +12,7 @@ use runkv_storage::components::{
     CachePolicy, Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef,
 };
 use runkv_storage::iterator::{BoxedIterator, Iterator, MergeIterator, Seek, SstableIterator};
-use runkv_storage::utils::{timestamp, user_key, value};
+use runkv_storage::utils::{sequence, user_key, value};
 use tonic::{Request, Response, Status};
 use tracing::{debug, trace};
 
@@ -97,7 +97,7 @@ impl ExhausterService for Exhauster {
         // Filter key value pairs.
         while iter.is_valid() {
             let uk = user_key(iter.key());
-            let ts = timestamp(iter.key());
+            let ts = sequence(iter.key());
             let v = value(iter.value());
 
             if sstable_builder.is_none() {

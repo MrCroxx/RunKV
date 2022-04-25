@@ -2,7 +2,7 @@ use async_recursion::async_recursion;
 use async_trait::async_trait;
 
 use super::{BoxedIterator, Iterator, Seek};
-use crate::utils::{full_key, timestamp, user_key, value};
+use crate::utils::{full_key, sequence, user_key, value};
 use crate::Result;
 
 pub struct UserKeyIterator {
@@ -11,17 +11,17 @@ pub struct UserKeyIterator {
     /// Note: `iter` is always valid when [`UserKeyIterator`] is valid.
     iter: BoxedIterator,
     // TODO: Should replaced with a `Snapshot` handler with epoch inside to pin the sst?
-    /// Timestamp for snapshot read.
-    timestamp: u64,
+    /// Sequence for snapshot read.
+    sequence: u64,
     /// Current user key.
     key: Vec<u8>,
 }
 
 impl UserKeyIterator {
-    pub fn new(iter: BoxedIterator, timestamp: u64) -> Self {
+    pub fn new(iter: BoxedIterator, sequence: u64) -> Self {
         Self {
             iter,
-            timestamp,
+            sequence,
             key: Vec::default(),
         }
     }
@@ -35,15 +35,15 @@ impl UserKeyIterator {
             }
 
             let uk = user_key(self.iter.key());
-            let ts = timestamp(self.iter.key());
-            if key == uk && self.timestamp >= ts {
+            let ts = sequence(self.iter.key());
+            if key == uk && self.sequence >= ts {
                 found = true;
             }
-            if self.timestamp >= ts && value(self.iter.value()).is_none() {
+            if self.sequence >= ts && value(self.iter.value()).is_none() {
                 // Get tombstone, skip the former versions of this user key.
                 self.key = uk.to_vec();
             }
-            if self.timestamp >= ts && uk != self.key {
+            if self.sequence >= ts && uk != self.key {
                 self.key = uk.to_vec();
                 return Ok(found);
             }
@@ -55,18 +55,18 @@ impl UserKeyIterator {
     /// Note: Ensure that the current state is valid.
     #[async_recursion]
     async fn prev_inner(&mut self, key: &[u8]) -> Result<bool> {
-        // Find the first visiable user key that not equals current user key based on timestamp.
+        // Find the first visiable user key that not equals current user key based on sequence.
         let mut found = false;
         loop {
             if !self.iter.is_valid() {
                 return Ok(found);
             }
             let uk = user_key(self.iter.key());
-            let ts = timestamp(self.iter.key());
-            if key == uk && self.timestamp >= ts {
+            let ts = sequence(self.iter.key());
+            if key == uk && self.sequence >= ts {
                 found = true;
             }
-            if self.timestamp >= ts && uk != self.key {
+            if self.sequence >= ts && uk != self.key {
                 self.key = uk.to_vec();
                 self.seek_latest_visiable_current_user_key().await?;
                 match value(self.iter.value()) {
@@ -83,7 +83,7 @@ impl UserKeyIterator {
     /// Move backward until reach the first visiable entry of the current user key.
     ///
     /// Note: Ensure that the current state is valid. And the current user key must have at least
-    /// one visiable version based on timestamp.
+    /// one visiable version based on sequence.
     async fn seek_latest_visiable_current_user_key(&mut self) -> Result<()> {
         loop {
             self.iter.prev().await?;
@@ -92,8 +92,8 @@ impl UserKeyIterator {
                 return Ok(());
             }
             let user_key = user_key(self.iter.key());
-            let timestamp = timestamp(self.iter.key());
-            if self.key != user_key || self.timestamp < timestamp {
+            let sequence = sequence(self.iter.key());
+            if self.key != user_key || self.sequence < sequence {
                 return self.iter.next().await;
             }
         }
@@ -175,7 +175,7 @@ mod tests {
     use crate::iterator::SstableIterator;
     use crate::MemObjectStore;
 
-    async fn build_iterator_for_test(timestamp: u64) -> UserKeyIterator {
+    async fn build_iterator_for_test(sequence: u64) -> UserKeyIterator {
         let object_store = Arc::new(MemObjectStore::default());
         let block_cache = BlockCache::new(65536);
         let options = SstableStoreOptions {
@@ -194,13 +194,13 @@ mod tests {
             .unwrap();
 
         let si = SstableIterator::new(sstable_store, sstable, CachePolicy::Fill);
-        UserKeyIterator::new(Box::new(si), timestamp)
+        UserKeyIterator::new(Box::new(si), sequence)
     }
 
     fn build_sstable_for_test() -> (SstableMeta, Vec<u8>) {
         let options = SstableBuilderOptions::default();
         let mut builder = SstableBuilder::new(options);
-        // Negative numbers stands for delete on the absolute number timestamp.
+        // Negative numbers stands for delete on the absolute number sequence.
         for (k, ts) in [
             (2, vec![-3, 2]),
             (3, vec![4, 3, 2]),

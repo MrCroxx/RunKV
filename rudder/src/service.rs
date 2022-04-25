@@ -30,7 +30,7 @@ pub struct Rudder {
     /// Manifest of sstables.
     version_manager: VersionManager,
     channel_pool: ChannelPool,
-    /// The smallest pinned timestamp. Any data whose timestamp is smaller than `watermark` can be
+    /// The smallest pinned sequence. Any data whose sequence is smaller than `watermark` can be
     /// safely delete.
     ///
     /// `wheel node` maintains its own watermark, and `rudder node` collects watermarks from each

@@ -277,7 +277,7 @@ impl SstableBuilder {
     }
 
     /// Add kv pair to sstable.
-    pub fn add(&mut self, user_key: &[u8], timestamp: u64, value: Option<&[u8]>) -> Result<()> {
+    pub fn add(&mut self, user_key: &[u8], sequence: u64, value: Option<&[u8]>) -> Result<()> {
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_none() {
             self.block_builder = Some(BlockBuilder::new(BlockBuilderOptions {
@@ -294,7 +294,7 @@ impl SstableBuilder {
         }
 
         let block_builder = self.block_builder.as_mut().unwrap();
-        let full_key = full_key(user_key, timestamp);
+        let full_key = full_key(user_key, sequence);
 
         block_builder.add(&full_key, &raw_value(value));
 

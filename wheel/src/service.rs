@@ -27,7 +27,6 @@ use tracing::trace;
 
 use crate::components::command::Command;
 use crate::components::gear::Gear;
-use crate::components::lsm_tree::ObjectStoreLsmTree;
 use crate::components::network::RaftNetwork;
 use crate::components::raft_manager::RaftManager;
 use crate::components::Raft;
@@ -39,7 +38,6 @@ fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
 }
 
 pub struct WheelOptions {
-    pub lsm_tree: ObjectStoreLsmTree,
     pub meta_store: MetaStoreRef,
     pub channel_pool: ChannelPool,
     pub raft_log_store: RaftLogStore,
@@ -49,7 +47,6 @@ pub struct WheelOptions {
 }
 
 struct WheelInner {
-    _lsm_tree: ObjectStoreLsmTree,
     meta_store: MetaStoreRef,
     channel_pool: ChannelPool,
     _raft_log_store: RaftLogStore,
@@ -68,7 +65,6 @@ impl Wheel {
     pub fn new(options: WheelOptions) -> Self {
         Self {
             inner: Arc::new(WheelInner {
-                _lsm_tree: options.lsm_tree,
                 meta_store: options.meta_store,
                 channel_pool: options.channel_pool,
                 _raft_log_store: options.raft_log_store,

@@ -30,9 +30,7 @@ use service::{Wheel, WheelOptions};
 use tonic::transport::Server;
 use tracing::info;
 use worker::heartbeater::{Heartbeater, HeartbeaterOptions};
-use worker::sstable_uploader::{SstableUploader, SstableUploaderOptions};
 
-use crate::components::lsm_tree::{ObjectStoreLsmTree, ObjectStoreLsmTreeOptions};
 use crate::config::WheelConfig;
 
 pub async fn bootstrap_wheel(
@@ -55,9 +53,7 @@ pub async fn bootstrap_wheel(
         .map_err(Error::err)
 }
 
-pub async fn build_wheel(
-    config: &WheelConfig,
-) -> Result<(Wheel, ObjectStoreLsmTree, Vec<BoxedWorker>)> {
+pub async fn build_wheel(config: &WheelConfig) -> Result<(Wheel, Vec<BoxedWorker>)> {
     let object_store = build_object_store(config).await;
     build_wheel_with_object_store(config, object_store).await
 }
@@ -65,28 +61,18 @@ pub async fn build_wheel(
 pub async fn build_wheel_with_object_store(
     config: &WheelConfig,
     object_store: ObjectStoreRef,
-) -> Result<(Wheel, ObjectStoreLsmTree, Vec<BoxedWorker>)> {
+) -> Result<(Wheel, Vec<BoxedWorker>)> {
     let sstable_store = build_sstable_store(config, object_store)?;
 
     let version_manager = build_version_manager(config, sstable_store.clone())?;
 
-    let lsm_tree = build_lsm_tree(config, sstable_store.clone(), version_manager.clone())?;
-
     let channel_pool = build_channel_pool(config);
-
-    let sstable_uploader = build_sstable_uploader(
-        config,
-        lsm_tree.clone(),
-        sstable_store,
-        version_manager.clone(),
-        channel_pool.clone(),
-    )?;
 
     let meta_store = build_meta_store()?;
 
     let version_syncer = build_heartbeater(
         config,
-        version_manager,
+        version_manager.clone(),
         meta_store.clone(),
         channel_pool.clone(),
     )?;
@@ -97,14 +83,15 @@ pub async fn build_wheel_with_object_store(
     let raft_network = build_raft_network(channel_pool.clone());
     let raft_manager = build_raft_manager(
         config,
-        lsm_tree.clone(),
         raft_log_store.clone(),
         raft_network.clone(),
         txn_notify_pool.clone(),
-    );
+        version_manager.clone(),
+        sstable_store.clone(),
+        channel_pool.clone(),
+    )?;
 
     let options = WheelOptions {
-        lsm_tree: lsm_tree.clone(),
         meta_store,
         channel_pool,
         raft_log_store,
@@ -115,11 +102,7 @@ pub async fn build_wheel_with_object_store(
 
     let wheel = Wheel::new(options);
 
-    Ok((
-        wheel,
-        lsm_tree,
-        vec![Box::new(sstable_uploader), Box::new(version_syncer)],
-    ))
+    Ok((wheel, vec![Box::new(version_syncer)]))
 }
 
 async fn build_object_store(config: &WheelConfig) -> ObjectStoreRef {
@@ -173,67 +156,6 @@ fn build_version_manager(
         sstable_store,
     };
     Ok(VersionManager::new(version_manager_options))
-}
-
-fn build_lsm_tree(
-    config: &WheelConfig,
-    sstable_store: SstableStoreRef,
-    version_manager: VersionManager,
-) -> Result<ObjectStoreLsmTree> {
-    let lsm_tree_options = ObjectStoreLsmTreeOptions {
-        sstable_store,
-        write_buffer_capacity: config
-            .buffer
-            .write_buffer_capacity
-            .parse::<ByteSize>()
-            .map_err(Error::config_err)?
-            .0 as usize,
-        version_manager,
-    };
-    Ok(ObjectStoreLsmTree::new(lsm_tree_options))
-}
-
-fn build_sstable_uploader(
-    config: &WheelConfig,
-    lsm_tree: ObjectStoreLsmTree,
-    sstable_store: SstableStoreRef,
-    version_manager: VersionManager,
-    channel_pool: ChannelPool,
-) -> Result<SstableUploader> {
-    let sstable_uploader = SstableUploaderOptions {
-        node_id: config.id,
-        lsm_tree,
-        sstable_store,
-        version_manager,
-        sstable_capacity: config
-            .lsm_tree
-            .sstable_capacity
-            .parse::<ByteSize>()
-            .map_err(Error::config_err)?
-            .0 as usize,
-        block_capacity: config
-            .lsm_tree
-            .block_capacity
-            .parse::<ByteSize>()
-            .map_err(Error::config_err)?
-            .0 as usize,
-        restart_interval: config.lsm_tree.restart_interval,
-        bloom_false_positive: config.lsm_tree.bloom_false_positive,
-        compression_algorithm: config
-            .lsm_tree
-            .levels_options
-            .get(0)
-            .ok_or_else(|| Error::Other("no L0 in lsm_tree.levels_options".to_string()))?
-            .compression_algorithm,
-        poll_interval: config
-            .poll_interval
-            .parse::<humantime::Duration>()
-            .map_err(Error::config_err)?
-            .into(),
-        channel_pool,
-        rudder_node_id: config.rudder.id,
-    };
-    Ok(SstableUploader::new(sstable_uploader))
 }
 
 fn build_heartbeater(
@@ -297,19 +219,57 @@ fn build_raft_network(channel_pool: ChannelPool) -> RaftNetwork {
 
 fn build_raft_manager(
     config: &WheelConfig,
-    lsm_tree: ObjectStoreLsmTree,
     raft_log_store: RaftLogStore,
     raft_network: RaftNetwork,
     txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
-) -> RaftManager {
+    version_manager: VersionManager,
+    sstable_store: SstableStoreRef,
+    channel_pool: ChannelPool,
+) -> Result<RaftManager> {
     let raft_manager_options = RaftManagerOptions {
         node: config.id,
-        lsm_tree,
+        rudder_node_id: config.rudder.id,
         raft_log_store,
         raft_network,
         txn_notify_pool,
+        version_manager,
+        sstable_store,
+        channel_pool,
+        lsm_tree_options: crate::components::raft_manager::LsmTreeOptions {
+            shard_write_buffer_capacity: config
+                .buffer
+                .write_buffer_capacity
+                .parse::<ByteSize>()
+                .map_err(Error::config_err)?
+                .0 as usize,
+            sstable_capacity: config
+                .lsm_tree
+                .sstable_capacity
+                .parse::<ByteSize>()
+                .map_err(Error::config_err)?
+                .0 as usize,
+            block_capacity: config
+                .lsm_tree
+                .block_capacity
+                .parse::<ByteSize>()
+                .map_err(Error::config_err)?
+                .0 as usize,
+            restart_interval: config.lsm_tree.restart_interval,
+            bloom_false_positive: config.lsm_tree.bloom_false_positive,
+            compression_algorithm: config
+                .lsm_tree
+                .levels_options
+                .get(0)
+                .ok_or_else(|| Error::Other("no L0 in lsm_tree.levels_options".to_string()))?
+                .compression_algorithm,
+            poll_interval: config
+                .poll_interval
+                .parse::<humantime::Duration>()
+                .map_err(Error::config_err)?
+                .into(),
+        },
     };
-    RaftManager::new(raft_manager_options)
+    Ok(RaftManager::new(raft_manager_options))
 }
 
 fn build_txn_notify_pool() -> NotifyPool<u64, Result<TxnResponse>> {

@@ -3,7 +3,7 @@ use bytes::Bytes;
 
 use super::{Iterator, Seek};
 use crate::components::{IterRef, Memtable, Skiplist};
-use crate::utils::{full_key, timestamp, user_key, value, FullKeyComparator};
+use crate::utils::{full_key, sequence, user_key, value, FullKeyComparator};
 use crate::Result;
 
 pub struct MemtableIterator {
@@ -12,17 +12,17 @@ pub struct MemtableIterator {
     /// Note: `iter` is always valid when [`MemtableIterator`] is valid.
     iter: IterRef<Skiplist<FullKeyComparator>, FullKeyComparator>,
     // TODO: Should replaced with a `Snapshot` handler with epoch inside to pin the sst?
-    /// Timestamp for snapshot read.
-    timestamp: u64,
+    /// Sequence for snapshot read.
+    sequence: u64,
     /// Current user key.
     key: Bytes,
 }
 
 impl MemtableIterator {
-    pub fn new(memtable: &Memtable, timestamp: u64) -> Self {
+    pub fn new(memtable: &Memtable, sequence: u64) -> Self {
         Self {
             iter: memtable.iter(),
-            timestamp,
+            sequence,
             key: Bytes::default(),
         }
     }
@@ -35,15 +35,15 @@ impl MemtableIterator {
                 return found;
             }
             let uk = user_key(self.iter.key());
-            let ts = timestamp(self.iter.key());
-            if key == uk && self.timestamp >= ts {
+            let ts = sequence(self.iter.key());
+            if key == uk && self.sequence >= ts {
                 found = true;
             }
-            if self.timestamp >= ts && value(self.iter.value()).is_none() {
+            if self.sequence >= ts && value(self.iter.value()).is_none() {
                 // Get tombstone, skip the former versions of this user key.
                 self.key = Bytes::from(uk.to_vec());
             }
-            if self.timestamp >= ts && uk != self.key {
+            if self.sequence >= ts && uk != self.key {
                 self.key = Bytes::from(uk.to_vec());
                 return found;
             }
@@ -54,18 +54,18 @@ impl MemtableIterator {
 
     /// Note: Ensure that the current state is valid.
     fn prev_inner(&mut self, key: &[u8]) -> bool {
-        // Find the first visiable user key that not equals current user key based on timestamp.
+        // Find the first visiable user key that not equals current user key based on sequence.
         let mut found = false;
         loop {
             if !self.iter.valid() {
                 return found;
             }
             let uk = user_key(self.iter.key());
-            let ts = timestamp(self.iter.key());
-            if key == uk && self.timestamp >= ts {
+            let ts = sequence(self.iter.key());
+            if key == uk && self.sequence >= ts {
                 found = true;
             }
-            if self.timestamp >= ts && uk != self.key {
+            if self.sequence >= ts && uk != self.key {
                 self.key = Bytes::from(uk.to_vec());
                 self.seek_latest_visiable_current_user_key();
                 match value(self.iter.value()) {
@@ -85,7 +85,7 @@ impl MemtableIterator {
     /// Move backward until reach the first visiable entry of the current user key.
     ///
     /// Note: Ensure that the current state is valid. And the current user key must have at least
-    /// one visiable version based on timestamp.
+    /// one visiable version based on sequence.
     fn seek_latest_visiable_current_user_key(&mut self) {
         loop {
             self.iter.prev();
@@ -94,8 +94,8 @@ impl MemtableIterator {
                 return;
             }
             let user_key = user_key(self.iter.key());
-            let timestamp = timestamp(self.iter.key());
-            if self.key != user_key || self.timestamp < timestamp {
+            let sequence = sequence(self.iter.key());
+            if self.key != user_key || self.sequence < sequence {
                 self.iter.next();
                 return;
             }
@@ -200,9 +200,9 @@ mod tests {
         memtable
     }
 
-    fn build_iterator_for_test(timestamp: u64) -> MemtableIterator {
+    fn build_iterator_for_test(sequence: u64) -> MemtableIterator {
         let memtable = build_memtable_for_test();
-        MemtableIterator::new(&memtable, timestamp)
+        MemtableIterator::new(&memtable, sequence)
     }
 
     #[test(tokio::test)]

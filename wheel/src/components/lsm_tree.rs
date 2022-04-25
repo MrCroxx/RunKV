@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -25,15 +25,14 @@ pub struct ObjectStoreLsmTreeOptions {
 
 pub struct MemtableWithCtx {
     pub table: Memtable,
-    /// `{ raft group -> index }`
-    pub ctx: BTreeMap<u64, u64>,
+    pub max_applied_index: u64,
 }
 
 impl MemtableWithCtx {
     fn new(capacity: usize) -> Self {
         Self {
             table: Memtable::new(capacity),
-            ctx: BTreeMap::default(),
+            max_applied_index: 0,
         }
     }
 }
@@ -76,7 +75,7 @@ impl ObjectStoreLsmTreeCore {
         }
     }
 
-    async fn get(&self, key: &Bytes, timestamp: u64) -> Result<Option<Bytes>> {
+    async fn get(&self, key: &Bytes, sequence: u64) -> Result<Option<Bytes>> {
         // Prevent current memtable and immutable memtable vec being modified.
         let memtables = {
             let guard = self.memtables.read();
@@ -96,7 +95,7 @@ impl ObjectStoreLsmTreeCore {
         // Seek from memtables.
         for (i, memtable) in memtables.iter().enumerate() {
             trace!("find key {:?} in memtable {}", key, i);
-            if let Some(raw) = memtable.get_raw(key, timestamp) {
+            if let Some(raw) = memtable.get_raw(key, sequence) {
                 return Ok(value(&raw).map(Bytes::copy_from_slice));
             }
         }
@@ -135,7 +134,7 @@ impl ObjectStoreLsmTreeCore {
                         ));
                         iters.push(iter);
                     }
-                    UserKeyIterator::new(Box::new(MergeIterator::new(iters)), timestamp)
+                    UserKeyIterator::new(Box::new(MergeIterator::new(iters)), sequence)
                 }
                 LevelCompactionStrategy::NonOverlap => {
                     assert_eq!(level.len(), 1);
@@ -146,7 +145,7 @@ impl ObjectStoreLsmTreeCore {
                             sst,
                             CachePolicy::Fill,
                         )),
-                        timestamp,
+                        sequence,
                     )
                 }
             };
@@ -165,9 +164,8 @@ impl ObjectStoreLsmTreeCore {
         &self,
         key: &Bytes,
         value: Option<&Bytes>,
-        timestamp: u64,
-        group: u64,
-        index: u64,
+        sequence: u64,
+        apply_index: u64,
     ) -> Result<()> {
         // = key len + value len
         // + skiplist node height (8B) + skiplist node tower (4 * MAX)
@@ -196,8 +194,9 @@ impl ObjectStoreLsmTreeCore {
             std::mem::swap(&mut imm, &mut guard.memtable);
             guard.immutable_memtables.push_front(imm);
         }
-        guard.memtable.table.put(key, value, timestamp);
-        *guard.memtable.ctx.entry(group).or_default() = index;
+        guard.memtable.table.put(key, value, sequence);
+        assert!(apply_index >= guard.memtable.max_applied_index);
+        guard.memtable.max_applied_index = apply_index;
         drop(guard);
 
         Ok(())
@@ -237,46 +236,45 @@ impl ObjectStoreLsmTree {
         }
     }
 
-    /// Put a new `key` `value` pair into LSM-Tree with given `timestamp`.
+    /// Put a new `key` `value` pair into LSM-Tree with given `sequence`.
     ///
     /// # Safety
     ///
-    /// The interface exposes `timestamp` to user for the compatibility with upper system. It's
-    /// caller's responsibility to ensure that the new timestamp is higher than the old one on the
+    /// The interface exposes `sequence` to user for the compatibility with upper system. It's
+    /// caller's responsibility to ensure that the new sequence is higher than the old one on the
     /// same key. Otherwise there will be consistency problems.
     pub async fn put(
         &self,
         key: &Bytes,
         value: &Bytes,
-        timestamp: u64,
-        group: u64,
-        index: u64,
+        sequence: u64,
+        apply_index: u64,
     ) -> Result<()> {
         self.inner
-            .write(key, Some(value), timestamp, group, index)
+            .write(key, Some(value), sequence, apply_index)
             .await
     }
 
-    /// Delete a the given `key` in LSM-Tree by tombstone with given `timestamp`.
+    /// Delete a the given `key` in LSM-Tree by tombstone with given `sequence`.
     ///
     /// # Safety
     ///
-    /// The interface exposes `timestamp` to user for the compatibility with upper system. It's
-    /// caller's responsibility to ensure that the new timestamp is higher than the old one on the
+    /// The interface exposes `sequence` to user for the compatibility with upper system. It's
+    /// caller's responsibility to ensure that the new sequence is higher than the old one on the
     /// same key. Otherwise there will be consistency problems.
-    pub async fn delete(&self, key: &Bytes, timestamp: u64, group: u64, index: u64) -> Result<()> {
-        self.inner.write(key, None, timestamp, group, index).await
+    pub async fn delete(&self, key: &Bytes, sequence: u64, apply_index: u64) -> Result<()> {
+        self.inner.write(key, None, sequence, apply_index).await
     }
 
-    /// Get the value of the given `key` in LSM-Tree with given `timestamp`.
+    /// Get the value of the given `key` in LSM-Tree with given `sequence`.
     ///
     /// # Safety
     ///
-    /// The interface exposes `timestamp` to user for the compatibility with upper system. It's
-    /// caller's responsibility to ensure that the new timestamp is higher than the old one on the
+    /// The interface exposes `sequence` to user for the compatibility with upper system. It's
+    /// caller's responsibility to ensure that the new sequence is higher than the old one on the
     /// same key. Otherwise there will be consistency problems.
-    pub async fn get(&self, key: &Bytes, timestamp: u64) -> Result<Option<Bytes>> {
-        self.inner.get(key, timestamp).await
+    pub async fn get(&self, key: &Bytes, sequence: u64) -> Result<Option<Bytes>> {
+        self.inner.get(key, sequence).await
     }
 
     pub fn get_oldest_immutable_memtable(&self) -> Option<Memtable> {
@@ -285,48 +283,5 @@ impl ObjectStoreLsmTree {
 
     pub fn drop_oldest_immutable_memtable(&self) -> MemtableWithCtx {
         self.inner.drop_oldest_immutable_memtable()
-    }
-}
-
-#[cfg(test)]
-pub mod tests {
-    use std::sync::Arc;
-
-    use runkv_common::coding::CompressionAlgorithm;
-    use runkv_common::config::LevelOptions;
-    use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions};
-    use runkv_storage::manifest::VersionManagerOptions;
-    use runkv_storage::MemObjectStore;
-
-    use super::*;
-
-    pub fn build_test_lsm_tree() -> ObjectStoreLsmTree {
-        let object_store = Arc::new(MemObjectStore::default());
-        let block_cache = BlockCache::new(16 << 10);
-        let sstable_store = Arc::new(SstableStore::new(SstableStoreOptions {
-            path: "path".to_string(),
-            object_store,
-            block_cache,
-            meta_cache_capacity: 4 << 10,
-        }));
-        let version_manager = VersionManager::new(VersionManagerOptions {
-            levels_options: vec![
-                LevelOptions {
-                    compaction_strategy: LevelCompactionStrategy::Overlap,
-                    compression_algorithm: CompressionAlgorithm::None,
-                },
-                LevelOptions {
-                    compaction_strategy: LevelCompactionStrategy::NonOverlap,
-                    compression_algorithm: CompressionAlgorithm::None,
-                },
-            ],
-            levels: vec![vec![]; 2],
-            sstable_store: sstable_store.clone(),
-        });
-        ObjectStoreLsmTree::new(ObjectStoreLsmTreeOptions {
-            sstable_store,
-            write_buffer_capacity: 4 << 10,
-            version_manager,
-        })
     }
 }
