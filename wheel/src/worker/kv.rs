@@ -9,7 +9,8 @@ use runkv_common::notify_pool::NotifyPool;
 use runkv_common::Worker;
 use runkv_proto::kv::{
     kv_op_request, kv_op_response, BytesSerde, DeleteRequest, DeleteResponse, GetRequest,
-    GetResponse, KvOpResponse, PutRequest, PutResponse, TxnRequest, TxnResponse,
+    GetResponse, KvOpResponse, PutRequest, PutResponse, SnapshotRequest, SnapshotResponse,
+    TxnRequest, TxnResponse,
 };
 use tokio::sync::mpsc;
 use tracing::{trace, warn};
@@ -226,7 +227,7 @@ impl Applier {
                 done + 1,
                 done + 1 + entries.len() as u64
             );
-            let done = done + entries.len() as u64;
+            let new_done = done + entries.len() as u64;
 
             let mut cmds = Vec::with_capacity(entries.len());
             for (index, entry) in
@@ -246,78 +247,76 @@ impl Applier {
             // TODO: Handle txns responses.
             for (index, cmd) in cmds {
                 match cmd {
-                    Command::TxnRequest { id, request: req } => {
-                        let rsp = self.txn(req, index).await;
-                        if let Err(e) = self.txn_notify_pool.notify(id, rsp) {
+                    Command::TxnRequest {
+                        request_id,
+                        sequence,
+                        request: req,
+                    } => {
+                        let rsp = self.txn(req, index, sequence).await;
+                        if let Err(e) = self.txn_notify_pool.notify(request_id, rsp) {
                             warn!("error raised when notify txn result: {}", e);
                         }
                     }
-                    Command::CompactRaftLog(index) => {
-                        self.compact_raft_log(index).await?;
+                    Command::CompactRaftLog { index, sequence } => {
+                        self.compact_raft_log(index, sequence).await?;
                     }
                 }
             }
 
-            self.done_index.store(done, Ordering::Release);
-            self.write_done_index(done).await?;
+            self.done_index.store(new_done, Ordering::Release);
+            self.write_done_index(new_done).await?;
         }
     }
 
-    async fn txn(&self, request: TxnRequest, index: u64) -> Result<TxnResponse> {
+    async fn txn(&self, request: TxnRequest, index: u64, sequence: u64) -> Result<TxnResponse> {
         let mut ops = Vec::with_capacity(request.ops.len());
         for op in request.ops {
             let op = match op.request.unwrap() {
-                kv_op_request::Request::Get(GetRequest { key }) => {
+                kv_op_request::Request::Get(GetRequest { key, sequence: seq }) => {
                     kv_op_response::Response::Get(GetResponse {
-                        value: self.get(key).await?.unwrap_or_default(),
+                        value: self
+                            .get(key, if seq > 0 { seq } else { sequence })
+                            .await?
+                            .unwrap_or_default(),
                     })
                 }
                 kv_op_request::Request::Put(PutRequest { key, value }) => {
-                    self.put(key, value, index).await?;
+                    self.put(key, value, index, sequence).await?;
                     kv_op_response::Response::Put(PutResponse::default())
                 }
                 kv_op_request::Request::Delete(DeleteRequest { key }) => {
-                    self.delete(key, index).await?;
+                    self.delete(key, index, sequence).await?;
                     kv_op_response::Response::Delete(DeleteResponse::default())
+                }
+                kv_op_request::Request::Snapshot(SnapshotRequest { .. }) => {
+                    kv_op_response::Response::Snapshot(SnapshotResponse { sequence })
                 }
             };
             ops.push(KvOpResponse { response: Some(op) });
         }
-        // TODO: Impl me.
-        // TODO: Impl me.
-        // TODO: Impl me.
         Ok(TxnResponse { ops })
     }
 
-    async fn get(&self, key: Vec<u8>) -> Result<Option<Vec<u8>>> {
+    async fn get(&self, key: Vec<u8>, sequence: u64) -> Result<Option<Vec<u8>>> {
         let key = Bytes::from(key);
-        // TODO: SEQUENCE!!!
-        // TODO: SEQUENCE!!!
-        // TODO: SEQUENCE!!!
-        let result = self.lsm_tree.get(&key, 0).await?;
+        let result = self.lsm_tree.get(&key, sequence).await?;
         Ok(result.map(|v| v.to_vec()))
     }
 
-    async fn put(&self, key: Vec<u8>, value: Vec<u8>, index: u64) -> Result<()> {
+    async fn put(&self, key: Vec<u8>, value: Vec<u8>, index: u64, sequence: u64) -> Result<()> {
         let key = Bytes::from(key);
         let value = Bytes::from(value);
-        // TODO: SEQUENCE!!!
-        // TODO: SEQUENCE!!!
-        // TODO: SEQUENCE!!!
-        self.lsm_tree.put(&key, &value, 0, index).await?;
+        self.lsm_tree.put(&key, &value, sequence, index).await?;
         Ok(())
     }
 
-    async fn delete(&self, key: Vec<u8>, index: u64) -> Result<()> {
+    async fn delete(&self, key: Vec<u8>, index: u64, sequence: u64) -> Result<()> {
         let key = Bytes::from(key);
-        // TODO: SEQUENCE!!!
-        // TODO: SEQUENCE!!!
-        // TODO: SEQUENCE!!!
-        self.lsm_tree.delete(&key, 0, index).await?;
+        self.lsm_tree.delete(&key, sequence, index).await?;
         Ok(())
     }
 
-    async fn compact_raft_log(&self, index: u64) -> Result<()> {
+    async fn compact_raft_log(&self, index: u64, _sequence: u64) -> Result<()> {
         self.raft_group_log_store.compact(index).await
     }
 

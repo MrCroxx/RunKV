@@ -14,6 +14,8 @@ use rand::{thread_rng, Rng};
 use runkv_exhauster::config::ExhausterConfig;
 use runkv_exhauster::{bootstrap_exhauster, build_exhauster_with_object_store};
 use runkv_proto::common::Endpoint;
+use runkv_proto::kv::kv_service_client::KvServiceClient;
+use runkv_proto::kv::{DeleteRequest, GetRequest, PutRequest};
 use runkv_proto::meta::KeyRange;
 use runkv_proto::wheel::wheel_service_client::WheelServiceClient;
 use runkv_proto::wheel::{AddEndpointsRequest, AddKeyRangeRequest, InitializeRaftGroupRequest};
@@ -23,6 +25,7 @@ use runkv_storage::MemObjectStore;
 use runkv_wheel::config::WheelConfig;
 use runkv_wheel::{bootstrap_wheel, build_wheel_with_object_store};
 use test_log::test;
+use tonic::transport::Channel;
 use tonic::Request;
 use tracing::trace;
 
@@ -126,6 +129,86 @@ async fn test_concurrent_put_get() {
 
     // TODO: Restore concurrent test with [`KvServiceClient`].
 
+    let channel = tonic::transport::Endpoint::from_shared(format!(
+        "http://{}:{}",
+        wheel_config.host, wheel_config.port
+    ))
+    .unwrap()
+    .connect()
+    .await
+    .unwrap();
+
+    let futures = (1..=100)
+        .map(|i| {
+            let channel_clone = channel.clone();
+            async move {
+                let mut rng = thread_rng();
+                let mut client = KvServiceClient::new(channel_clone);
+                tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                trace!("put {:?}", key(i));
+                client
+                    .put(Request::new(PutRequest {
+                        key: key(i),
+                        value: value(i),
+                    }))
+                    .await
+                    .unwrap();
+                tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                trace!("get {:?}", key(i));
+                assert_eq!(
+                    client
+                        .get(Request::new(GetRequest {
+                            key: key(i),
+                            sequence: 0,
+                        }))
+                        .await
+                        .unwrap()
+                        .into_inner()
+                        .value,
+                    value(i)
+                );
+                tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                trace!("delete {:?}", key(i));
+                client
+                    .delete(Request::new(DeleteRequest { key: key(i) }))
+                    .await
+                    .unwrap();
+                tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                trace!("get {:?}", key(i));
+                assert_eq!(
+                    client
+                        .get(Request::new(GetRequest {
+                            key: key(i),
+                            sequence: 0,
+                        }))
+                        .await
+                        .unwrap()
+                        .into_inner()
+                        .value,
+                    vec![]
+                );
+                // tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                //             trace!("get {:?} at {}", key(i), 7);
+                //             assert_eq!(lsmtree_clone.get(&key(i), 7).await.unwrap(), None);
+                //
+                // tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                //             lsmtree_clone
+                //                 .put(&key(i), &value(i), 9, 0, 0)
+                //                 .await
+                //                 .unwrap();
+                //             trace!("put {:?} at {}", key(i), 9);
+                //
+                // tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                //             trace!("get {:?} at {}", key(i), 11);
+                //             assert_eq!(
+                //                 lsmtree_clone.get(&key(i), 11).await.unwrap(),
+                //                 Some(value(i))
+                //             );
+            }
+        })
+        .collect_vec();
+    future::join_all(futures).await;
+
     // let futures = (1..=10000)
     //     .map(|i| {
     //         let lsmtree_clone = lsmtree.clone();
@@ -169,12 +252,12 @@ async fn test_concurrent_put_get() {
     drop(tempdir)
 }
 
-fn key(i: u64) -> Bytes {
-    Bytes::from(format!("k{:064}", i))
+fn key(i: u64) -> Vec<u8> {
+    format!("k{:064}", i).as_bytes().to_vec()
 }
 
-fn value(i: u64) -> Bytes {
-    Bytes::from(format!("v{:064}", i))
+fn value(i: u64) -> Vec<u8> {
+    format!("v{:064}", i).as_bytes().to_vec()
 }
 
 fn concat_toml(path1: &str, path2: &str) -> String {

@@ -1,11 +1,13 @@
 use std::collections::btree_map::BTreeMap;
 use std::collections::BTreeSet;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
 
 use runkv_common::channel_pool::ChannelPool;
 use runkv_common::coding::CompressionAlgorithm;
 use runkv_common::notify_pool::NotifyPool;
+use runkv_common::time::rtimestamp;
 use runkv_common::Worker;
 use runkv_proto::kv::TxnResponse;
 use runkv_storage::components::SstableStoreRef;
@@ -52,6 +54,8 @@ struct RaftManagerInner {
     rafts: BTreeMap<u64, Raft<Gear>>,
     /// `{raft node id -> ObjectStoreLsmTree }`
     lsm_trees: BTreeMap<u64, ObjectStoreLsmTree>,
+    /// `{raft node id -> sequence }`
+    sequences: BTreeMap<u64, Arc<AtomicU64>>,
 }
 
 #[derive(Clone)]
@@ -86,6 +90,7 @@ impl RaftManager {
             inner: Arc::new(RwLock::new(RaftManagerInner {
                 rafts: BTreeMap::default(),
                 lsm_trees: BTreeMap::default(),
+                sequences: BTreeMap::default(),
             })),
         }
     }
@@ -109,6 +114,12 @@ impl RaftManager {
             }
             .into());
         }
+
+        // Initialize sequence.
+        // TODO: Use max sequence from WAL.
+        inner
+            .sequences
+            .insert(raft_node, Arc::new(AtomicU64::new(rtimestamp())));
 
         // Build LSM-tree.
         let lsm_tree_options = ObjectStoreLsmTreeOptions {
@@ -146,17 +157,18 @@ impl RaftManager {
         let raft_group_log_store = RaftGroupLogStore::new(group, self.raft_log_store.clone(), gear);
         let config = openraft::Config {
             cluster_name: raft_group_name(group),
-            // election_timeout_min: todo!(),
-            // election_timeout_max: todo!(),
-            // heartbeat_interval: todo!(),
-            // install_snapshot_timeout: todo!(),
-            // max_payload_entries: todo!(),
-            // replication_lag_threshold: todo!(),
+            election_timeout_min: 1000,
+            election_timeout_max: 2000,
+            heartbeat_interval: 100,
+            install_snapshot_timeout: 2000,
+            max_payload_entries: 1000,
+            replication_lag_threshold: 10000,
             // snapshot_policy: todo!(),
             // snapshot_max_chunk_size: todo!(),
-            // max_applied_log_to_keep: todo!(),
+            max_applied_log_to_keep: 10000,
             ..Default::default()
         };
+
         let config = config.validate().map_err(RaftError::err)?;
         let config = Arc::new(config);
 
@@ -190,6 +202,17 @@ impl RaftManager {
     pub async fn get_raft_node(&self, raft_node: u64) -> Result<Raft<Gear>> {
         let inner = self.inner.read().await;
         inner.rafts.get(&raft_node).cloned().ok_or_else(|| {
+            RaftError::RaftNodeNotExists {
+                raft_node,
+                node: self.node,
+            }
+            .into()
+        })
+    }
+
+    pub async fn get_sequence(&self, raft_node: u64) -> Result<Arc<AtomicU64>> {
+        let inner = self.inner.read().await;
+        inner.sequences.get(&raft_node).cloned().ok_or_else(|| {
             RaftError::RaftNodeNotExists {
                 raft_node,
                 node: self.node,
@@ -288,7 +311,8 @@ mod tests {
 
         let rx = txn_notify_pool.register(1).unwrap();
         let cmd = Command::TxnRequest {
-            id: 1,
+            request_id: 1,
+            sequence: 1,
             request: TxnRequest { ops: vec![] },
         };
 
