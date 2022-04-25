@@ -1,43 +1,73 @@
 use std::collections::btree_map::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::time::Duration;
 
+use runkv_common::channel_pool::ChannelPool;
+use runkv_common::coding::CompressionAlgorithm;
 use runkv_common::notify_pool::NotifyPool;
 use runkv_common::Worker;
 use runkv_proto::kv::TxnResponse;
+use runkv_storage::components::SstableStoreRef;
+use runkv_storage::manifest::VersionManager;
 use runkv_storage::raft_log_store::RaftLogStore;
 use tokio::sync::{mpsc, RwLock};
 
 use super::gear::Gear;
-use super::lsm_tree::ObjectStoreLsmTree;
+use super::lsm_tree::{ObjectStoreLsmTree, ObjectStoreLsmTreeOptions};
 use super::network::RaftNetwork;
 use super::raft_log_store::RaftGroupLogStore;
 use super::Raft;
 use crate::error::{Error, RaftError, Result};
 use crate::worker::kv::{KvWorker, KvWorkerOptions, DONE_INDEX_KEY};
+use crate::worker::sstable_uploader::{SstableUploader, SstableUploaderOptions};
 
 const RAFT_GROUP_NAME_PREFIX: &str = "raft-group-";
 
+#[derive(Clone)]
+pub struct LsmTreeOptions {
+    pub shard_write_buffer_capacity: usize,
+    pub sstable_capacity: usize,
+    pub block_capacity: usize,
+    pub restart_interval: usize,
+    pub bloom_false_positive: f64,
+    pub compression_algorithm: CompressionAlgorithm,
+    pub poll_interval: Duration,
+}
+
 pub struct RaftManagerOptions {
     pub node: u64,
-    pub lsm_tree: ObjectStoreLsmTree,
+    pub rudder_node_id: u64,
     pub raft_log_store: RaftLogStore,
     pub raft_network: RaftNetwork,
     pub txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
+    pub version_manager: VersionManager,
+    pub sstable_store: SstableStoreRef,
+    pub channel_pool: ChannelPool,
+    pub lsm_tree_options: LsmTreeOptions,
 }
 
 struct RaftManagerInner {
     /// `{ raft node id -> Raft }`.
     rafts: BTreeMap<u64, Raft<Gear>>,
+    /// `{raft node id -> ObjectStoreLsmTree }`
+    lsm_trees: BTreeMap<u64, ObjectStoreLsmTree>,
 }
 
 #[derive(Clone)]
 pub struct RaftManager {
     node: u64,
-    lsm_tree: ObjectStoreLsmTree,
+    rudder_node_id: u64,
+
     raft_log_store: RaftLogStore,
     raft_network: RaftNetwork,
     txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
+    version_manager: VersionManager,
+    sstable_store: SstableStoreRef,
+    channel_pool: ChannelPool,
+
+    lsm_tree_options: LsmTreeOptions,
+
     inner: Arc<RwLock<RaftManagerInner>>,
 }
 
@@ -45,12 +75,17 @@ impl RaftManager {
     pub fn new(options: RaftManagerOptions) -> Self {
         Self {
             node: options.node,
-            lsm_tree: options.lsm_tree,
+            rudder_node_id: options.rudder_node_id,
             raft_log_store: options.raft_log_store,
             raft_network: options.raft_network,
             txn_notify_pool: options.txn_notify_pool,
+            version_manager: options.version_manager,
+            sstable_store: options.sstable_store,
+            lsm_tree_options: options.lsm_tree_options,
+            channel_pool: options.channel_pool,
             inner: Arc::new(RwLock::new(RaftManagerInner {
                 rafts: BTreeMap::default(),
+                lsm_trees: BTreeMap::default(),
             })),
         }
     }
@@ -75,6 +110,35 @@ impl RaftManager {
             .into());
         }
 
+        // Build LSM-tree.
+        let lsm_tree_options = ObjectStoreLsmTreeOptions {
+            sstable_store: self.sstable_store.clone(),
+            write_buffer_capacity: self.lsm_tree_options.shard_write_buffer_capacity,
+            version_manager: self.version_manager.clone(),
+        };
+        let lsm_tree = ObjectStoreLsmTree::new(lsm_tree_options);
+        inner.lsm_trees.insert(raft_node, lsm_tree.clone());
+
+        // Build and run sstable uploader.
+        let sstable_uploader_options = SstableUploaderOptions {
+            raft_node,
+            rudder_node_id: self.rudder_node_id,
+            lsm_tree: lsm_tree.clone(),
+            sstable_store: self.sstable_store.clone(),
+            version_manager: self.version_manager.clone(),
+            sstable_capacity: self.lsm_tree_options.sstable_capacity,
+            block_capacity: self.lsm_tree_options.block_capacity,
+            restart_interval: self.lsm_tree_options.restart_interval,
+            bloom_false_positive: self.lsm_tree_options.bloom_false_positive,
+            compression_algorithm: self.lsm_tree_options.compression_algorithm,
+            poll_interval: self.lsm_tree_options.poll_interval,
+            channel_pool: self.channel_pool.clone(),
+        };
+        let mut sstable_uploader = SstableUploader::new(sstable_uploader_options);
+        // TODO: Hold the handle for gracefully shutdown.
+        let _handle = tokio::spawn(async move { sstable_uploader.run().await });
+
+        // Build raft node.
         let network = self.raft_network.clone();
         self.raft_log_store.add_group(raft_node).await?;
         let (tx, rx) = mpsc::unbounded_channel();
@@ -109,7 +173,7 @@ impl RaftManager {
             available_index,
             done_index,
             raft_group_log_store,
-            lsm_tree: self.lsm_tree.clone(),
+            lsm_tree,
             raft: raft.clone(),
             rx,
             txn_notify_pool: self.txn_notify_pool.clone(),
@@ -168,14 +232,17 @@ mod tests {
     use std::net::SocketAddr;
 
     use runkv_common::channel_pool::ChannelPool;
-    use runkv_common::config::Node;
+    use runkv_common::coding::CompressionAlgorithm;
+    use runkv_common::config::{LevelCompactionStrategy, LevelOptions, Node};
     use runkv_proto::kv::{BytesSerde, TxnRequest};
+    use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions};
+    use runkv_storage::manifest::VersionManagerOptions;
     use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
+    use runkv_storage::MemObjectStore;
     use test_log::test;
 
     use super::*;
     use crate::components::command::Command;
-    use crate::components::lsm_tree::tests::build_test_lsm_tree;
     use crate::components::RaftTypeConfig;
     use crate::service::tests::MockRaftService;
 
@@ -269,15 +336,47 @@ mod tests {
             block_cache_capacity: 1024,
         };
         let raft_log_store = RaftLogStore::open(raft_log_store_options).await.unwrap();
-        let raft_network = RaftNetwork::new(channel_pool);
-        let lsm_tree = build_test_lsm_tree();
+        let raft_network = RaftNetwork::new(channel_pool.clone());
+        let object_store = Arc::new(MemObjectStore::default());
+        let sstable_store = Arc::new(SstableStore::new(SstableStoreOptions {
+            path: "test".to_string(),
+            object_store,
+            block_cache: BlockCache::new(64 << 10),
+            meta_cache_capacity: 64 << 10,
+        }));
+        let version_manager = VersionManager::new(VersionManagerOptions {
+            levels_options: vec![
+                LevelOptions {
+                    compaction_strategy: LevelCompactionStrategy::Overlap,
+                    compression_algorithm: CompressionAlgorithm::None,
+                },
+                LevelOptions {
+                    compaction_strategy: LevelCompactionStrategy::NonOverlap,
+                    compression_algorithm: CompressionAlgorithm::None,
+                },
+            ],
+            levels: vec![vec![]; 2],
+            sstable_store: sstable_store.clone(),
+        });
 
         let options = RaftManagerOptions {
             node: 1,
-            lsm_tree,
+            rudder_node_id: 0, // disable rudder
             raft_log_store: raft_log_store.clone(),
             raft_network,
             txn_notify_pool: txn_notify_pool.clone(),
+            version_manager,
+            sstable_store,
+            channel_pool,
+            lsm_tree_options: LsmTreeOptions {
+                shard_write_buffer_capacity: 4 << 10,
+                sstable_capacity: 16 << 10,
+                block_capacity: 1 << 10,
+                restart_interval: 2,
+                bloom_false_positive: 0.1,
+                compression_algorithm: CompressionAlgorithm::None,
+                poll_interval: Duration::from_secs(10),
+            },
         };
         let manager = RaftManager::new(options);
         (manager, raft_log_store, txn_notify_pool)

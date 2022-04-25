@@ -45,7 +45,7 @@ pub struct VersionManagerCore {
     diffs: VecDeque<VersionDiff>,
     /// `sstable_store` is used to fetch sstable meta.
     sstable_store: SstableStoreRef,
-    /// Minimum accessable timestamp.
+    /// Minimum accessable sequence.
     watermark: u64,
 }
 
@@ -856,12 +856,12 @@ mod tests {
         sstable_store: SstableStoreRef,
         sst_id: u64,
         kvs: &[(&'static [u8], &'static [u8])],
-        timestamp: u64,
+        sequence: u64,
     ) {
         let options = SstableBuilderOptions::default();
         let mut builder = SstableBuilder::new(options);
         for (k, v) in kvs {
-            builder.add(k, timestamp, Some(v)).unwrap();
+            builder.add(k, sequence, Some(v)).unwrap();
         }
         let (meta, data) = builder.build().unwrap();
         let sst = Sstable::new(sst_id, Arc::new(meta));

@@ -2,7 +2,7 @@ use bytes::Bytes;
 
 pub trait CompactionFilter {
     /// Keep the key value pair if `filter` returns true.
-    fn filter(&mut self, key: &[u8], value: Option<&[u8]>, timestamp: u64) -> bool;
+    fn filter(&mut self, key: &[u8], value: Option<&[u8]>, sequence: u64) -> bool;
 }
 
 pub struct DefaultCompactionFilter {
@@ -22,10 +22,10 @@ impl DefaultCompactionFilter {
 }
 
 impl CompactionFilter for DefaultCompactionFilter {
-    fn filter(&mut self, key: &[u8], _value: Option<&[u8]>, timestamp: u64) -> bool {
+    fn filter(&mut self, key: &[u8], _value: Option<&[u8]>, sequence: u64) -> bool {
         let mut retain = true;
         // TODO: Handle `remove_tombstone`.
-        if key == self.last_key && timestamp < self.watermark {
+        if key == self.last_key && sequence < self.watermark {
             retain = false;
         }
         self.last_key = Bytes::copy_from_slice(key);

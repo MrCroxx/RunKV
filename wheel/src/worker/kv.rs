@@ -4,9 +4,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use runkv_common::notify_pool::NotifyPool;
 use runkv_common::Worker;
-use runkv_proto::kv::{BytesSerde, TxnRequest, TxnResponse};
+use runkv_proto::kv::{
+    kv_op_request, kv_op_response, BytesSerde, DeleteRequest, DeleteResponse, GetRequest,
+    GetResponse, KvOpResponse, PutRequest, PutResponse, TxnRequest, TxnResponse,
+};
 use tokio::sync::mpsc;
 use tracing::{trace, warn};
 
@@ -59,7 +63,7 @@ impl Worker for KvWorker {
             group: self.group,
             raft_node: self.raft_node,
             raft_group_log_store: self.raft_group_log_store.clone(),
-            _lsm_tree: self.lsm_tree.clone(),
+            lsm_tree: self.lsm_tree.clone(),
             raft: self.raft.clone(),
             txn_notify_pool: self.txn_notify_pool.clone(),
             available_index: self.available_index.clone(),
@@ -170,7 +174,7 @@ struct Applier {
     group: u64,
     raft_node: u64,
     raft_group_log_store: RaftGroupLogStore<Gear>,
-    _lsm_tree: ObjectStoreLsmTree,
+    lsm_tree: ObjectStoreLsmTree,
     raft: Raft<Gear>,
     txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
 
@@ -225,7 +229,9 @@ impl Applier {
             let done = done + entries.len() as u64;
 
             let mut cmds = Vec::with_capacity(entries.len());
-            for entry in entries {
+            for (index, entry) in
+                (done + 1..done + 1 + entries.len() as u64).zip(entries.into_iter())
+            {
                 let data =
                     match bincode::deserialize::<openraft::EntryPayload<RaftTypeConfig>>(&entry)
                         .map_err(Error::serde_err)?
@@ -234,14 +240,14 @@ impl Applier {
                         _ => continue,
                     };
                 let cmd = Command::decode(&data).map_err(Error::serde_err)?;
-                cmds.push(cmd);
+                cmds.push((index, cmd));
             }
 
             // TODO: Handle txns responses.
-            for cmd in cmds {
+            for (index, cmd) in cmds {
                 match cmd {
                     Command::TxnRequest { id, request: req } => {
-                        let rsp = self.txn(req).await;
+                        let rsp = self.txn(req, index).await;
                         if let Err(e) = self.txn_notify_pool.notify(id, rsp) {
                             warn!("error raised when notify txn result: {}", e);
                         }
@@ -257,11 +263,58 @@ impl Applier {
         }
     }
 
-    async fn txn(&self, _request: TxnRequest) -> Result<TxnResponse> {
+    async fn txn(&self, request: TxnRequest, index: u64) -> Result<TxnResponse> {
+        let mut ops = Vec::with_capacity(request.ops.len());
+        for op in request.ops {
+            let op = match op.request.unwrap() {
+                kv_op_request::Request::Get(GetRequest { key }) => {
+                    kv_op_response::Response::Get(GetResponse {
+                        value: self.get(key).await?.unwrap_or_default(),
+                    })
+                }
+                kv_op_request::Request::Put(PutRequest { key, value }) => {
+                    self.put(key, value, index).await?;
+                    kv_op_response::Response::Put(PutResponse::default())
+                }
+                kv_op_request::Request::Delete(DeleteRequest { key }) => {
+                    self.delete(key, index).await?;
+                    kv_op_response::Response::Delete(DeleteResponse::default())
+                }
+            };
+            ops.push(KvOpResponse { response: Some(op) });
+        }
         // TODO: Impl me.
         // TODO: Impl me.
         // TODO: Impl me.
-        Ok(TxnResponse::default())
+        Ok(TxnResponse { ops })
+    }
+
+    async fn get(&self, key: Vec<u8>) -> Result<Option<Vec<u8>>> {
+        let key = Bytes::from(key);
+        // TODO: SEQUENCE!!!
+        // TODO: SEQUENCE!!!
+        // TODO: SEQUENCE!!!
+        let result = self.lsm_tree.get(&key, 0).await?;
+        Ok(result.map(|v| v.to_vec()))
+    }
+
+    async fn put(&self, key: Vec<u8>, value: Vec<u8>, index: u64) -> Result<()> {
+        let key = Bytes::from(key);
+        let value = Bytes::from(value);
+        // TODO: SEQUENCE!!!
+        // TODO: SEQUENCE!!!
+        // TODO: SEQUENCE!!!
+        self.lsm_tree.put(&key, &value, 0, index).await?;
+        Ok(())
+    }
+
+    async fn delete(&self, key: Vec<u8>, index: u64) -> Result<()> {
+        let key = Bytes::from(key);
+        // TODO: SEQUENCE!!!
+        // TODO: SEQUENCE!!!
+        // TODO: SEQUENCE!!!
+        self.lsm_tree.delete(&key, 0, index).await?;
+        Ok(())
     }
 
     async fn compact_raft_log(&self, index: u64) -> Result<()> {

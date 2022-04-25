@@ -17,18 +17,18 @@ impl Memtable {
         }
     }
 
-    pub fn put(&self, key: &Bytes, value: Option<&Bytes>, timestamp: u64) {
-        let key = full_key(key, timestamp);
+    pub fn put(&self, key: &Bytes, value: Option<&Bytes>, sequence: u64) {
+        let key = full_key(key, sequence);
         self.inner.put(key, raw_value(value.map(|v| &v[..])));
     }
 
-    pub fn get(&self, key: &Bytes, timestamp: u64) -> Option<Bytes> {
-        let raw = self.get_raw(key, timestamp)?;
+    pub fn get(&self, key: &Bytes, sequence: u64) -> Option<Bytes> {
+        let raw = self.get_raw(key, sequence)?;
         value(&raw).map(Bytes::copy_from_slice)
     }
 
-    pub fn get_raw(&self, key: &Bytes, timestamp: u64) -> Option<Bytes> {
-        let key = full_key(key, timestamp);
+    pub fn get_raw(&self, key: &Bytes, sequence: u64) -> Option<Bytes> {
+        let key = full_key(key, sequence);
         self.inner.get(&key).cloned()
     }
 
@@ -80,7 +80,7 @@ mod tests {
     async fn test_concurrent_put() {
         // Insert multiple kvs out of order concurrently.
         // Then iterate from start to end to check if memtable is complete and ordered.
-        // Then check if get returns correct results on a timestamp while inserting kvs
+        // Then check if get returns correct results on a sequence while inserting kvs
         // concurrently.
         let memtable = Memtable::new(DEFAULT_MEMTABLE_SIZE);
         let futures = (1..=10000)
@@ -132,7 +132,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_concurrent_iter() {
-        // Insert multiple kvs and create an iterator on the newest timestamp.
+        // Insert multiple kvs and create an iterator on the newest sequence.
         // Then iterate from start to end and check results while inserting kvs concurrently.
         let memtable = Memtable::new(DEFAULT_MEMTABLE_SIZE * 4);
         for i in 1..=10000 {

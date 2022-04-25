@@ -145,14 +145,14 @@ pub fn crc32check(data: &[u8], crc32sum: u32) -> bool {
 /// A full key value pair looks like:
 ///
 /// ```plain
-/// | user key | timestamp (8B) | value |
+/// | user key | sequence (8B) | value |
 ///
 /// |<------- full key ------->|
 /// ```
-pub fn full_key(user_key: &[u8], timestamp: u64) -> Vec<u8> {
+pub fn full_key(user_key: &[u8], sequence: u64) -> Vec<u8> {
     let mut buf = Vec::with_capacity(user_key.len() + 8);
     buf.put_slice(user_key);
-    buf.put_u64(!timestamp);
+    buf.put_u64(!sequence);
     buf
 }
 
@@ -161,8 +161,8 @@ pub fn user_key(full_key: &[u8]) -> &[u8] {
     &full_key[..full_key.len() - 8]
 }
 
-/// Get timestamp in full key.
-pub fn timestamp(full_key: &[u8]) -> u64 {
+/// Get sequence in full key.
+pub fn sequence(full_key: &[u8]) -> u64 {
     !(&full_key[full_key.len() - 8..]).get_u64()
 }
 

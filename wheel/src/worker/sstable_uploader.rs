@@ -13,7 +13,7 @@ use runkv_storage::components::{
     CachePolicy, Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef,
 };
 use runkv_storage::manifest::{ManifestError, VersionManager};
-use runkv_storage::utils::{timestamp, user_key, value};
+use runkv_storage::utils::{sequence, user_key, value};
 use tonic::Request;
 use tracing::{debug, trace, warn};
 
@@ -21,7 +21,7 @@ use crate::components::lsm_tree::ObjectStoreLsmTree;
 use crate::error::{Error, Result};
 
 pub struct SstableUploaderOptions {
-    pub node_id: u64,
+    pub raft_node: u64,
     pub lsm_tree: ObjectStoreLsmTree,
     pub sstable_store: SstableStoreRef,
     pub version_manager: VersionManager,
@@ -36,7 +36,7 @@ pub struct SstableUploaderOptions {
 }
 
 pub struct SstableUploader {
-    node_id: u64,
+    raft_node: u64,
     options: SstableUploaderOptions,
     lsm_tree: ObjectStoreLsmTree,
     sstable_store: SstableStoreRef,
@@ -49,6 +49,9 @@ pub struct SstableUploader {
 #[async_trait]
 impl Worker for SstableUploader {
     async fn run(&mut self) -> anyhow::Result<()> {
+        if cfg!(test) && self.rudder_node_id == 0 {
+            return Ok(());
+        }
         // TODO: Gracefully kill.
         loop {
             match self.run_inner().await {
@@ -64,7 +67,7 @@ impl Worker for SstableUploader {
 impl SstableUploader {
     pub fn new(options: SstableUploaderOptions) -> Self {
         Self {
-            node_id: options.node_id,
+            raft_node: options.raft_node,
             lsm_tree: options.lsm_tree.clone(),
             sstable_store: options.sstable_store.clone(),
             version_manager: options.version_manager.clone(),
@@ -115,7 +118,7 @@ impl SstableUploader {
                     let builder = sstable_builder.as_mut().unwrap();
                     let fk = iter.key();
                     let uk = user_key(fk);
-                    let ts = timestamp(fk);
+                    let ts = sequence(fk);
                     let vraw = iter.value();
                     builder.add(uk, ts, value(vraw))?;
                     iter.next();
@@ -152,7 +155,7 @@ impl SstableUploader {
 
     async fn notify_update_version(&mut self, sst_infos: Vec<SstableInfo>) -> Result<()> {
         let request = Request::new(InsertL0Request {
-            node_id: self.node_id,
+            node_id: self.raft_node,
             sst_infos,
             next_version_id: self.version_manager.latest_version_id().await + 1,
         });
@@ -183,7 +186,7 @@ impl SstableUploader {
 
     fn gen_sstable_id(&self) -> u64 {
         let sequential_id = self.sstable_sequential_id.fetch_add(1, Ordering::SeqCst);
-        let node_id = self.options.node_id;
+        let node_id = self.options.raft_node;
         (node_id << 32) | sequential_id
     }
 }
