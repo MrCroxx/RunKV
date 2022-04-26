@@ -1,5 +1,5 @@
 [package]
-name = "tests"
+name = "runkv_tests"
 version = "0.1.0"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -16,6 +16,7 @@ env_logger = "*"
 futures = "0.3"
 itertools = "0.10.3"
 rand = "0.8.5"
+runkv-common = { path = "../common" }
 runkv-exhauster = { path = "../exhauster" }
 runkv-proto = { path = "../proto" }
 runkv-rudder = { path = "../rudder" }

@@ -1,0 +1,24 @@
+extend = "common.toml"
+
+[env]
+JAEGER_SYSTEM = "${SYSTEM}"
+JAEGER_DOWNLOAD_TAR = "https://github.com/jaegertracing/jaeger/releases/download/v1.33.0/jaeger-1.33.0-${JAEGER_SYSTEM}.tar.gz"
+
+[tasks.download-jaeger]
+category = "Tracing"
+dependencies = ["prepare"]
+description = "Download and extract Jaeger."
+script = '''
+#!/bin/bash
+set -e
+if [ -f "${PREFIX_BIN}/jaeger" ]; then
+    exit 0
+fi
+echo "Jaeger not found, downloading"
+curl -fL -o "${PREFIX_TMP}/jaeger.tar.gz" "${JAEGER_DOWNLOAD_TAR}"
+tar -C "${PREFIX_TMP}/" -xzf "${PREFIX_TMP}/jaeger.tar.gz"
+chmod +x "${PREFIX_TMP}/jaeger-1.33.0-${JAEGER_SYSTEM}/jaeger-all-in-one"
+mv "${PREFIX_TMP}/jaeger-1.33.0-${JAEGER_SYSTEM}/jaeger-all-in-one" "${PREFIX_BIN}/jaeger"
+
+"${PREFIX_BIN}/jaeger" version
+'''

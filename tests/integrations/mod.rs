@@ -11,6 +11,7 @@ use bytes::Bytes;
 use futures::future;
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
+use runkv_common::log::init_runkv_logger;
 use runkv_exhauster::config::ExhausterConfig;
 use runkv_exhauster::{bootstrap_exhauster, build_exhauster_with_object_store};
 use runkv_proto::common::Endpoint;
@@ -34,8 +35,10 @@ const WHEEL_CONFIG_PATH: &str = "etc/wheel.toml";
 const EXHAUSTER_CONFIG_PATH: &str = "etc/exhauster.toml";
 const LSM_TREE_CONFIG_PATH: &str = "etc/lsm_tree.toml";
 
-#[test(tokio::test)]
+#[tokio::test]
 async fn test_concurrent_put_get() {
+    init_runkv_logger("runkv_tests", true);
+
     let tempdir = tempfile::tempdir().unwrap();
     let raft_log_dir_path = Path::new(tempdir.path())
         .join("raft")

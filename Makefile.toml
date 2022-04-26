@@ -1,4 +1,4 @@
-extend = [{ path = "make/common.toml" }, { path = "make/minio.toml" }]
+extend = [{ path = "make/common.toml" }, { path = "make/minio.toml" }, { path = "make/jaeger.toml" }]
 
 [env]
 RUST_BACKTRACE = 1
@@ -43,6 +43,8 @@ script = '''
 #!/bin/bash
 # run minio
 tmux new -d -s runkv-minio ${PREFIX_BIN}/minio server --address 127.0.0.1:9000 --console-address 127.0.0.1:9090 ${PREFIX_DATA}
+# run jaeger
+tmux new -d -s runkv-jaeger ${PREFIX_BIN}/jaeger
 # create test bucket
 tmux new -d -s runkv-mcli ' \
 ${PREFIX_BIN}/mcli alias set local http://127.0.0.1:9000 minioadmin minioadmin ; \
@@ -59,4 +61,5 @@ description = "Kill development environment."
 script = '''
 #!/bin/bash
 tmux kill-session -t runkv-minio
+tmux kill-session -t runkv-jaeger
 '''
