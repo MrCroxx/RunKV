@@ -37,7 +37,7 @@ const LSM_TREE_CONFIG_PATH: &str = "etc/lsm_tree.toml";
 
 #[tokio::test]
 async fn test_concurrent_put_get() {
-    init_runkv_logger("runkv_tests", true);
+    init_runkv_logger("runkv_tests");
 
     let tempdir = tempfile::tempdir().unwrap();
     let raft_log_dir_path = Path::new(tempdir.path())
