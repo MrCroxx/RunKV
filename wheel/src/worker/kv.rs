@@ -297,12 +297,14 @@ impl Applier {
         Ok(TxnResponse { ops })
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn get(&self, key: Vec<u8>, sequence: u64) -> Result<Option<Vec<u8>>> {
         let key = Bytes::from(key);
         let result = self.lsm_tree.get(&key, sequence).await?;
         Ok(result.map(|v| v.to_vec()))
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn put(&self, key: Vec<u8>, value: Vec<u8>, index: u64, sequence: u64) -> Result<()> {
         let key = Bytes::from(key);
         let value = Bytes::from(value);
@@ -310,16 +312,19 @@ impl Applier {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn delete(&self, key: Vec<u8>, index: u64, sequence: u64) -> Result<()> {
         let key = Bytes::from(key);
         self.lsm_tree.delete(&key, sequence, index).await?;
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn compact_raft_log(&self, index: u64, _sequence: u64) -> Result<()> {
         self.raft_group_log_store.compact(index).await
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn write_done_index(&self, index: u64) -> Result<()> {
         let buf = bincode::serialize(&index).map_err(Error::serde_err)?;
         self.raft_group_log_store

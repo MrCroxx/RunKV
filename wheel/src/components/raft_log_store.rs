@@ -44,6 +44,7 @@ pub fn storage_io_error(
 }
 
 impl<F: Fsm> RaftGroupLogStore<F> {
+    #[tracing::instrument(level = "trace", skip(self))]
     pub async fn applied_index(&self) -> Result<Option<u64>> {
         let applied_log_id = match self
             .core
@@ -59,12 +60,14 @@ impl<F: Fsm> RaftGroupLogStore<F> {
         Ok(Some(applied_log_id.index))
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub async fn entries(&self, index: u64, max_len: usize) -> Result<Vec<Vec<u8>>> {
         let raft_entries = self.core.entries(self.group, index, max_len).await?;
         let entries = raft_entries.into_iter().map(|re| re.data).collect_vec();
         Ok(entries)
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub async fn put(&self, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
         self.core
             .put(self.group, key, value)
@@ -72,10 +75,12 @@ impl<F: Fsm> RaftGroupLogStore<F> {
             .map_err(|e| e.into())
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub async fn get(&self, key: Vec<u8>) -> Result<Option<Vec<u8>>> {
         self.core.get(self.group, key).await.map_err(|e| e.into())
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub async fn delete(&self, key: Vec<u8>) -> Result<()> {
         self.core
             .delete(self.group, key)
@@ -83,6 +88,7 @@ impl<F: Fsm> RaftGroupLogStore<F> {
             .map_err(|e| e.into())
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub async fn compact(&self, index: u64) -> Result<()> {
         self.core
             .compact(self.group, index)
@@ -124,6 +130,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
 
     type SnapshotBuilder = Self;
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn save_vote(
         &mut self,
         vote: &openraft::Vote<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
@@ -143,6 +150,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn read_vote(
         &mut self,
     ) -> core::result::Result<
@@ -179,6 +187,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
     ///
     /// Though the entries will always be presented in order, each entry's index should be used to
     /// determine its location to be written in the log.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn append_to_log(
         &mut self,
         entries: &[&openraft::Entry<RaftTypeConfig>],
@@ -217,6 +226,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
     }
 
     /// Delete conflict log entries since `log_id`, inclusive.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn delete_conflict_logs_since(
         &mut self,
         log_id: openraft::LogId<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
@@ -241,6 +251,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
     }
 
     /// Delete applied log entries upto `log_id`, inclusive.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn purge_logs_upto(
         &mut self,
         log_id: openraft::LogId<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
@@ -280,6 +291,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
     /// membership log id and membership config.
     // NOTE: This can be made into sync, provided all state machines will use atomic read or the
     // like.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn last_applied_state(
         &mut self,
     ) -> core::result::Result<
@@ -340,6 +352,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
     // then collect completions on this channel and update the client with the result once all
     // the preceding operations have been applied to the state machine. This way we'll reach
     // operation pipelining w/o the need to wait for the completion of each operation inline.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn apply_to_state_machine(
         &mut self,
         entries: &[&openraft::Entry<RaftTypeConfig>],
@@ -397,6 +410,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
     /// ### implementation guide
     /// See the [storage chapter of the guide](https://datafuselabs.github.io/openraft/storage.html)
     /// for details on log compaction / snapshotting.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn begin_receiving_snapshot(
         &mut self,
     ) -> core::result::Result<
@@ -413,6 +427,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
     /// ### snapshot
     /// A snapshot created from an earlier call to `begin_receiving_snapshot` which provided the
     /// snapshot.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn install_snapshot(
         &mut self,
         meta: &openraft::SnapshotMeta<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
@@ -477,6 +492,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
     ///
     /// A proper snapshot implementation will store the term, index and membership config as part
     /// of the snapshot, which should be decoded for creating this method's response data.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn get_current_snapshot(
         &mut self,
     ) -> core::result::Result<
@@ -529,6 +545,7 @@ impl<F: Fsm> openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore<F> {
     /// `last_purged_log_id` if there is no entry at all.
     // NOTE: This can be made into sync, provided all state machines will use atomic read or the
     // like.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn get_log_state(
         &mut self,
     ) -> core::result::Result<
@@ -598,6 +615,7 @@ impl<F: Fsm> openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore<F> {
     /// stop)`.
     ///
     /// Entry that is not found is allowed.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn try_get_log_entries<
         RB: std::ops::RangeBounds<u64> + Clone + std::fmt::Debug + Send + Sync,
     >(
@@ -667,6 +685,7 @@ impl<F: Fsm> openraft::RaftSnapshotBuilder<RaftTypeConfig, Cursor<Vec<u8>>>
     /// - Performing log compaction, e.g. merge log entries that operates on the same key, like a
     ///   LSM-tree does,
     /// - or by fetching a snapshot from the state machine.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn build_snapshot(
         &mut self,
     ) -> core::result::Result<

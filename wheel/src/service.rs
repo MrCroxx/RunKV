@@ -24,7 +24,7 @@ use runkv_proto::wheel::{
 };
 use runkv_storage::raft_log_store::RaftLogStore;
 use tonic::{Request, Response, Status};
-use tracing::trace;
+use tracing::{trace, trace_span, Instrument};
 
 use crate::components::command::Command;
 use crate::components::gear::Gear;
@@ -135,6 +135,7 @@ impl Wheel {
         Ok(response)
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn txn_inner(&self, request: TxnRequest) -> Result<TxnResponse> {
         // Pick raft leader of the request.
         let (raft_node, raft) = match self.leader(&request).await? {
@@ -170,18 +171,24 @@ impl Wheel {
             request,
         };
         let buf = cmd.encode_to_vec().map_err(Error::serde_err)?;
+
         raft.client_write(openraft::raft::ClientWriteRequest::new(
             openraft::EntryPayload::Normal(buf),
         ))
+        .instrument(trace_span!("openraft_client_write"))
         .await
         .map_err(RaftError::err)?;
 
         // Wait for resposne.
-        let response = rx.await.map_err(Error::err)?;
+        let response = rx
+            .instrument(trace_span!("wait_apply"))
+            .await
+            .map_err(Error::err)?;
         response
     }
 
     /// Returns `(group, raft node, Option<Raft>)`.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn leader<'a>(&self, request: &'a TxnRequest) -> Result<(u64, u64, Option<Raft<Gear>>)> {
         assert!(!request.ops.is_empty());
 
