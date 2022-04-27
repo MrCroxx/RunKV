@@ -3,7 +3,12 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::Layer;
 
-pub fn init_runkv_logger(service_name: &str, enable_jaeger_tracing: bool) {
+pub fn init_runkv_logger(service_name: &str) {
+    let enable_jaeger_tracing = match std::env::var("RUNKV_TRACE") {
+        Err(_) => false,
+        Ok(val) => val.parse().unwrap(),
+    };
+
     if enable_jaeger_tracing {
         opentelemetry::global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
 
