@@ -33,7 +33,3 @@ tokio = { version = "1", features = [
 toml = "0.4.2"
 tonic = "0.6.2"
 tracing = "0.1"
-
-[profile.bench]
-# Uncomment this line if you are generating flame graph.
-# debug = true
