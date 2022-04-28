@@ -4,7 +4,9 @@ pub mod gear;
 pub mod lsm_tree;
 pub mod network;
 pub mod raft_log_store;
+pub mod raft_log_store_v2;
 pub mod raft_manager;
+pub mod raft_network;
 
 use self::network::RaftNetwork;
 use self::raft_log_store::RaftGroupLogStore;

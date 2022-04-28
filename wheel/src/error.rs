@@ -15,6 +15,10 @@ pub enum Error {
     SerdeError(String),
     #[error("raft error: {0}")]
     RaftError(#[from] RaftError),
+    #[error("raft error: {0}")]
+    RaftV2Error(#[from] raft::Error),
+    #[error("raft manage error: {0}")]
+    RaftManagerError(#[from] RaftManageError),
     #[error("meta error: {0}")]
     MetaError(#[from] MetaError),
     #[error("kv error: {0}")]
@@ -26,6 +30,10 @@ pub enum Error {
 impl Error {
     pub fn err(e: impl Into<Box<dyn std::error::Error>>) -> Self {
         Self::Other(e.into().to_string())
+    }
+
+    pub fn transport_err(e: tonic::transport::Error) -> Self {
+        e.into()
     }
 
     pub fn config_err(e: impl Into<Box<dyn std::error::Error>>) -> Self {
@@ -47,6 +55,10 @@ impl Error {
     pub fn raft_err(e: impl Into<Box<dyn std::error::Error>>) -> Self {
         RaftError::err(e).into()
     }
+
+    pub fn raft_v2_err(e: raft::Error) -> Self {
+        e.into()
+    }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -66,6 +78,30 @@ pub enum RaftError {
 }
 
 impl RaftError {
+    pub fn err(e: impl Into<Box<dyn std::error::Error>>) -> Self {
+        Self::Other(e.into().to_string())
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum RaftManageError {
+    #[error("raft group already exists")]
+    RaftGroupAlreadyExists(u64),
+    #[error("raft group not exists")]
+    RaftGroupNotExists(u64),
+    #[error("raft node not exists: [raft node: {raft_node}] [node: {node}]")]
+    RaftNodeNotExists { raft_node: u64, node: u64 },
+    #[error("raft node already exists: [group: {group}] [raft node: {raft_node}] [node: {node}]")]
+    RaftNodeAlreadyExists {
+        group: u64,
+        raft_node: u64,
+        node: u64,
+    },
+    #[error("other: {0}")]
+    Other(String),
+}
+
+impl RaftManageError {
     pub fn err(e: impl Into<Box<dyn std::error::Error>>) -> Self {
         Self::Other(e.into().to_string())
     }

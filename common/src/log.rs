@@ -31,6 +31,7 @@ pub fn init_runkv_logger(service_name: &str) {
             .with_target("runkv_storage", tracing::Level::TRACE)
             .with_target("runkv_tests", tracing::Level::TRACE)
             .with_target("openraft::raft", tracing::Level::TRACE)
+            .with_target("raft", tracing::Level::TRACE)
             .with_target("events", tracing::Level::ERROR);
 
         let opentelemetry_layer = tracing_opentelemetry::layer()

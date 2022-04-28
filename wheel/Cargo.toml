@@ -18,12 +18,15 @@ moka = { version = "0.7", features = ["future"] }
 openraft = { git = "https://github.com/datafuselabs/openraft", rev = "ca8a09c1898dbcaa4c2bf49bf5dabc5221e0b908" }
 parking_lot = "0.12"
 prost = "0.9"
+raft = { git = "https://github.com/mrcroxx/raft-rs", rev = "0f7ae9334db9a73ef8c0d13d19a6dbf2a9077b54" }
+# raft = { path = "../../raft-rs" }
 rand = "0.8.5"
 runkv-common = { path = "../common" }
 runkv-proto = { path = "../proto" }
 runkv-storage = { path = "../storage" }
 serde = "1.0"
 serde_derive = "1.0"
+slog = "2.7" # Required by "raft".
 tempfile = "3"
 thiserror = "1.0"
 tokio = { version = "1", features = [
@@ -35,6 +38,7 @@ tokio = { version = "1", features = [
 toml = "0.4.2"
 tonic = "0.6.2"
 tracing = "0.1"
+tracing-slog = "0.1" # Required by "raft".
 tracing-subscriber = "0.3"
 
 [dev-dependencies]
