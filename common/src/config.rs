@@ -65,6 +65,13 @@ pub struct Node {
     pub port: u16,
 }
 
+// prometheus config
+#[derive(Deserialize, Clone, Debug)]
+pub struct PrometheusConfig {
+    pub host: String,
+    pub port: u16,
+}
+
 #[cfg(test)]
 mod tests {
 

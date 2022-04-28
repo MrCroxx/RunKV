@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::net::SocketAddr;
+use std::time::SystemTime;
 
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -34,6 +36,17 @@ use crate::components::Raft;
 use crate::error::{Error, KvError, RaftError, Result};
 use crate::meta::MetaStoreRef;
 
+use runkv_common::config::PrometheusConfig;
+use chrono::{DateTime, Duration, Local, NaiveDateTime};
+use http;
+use hyper::header::CONTENT_TYPE;
+use hyper::service::{make_service_fn, service_fn};
+use hyper::{Body, Server};
+use lazy_static::lazy_static;
+use log::info;
+use prometheus::{
+    labels, opts, register_counter, register_gauge, Counter, Encoder, Gauge, TextEncoder,
+};
 fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
     Status::internal(e.into().to_string())
 }
@@ -232,6 +245,24 @@ impl Wheel {
         Ok((group, 0, None))
     }
 }
+// prometheus
+impl Wheel {
+    pub async fn prometheus_serve_req(_req: http::Request<Body>) -> Result<http::Response<Body>> {
+        let encoder = TextEncoder::new();
+        let metric_families = prometheus::gather();
+        let mut buffer = vec![];
+        encoder.encode(&metric_families, &mut buffer).unwrap();
+
+        let response: hyper::Response<Body> = hyper::Response::builder()
+            .status(200)
+            .header(CONTENT_TYPE, encoder.format_type())
+            .body(Body::from(buffer))
+            .unwrap();
+
+        Ok(response)
+    }
+}
+
 
 #[async_trait]
 impl WheelService for Wheel {

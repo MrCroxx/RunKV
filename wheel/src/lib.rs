@@ -6,6 +6,7 @@ pub mod service;
 pub mod worker;
 
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use bytesize::ByteSize;
 use components::network::RaftNetwork;
@@ -33,6 +34,38 @@ use worker::heartbeater::{Heartbeater, HeartbeaterOptions};
 
 use crate::config::WheelConfig;
 
+use chrono::{DateTime, Duration, Local, NaiveDateTime};
+use http;
+// prometheus
+use hyper::{
+    header::CONTENT_TYPE,
+    service::{make_service_fn, service_fn},
+    Body, Request, Response,
+};
+use lazy_static::lazy_static;
+use prometheus::{
+    labels, opts, register_counter, register_gauge, Counter, Encoder, Gauge, TextEncoder,
+};
+use tokio::time::sleep;
+use std::net::SocketAddr;
+
+
+lazy_static! {
+    static ref EXAMPLE_COUNTER: Counter = register_counter!(opts!(
+        "example_num",
+        "Example of total num",
+        labels! {"handler" => "all",}
+    ))
+    .unwrap();
+    static ref EXAMPLE_TIME_GAUGE: Gauge = register_gauge!(opts!(
+        "example_time",
+        "The example time.",
+        labels! {"handler" => "all",}
+    ))
+    .unwrap();
+}
+
+
 pub async fn bootstrap_wheel(
     config: &WheelConfig,
     wheel: Wheel,
@@ -44,6 +77,10 @@ pub async fn bootstrap_wheel(
         tokio::spawn(async move { worker.run().await });
     }
 
+    test_prometheus();
+    let listen_addr: String = format!("{}:{}", config.prometheus.host, config.prometheus.port);
+    boot_prometheus_service(listen_addr, wheel.clone());
+
     Server::builder()
         .add_service(WheelServiceServer::new(wheel.clone()))
         .add_service(RaftServiceServer::new(wheel.clone()))
@@ -52,6 +89,38 @@ pub async fn bootstrap_wheel(
         .await
         .map_err(Error::err)
 }
+
+pub fn test_prometheus() {
+    tokio::spawn(async move {
+        log::info!("every second update example_num and exampe_time");
+        loop {
+            EXAMPLE_COUNTER.inc();
+            let dt = Local::now();
+            let t = dt.timestamp_millis();
+            EXAMPLE_TIME_GAUGE.set(t as f64);
+            sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+    });
+}
+
+pub fn boot_prometheus_service(listen_addr: String, wheel: Wheel) {
+    tokio::spawn(async move {
+        log::info!(
+            "Prometheus listener for Prometheus is set up on http://{}",
+            listen_addr
+        );
+        let listen_prometheus_addr: SocketAddr = listen_addr.parse().unwrap();
+        let serve_future =
+            hyper::Server::bind(&listen_prometheus_addr).serve(make_service_fn(|_| async {
+                Ok::<_, hyper::Error>(service_fn(Wheel::prometheus_serve_req))
+            }));
+
+        if let Err(err) = serve_future.await {
+            eprintln!("server error: {}", err);
+        }
+    });
+}
+
 
 pub async fn build_wheel(config: &WheelConfig) -> Result<(Wheel, Vec<BoxedWorker>)> {
     let object_store = build_object_store(config).await;
