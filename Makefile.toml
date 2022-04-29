@@ -45,8 +45,8 @@ script = '''
 tmux new -d -s runkv-minio ${PREFIX_BIN}/minio server --address 127.0.0.1:9000 --console-address 127.0.0.1:9090 ${PREFIX_DATA}
 # run jaeger
 tmux new -d -s runkv-jaeger ${PREFIX_BIN}/jaeger
-#run prometheus
-tmux new -d -s runkv-prometheus ${PROMETHEUS_BIN_FILE} --config.file="${PROMETHEUS_CONFIG_FILE}" --web.listen-address=:"${PROMETHEUS_LISTEN_ADDRESS}" --storage.tsdb.path="${PROMETHEUS_DATA}"
+# run prometheus
+tmux new -d -s runkv-prometheus "${PREFIX_BIN}/prometheus/prometheus" --config.file="${PWD}/tests/etc/prometheus.yml" --web.listen-address=:9091 --storage.tsdb.path="${PREFIX_DATA}/prometheus_data"
 # create test bucket
 tmux new -d -s runkv-mcli ' \
 ${PREFIX_BIN}/mcli alias set local http://127.0.0.1:9000 minioadmin minioadmin ; \
