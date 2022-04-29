@@ -2049,6 +2049,7 @@ dependencies = [
 [[package]]
 name = "raft"
 version = "0.7.0"
+source = "git+https://github.com/mrcroxx/raft-rs?rev=f44c57464e9939c66f5e1bcb6913e9be28213689#f44c57464e9939c66f5e1bcb6913e9be28213689"
 dependencies = [
  "async-recursion",
  "async-trait",
@@ -2072,6 +2073,7 @@ dependencies = [
 [[package]]
 name = "raft-proto"
 version = "0.7.0"
+source = "git+https://github.com/mrcroxx/raft-rs?rev=f44c57464e9939c66f5e1bcb6913e9be28213689#f44c57464e9939c66f5e1bcb6913e9be28213689"
 dependencies = [
  "lazy_static",
  "prost",
