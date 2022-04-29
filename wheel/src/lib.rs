@@ -15,11 +15,9 @@ use components::network::RaftNetwork;
 use components::raft_manager::{RaftManager, RaftManagerOptions};
 use error::{Error, Result};
 use http;
-use hyper::{
-    header::CONTENT_TYPE,
-    service::{make_service_fn, service_fn},
-    Body, Request, Response,
-};
+use hyper::header::CONTENT_TYPE;
+use hyper::service::{make_service_fn, service_fn};
+use hyper::{Body, Request, Response};
 use lazy_static::lazy_static;
 use meta::mem::MemoryMetaStore;
 use meta::MetaStoreRef;
@@ -83,7 +81,7 @@ pub fn boot_prometheus_service(listen_addr: String, wheel: Wheel) {
             }));
 
         if let Err(err) = serve_future.await {
-            eprintln!("server error: {}", err);
+            tracing::error!("server error: {}", err);
         }
     });
 }

@@ -1,4 +1,4 @@
-extend = [{ path = "make/common.toml" }, { path = "make/minio.toml" }, { path = "make/jaeger.toml" },{ path = "make/prometheus.toml"},{ path = "make/grafana.toml"}]
+extend = [{ path = "make/common.toml" }, { path = "make/minio.toml" }, { path = "make/jaeger.toml" }, { path = "make/prometheus.toml" }, { path = "make/grafana.toml" }]
 
 [env]
 RUST_BACKTRACE = 1
@@ -38,13 +38,15 @@ echo success
 [tasks.pre-dev]
 category = "Develop"
 description = "Downloads necessary tools and build required components."
-dependencies = ["download-minio", "download-mcli","boot-prometheus","download-grafana", "clean-data"]
+dependencies = ["download-minio", "download-mcli", "download-prometheus", "download-grafana", "clean-data"]
 script = '''
 #!/bin/bash
 # run minio
 tmux new -d -s runkv-minio ${PREFIX_BIN}/minio server --address 127.0.0.1:9000 --console-address 127.0.0.1:9090 ${PREFIX_DATA}
 # run jaeger
 tmux new -d -s runkv-jaeger ${PREFIX_BIN}/jaeger
+#run prometheus
+tmux new -d -s runkv-prometheus ${PROMETHEUS_BIN_FILE} --config.file="${PROMETHEUS_CONFIG_FILE}" --web.listen-address=:"${PROMETHEUS_LISTEN_ADDRESS}" --storage.tsdb.path="${PROMETHEUS_DATA}"
 # create test bucket
 tmux new -d -s runkv-mcli ' \
 ${PREFIX_BIN}/mcli alias set local http://127.0.0.1:9000 minioadmin minioadmin ; \
@@ -62,4 +64,5 @@ script = '''
 #!/bin/bash
 tmux kill-session -t runkv-minio
 tmux kill-session -t runkv-jaeger
+tmux kill-session -t runkv-prometheus
 '''

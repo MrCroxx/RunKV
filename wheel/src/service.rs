@@ -250,7 +250,7 @@ impl Wheel {
         let mut buffer = vec![];
         encoder.encode(&metric_families, &mut buffer).unwrap();
 
-        let response: hyper::Response<Body> = hyper::Response::builder()
+        let response = hyper::Response::builder()
             .status(200)
             .header(CONTENT_TYPE, encoder.format_type())
             .body(Body::from(buffer))
