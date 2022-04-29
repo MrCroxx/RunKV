@@ -1,4 +1,4 @@
-extend = [{ path = "make/common.toml" }, { path = "make/minio.toml" }, { path = "make/jaeger.toml" },{ path = "make/prometheus.toml"}]
+extend = [{ path = "make/common.toml" }, { path = "make/minio.toml" }, { path = "make/jaeger.toml" },{ path = "make/prometheus.toml"},{ path = "make/grafana.toml"}]
 
 [env]
 RUST_BACKTRACE = 1
@@ -38,7 +38,7 @@ echo success
 [tasks.pre-dev]
 category = "Develop"
 description = "Downloads necessary tools and build required components."
-dependencies = ["download-minio", "download-mcli","download-prometheus", "clean-data"]
+dependencies = ["download-minio", "download-mcli","boot-prometheus","download-grafana", "clean-data"]
 script = '''
 #!/bin/bash
 # run minio

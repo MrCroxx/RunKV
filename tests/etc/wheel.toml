@@ -30,5 +30,5 @@ log_file_capacity = "64 MiB"
 block_cache_capacity = "256 MiB"
 
 [prometheus]
-host = "192.168.105.132"
+host = "127.0.0.1"
 port = 9898

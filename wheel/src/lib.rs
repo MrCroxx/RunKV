@@ -5,15 +5,27 @@ pub mod meta;
 pub mod service;
 pub mod worker;
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use bytesize::ByteSize;
+use chrono::{DateTime, Duration, Local, NaiveDateTime};
 use components::network::RaftNetwork;
 use components::raft_manager::{RaftManager, RaftManagerOptions};
 use error::{Error, Result};
+use http;
+use hyper::{
+    header::CONTENT_TYPE,
+    service::{make_service_fn, service_fn},
+    Body, Request, Response,
+};
+use lazy_static::lazy_static;
 use meta::mem::MemoryMetaStore;
 use meta::MetaStoreRef;
+use prometheus::{
+    labels, opts, register_counter, register_gauge, Counter, Encoder, Gauge, TextEncoder,
+};
 use runkv_common::channel_pool::ChannelPool;
 use runkv_common::notify_pool::NotifyPool;
 use runkv_common::BoxedWorker;
@@ -28,43 +40,12 @@ use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
 use runkv_storage::raft_log_store::RaftLogStore;
 use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
 use service::{Wheel, WheelOptions};
+use tokio::time::sleep;
 use tonic::transport::Server;
 use tracing::info;
 use worker::heartbeater::{Heartbeater, HeartbeaterOptions};
 
 use crate::config::WheelConfig;
-
-use chrono::{DateTime, Duration, Local, NaiveDateTime};
-use http;
-// prometheus
-use hyper::{
-    header::CONTENT_TYPE,
-    service::{make_service_fn, service_fn},
-    Body, Request, Response,
-};
-use lazy_static::lazy_static;
-use prometheus::{
-    labels, opts, register_counter, register_gauge, Counter, Encoder, Gauge, TextEncoder,
-};
-use tokio::time::sleep;
-use std::net::SocketAddr;
-
-
-lazy_static! {
-    static ref EXAMPLE_COUNTER: Counter = register_counter!(opts!(
-        "example_num",
-        "Example of total num",
-        labels! {"handler" => "all",}
-    ))
-    .unwrap();
-    static ref EXAMPLE_TIME_GAUGE: Gauge = register_gauge!(opts!(
-        "example_time",
-        "The example time.",
-        labels! {"handler" => "all",}
-    ))
-    .unwrap();
-}
-
 
 pub async fn bootstrap_wheel(
     config: &WheelConfig,
@@ -77,8 +58,7 @@ pub async fn bootstrap_wheel(
         tokio::spawn(async move { worker.run().await });
     }
 
-    test_prometheus();
-    let listen_addr: String = format!("{}:{}", config.prometheus.host, config.prometheus.port);
+    let listen_addr = format!("{}:{}", config.prometheus.host, config.prometheus.port);
     boot_prometheus_service(listen_addr, wheel.clone());
 
     Server::builder()
@@ -90,22 +70,9 @@ pub async fn bootstrap_wheel(
         .map_err(Error::err)
 }
 
-pub fn test_prometheus() {
-    tokio::spawn(async move {
-        log::info!("every second update example_num and exampe_time");
-        loop {
-            EXAMPLE_COUNTER.inc();
-            let dt = Local::now();
-            let t = dt.timestamp_millis();
-            EXAMPLE_TIME_GAUGE.set(t as f64);
-            sleep(tokio::time::Duration::from_millis(10)).await;
-        }
-    });
-}
-
 pub fn boot_prometheus_service(listen_addr: String, wheel: Wheel) {
     tokio::spawn(async move {
-        log::info!(
+        info!(
             "Prometheus listener for Prometheus is set up on http://{}",
             listen_addr
         );
@@ -120,7 +87,6 @@ pub fn boot_prometheus_service(listen_addr: String, wheel: Wheel) {
         }
     });
 }
-
 
 pub async fn build_wheel(config: &WheelConfig) -> Result<(Wheel, Vec<BoxedWorker>)> {
     let object_store = build_object_store(config).await;

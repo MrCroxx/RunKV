@@ -1,4 +1,6 @@
-use runkv_common::config::{CacheConfig, LsmTreeConfig, MinioConfig, Node, S3Config,PrometheusConfig};
+use runkv_common::config::{
+    CacheConfig, LsmTreeConfig, MinioConfig, Node, PrometheusConfig, S3Config,
+};
 use serde::Deserialize;
 
 #[derive(Deserialize, Clone, Debug)]

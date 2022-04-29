@@ -2291,7 +2291,6 @@ dependencies = [
  "hyper",
  "itertools",
  "lazy_static",
- "log",
  "moka",
  "openraft",
  "parking_lot 0.12.0",

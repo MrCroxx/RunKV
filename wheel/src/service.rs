@@ -1,13 +1,22 @@
 use std::collections::BTreeMap;
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::net::SocketAddr;
 use std::time::SystemTime;
 
 use async_trait::async_trait;
+use chrono::{DateTime, Duration, Local, NaiveDateTime};
+use http;
+use hyper::header::CONTENT_TYPE;
+use hyper::service::{make_service_fn, service_fn};
+use hyper::{Body, Server};
 use itertools::Itertools;
+use lazy_static::lazy_static;
+use prometheus::{
+    labels, opts, register_counter, register_gauge, Counter, Encoder, Gauge, TextEncoder,
+};
 use runkv_common::channel_pool::ChannelPool;
-use runkv_common::config::Node;
+use runkv_common::config::{Node, PrometheusConfig};
 use runkv_common::notify_pool::NotifyPool;
 use runkv_proto::common::Endpoint;
 use runkv_proto::kv::kv_service_server::KvService;
@@ -35,18 +44,6 @@ use crate::components::raft_manager::RaftManager;
 use crate::components::Raft;
 use crate::error::{Error, KvError, RaftError, Result};
 use crate::meta::MetaStoreRef;
-
-use runkv_common::config::PrometheusConfig;
-use chrono::{DateTime, Duration, Local, NaiveDateTime};
-use http;
-use hyper::header::CONTENT_TYPE;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Server};
-use lazy_static::lazy_static;
-use log::info;
-use prometheus::{
-    labels, opts, register_counter, register_gauge, Counter, Encoder, Gauge, TextEncoder,
-};
 fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
     Status::internal(e.into().to_string())
 }
@@ -245,7 +242,7 @@ impl Wheel {
         Ok((group, 0, None))
     }
 }
-// prometheus
+
 impl Wheel {
     pub async fn prometheus_serve_req(_req: http::Request<Body>) -> Result<http::Response<Body>> {
         let encoder = TextEncoder::new();
@@ -262,7 +259,6 @@ impl Wheel {
         Ok(response)
     }
 }
-
 
 #[async_trait]
 impl WheelService for Wheel {
