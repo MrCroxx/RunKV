@@ -74,7 +74,7 @@ pub fn boot_prometheus_service(listen_addr: String, wheel: Wheel) {
             "Prometheus listener for Prometheus is set up on http://{}",
             listen_addr
         );
-        let listen_prometheus_addr: SocketAddr = listen_addr.parse().unwrap();
+        let listen_prometheus_addr = listen_addr.parse().unwrap();
         let serve_future =
             hyper::Server::bind(&listen_prometheus_addr).serve(make_service_fn(|_| async {
                 Ok::<_, hyper::Error>(service_fn(Wheel::prometheus_serve_req))

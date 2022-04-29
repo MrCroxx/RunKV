@@ -2,10 +2,6 @@ extend = "common.toml"
 
 [env]
 PROMETHEUS_SYSTEM = "${SYSTEM}" 
-PROMETHEUS_BIN_FILE = "${PREFIX_BIN}/prometheus/prometheus"
-PROMETHEUS_CONFIG_FILE = "${PWD}/tests/etc/prometheus.yml"
-PROMETHEUS_DATA = "${PREFIX_DATA}/prometheus_data"
-PROMETHEUS_LISTEN_ADDRESS = "9091"
 PROMETHEUS_DOWNLOAD_PATH = "${PREFIX_TMP}/prometheus.tar.gz"
 PROMETHEUS_VERSION = "2.32.1"
 PROMETHEUS_RELEASE = "prometheus-${PROMETHEUS_VERSION}.${PROMETHEUS_SYSTEM}"
@@ -22,15 +18,9 @@ if [ -d "${PREFIX_BIN}/prometheus" ]; then
     exit 0
 fi
 if [ -e "${PREFIX_TMP}/prometheus.tar.gz" ]; then
-    echo "prometheus.tar.gz exist"
-    echo "${WORKING_DIRECTORY}"
 else 
-    echo "Prometheus not found, download ${PROMETHEUS_RELEASE}"
     curl -fL -o "${PROMETHEUS_DOWNLOAD_PATH}" "${PROMETHEUS_DOWNLOAD_TAR_GZ}"
 fi
-echo ${PROMETHEUS_DOWNLOAD_PATH}
 tar -xf "${PROMETHEUS_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
 mv "${PREFIX_TMP}/${PROMETHEUS_RELEASE}" "${PREFIX_BIN}/prometheus"
-#cp "${WORKING_DIRECTORY}/tests/etc/prometheus.yml"  "${PREFIX_BIN}/prometheus/"
-#"${PREFIX_BIN}/prometheus/prometheus" --config.file="${PREFIX_BIN}/prometheus/prometheus.yml" --web.listen-address=:9091 --storage.tsdb.path="data/"
 '''
