@@ -5,25 +5,15 @@ pub mod meta;
 pub mod service;
 pub mod worker;
 
-use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::SystemTime;
-
 use bytesize::ByteSize;
-use chrono::{DateTime, Duration, Local, NaiveDateTime};
 use components::network::RaftNetwork;
 use components::raft_manager::{RaftManager, RaftManagerOptions};
 use error::{Error, Result};
-use http;
-use hyper::header::CONTENT_TYPE;
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response};
-use lazy_static::lazy_static;
 use meta::mem::MemoryMetaStore;
 use meta::MetaStoreRef;
-use prometheus::{
-    labels, opts, register_counter, register_gauge, Counter, Encoder, Gauge, TextEncoder,
-};
+
 use runkv_common::channel_pool::ChannelPool;
 use runkv_common::notify_pool::NotifyPool;
 use runkv_common::BoxedWorker;
@@ -38,7 +28,7 @@ use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
 use runkv_storage::raft_log_store::RaftLogStore;
 use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
 use service::{Wheel, WheelOptions};
-use tokio::time::sleep;
+
 use tonic::transport::Server;
 use tracing::info;
 use worker::heartbeater::{Heartbeater, HeartbeaterOptions};
@@ -57,7 +47,7 @@ pub async fn bootstrap_wheel(
     }
 
     let listen_addr = format!("{}:{}", config.prometheus.host, config.prometheus.port);
-    boot_prometheus_service(listen_addr, wheel.clone());
+    boot_prometheus_service(listen_addr);
 
     Server::builder()
         .add_service(WheelServiceServer::new(wheel.clone()))
@@ -68,7 +58,7 @@ pub async fn bootstrap_wheel(
         .map_err(Error::err)
 }
 
-pub fn boot_prometheus_service(listen_addr: String, wheel: Wheel) {
+pub fn boot_prometheus_service(listen_addr: String) {
     tokio::spawn(async move {
         info!(
             "Prometheus listener for Prometheus is set up on http://{}",
