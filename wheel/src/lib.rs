@@ -210,7 +210,7 @@ async fn build_raft_log_store(config: &WheelConfig) -> Result<RaftLogStore> {
     };
     RaftLogStore::open(raft_log_store_options)
         .await
-        .map_err(Error::storage_err)
+        .map_err(Error::StorageError)
 }
 
 fn build_raft_network(channel_pool: ChannelPool) -> RaftNetwork {

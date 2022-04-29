@@ -1,16 +1,11 @@
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use runkv_common::Worker;
-use runkv_proto::wheel::raft_service_client::RaftServiceClient;
-use runkv_proto::wheel::RaftRequest;
-use runkv_storage::raft_log_store::entry::RaftLogBatchBuilder;
-use runkv_storage::raft_log_store::RaftLogStore;
+use runkv_storage::raft_log_store_v2::entry::RaftLogBatchBuilder;
+use runkv_storage::raft_log_store_v2::RaftLogStore;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
-use tonic::transport::Channel;
-use tonic::Request;
 use tracing::{trace, warn};
 
 use crate::components::command::GearCommand;
@@ -21,9 +16,9 @@ use crate::error::{Error, Result};
 const RAFT_HEARTBEAT_TICK_DURATION: Duration = Duration::from_millis(100);
 
 #[derive(Serialize, Deserialize, Debug)]
-pub enum RaftMessage {
-    Proposal { data: Vec<u8>, context: Vec<u8> },
-    Raft(Box<raft::prelude::Message>),
+pub struct Proposal {
+    data: Vec<u8>,
+    context: Vec<u8>,
 }
 
 pub enum RaftStartMode {
@@ -40,7 +35,7 @@ impl RaftStartMode {
     }
 }
 
-pub struct RaftWorkerOptions {
+pub struct RaftWorkerOptions<RN: RaftNetwork> {
     pub group: u64,
     pub node: u64,
     pub raft_node: u64,
@@ -48,28 +43,28 @@ pub struct RaftWorkerOptions {
     pub raft_start_mode: RaftStartMode,
     pub raft_log_store: RaftLogStore,
     pub raft_logger: slog::Logger,
-    pub raft_network: RaftNetwork,
+    pub raft_network: RN,
 
-    pub message_rx: mpsc::UnboundedReceiver<RaftMessage>,
+    pub proposal_rx: mpsc::UnboundedReceiver<Proposal>,
     pub apply_tx: mpsc::UnboundedSender<GearCommand>,
 }
 
-pub struct RaftWorker {
+pub struct RaftWorker<RN: RaftNetwork> {
     group: u64,
     _node: u64,
     _raft_node: u64,
 
     raft: raft::RawNode<RaftGroupLogStore>,
     raft_log_store: RaftGroupLogStore,
-    raft_network: RaftNetwork,
-    raft_clients: BTreeMap<u64, RaftServiceClient<Channel>>,
+    raft_network: RN,
 
-    message_rx: mpsc::UnboundedReceiver<RaftMessage>,
+    message_rx: mpsc::UnboundedReceiver<raft::prelude::Message>,
+    proposal_rx: mpsc::UnboundedReceiver<Proposal>,
     apply_tx: mpsc::UnboundedSender<GearCommand>,
 }
 
 #[async_trait]
-impl Worker for RaftWorker {
+impl<RN: RaftNetwork> Worker for RaftWorker<RN> {
     async fn run(&mut self) -> anyhow::Result<()> {
         // TODO: Gracefully kill.
         loop {
@@ -81,8 +76,8 @@ impl Worker for RaftWorker {
     }
 }
 
-impl RaftWorker {
-    pub async fn build(options: RaftWorkerOptions) -> Self {
+impl<RN: RaftNetwork> RaftWorker<RN> {
+    pub async fn build(options: RaftWorkerOptions<RN>) -> Self {
         let raft_config = raft::Config {
             id: options.raft_node,
             // election_tick: todo!(),
@@ -114,12 +109,14 @@ impl RaftWorker {
             raft_log_store.put_conf_state(&cs).await.unwrap();
         };
 
-        // let drain = tracing_slog::TracingSlogDrain;
-        // let drain = slog_async::Async::new(drain).build().fuse();
-        // let logger = slog::Logger::root(drain, slog::o!("namespace" => "raft"));
-
         let logger = options.raft_logger.new(slog::o!("group" => options.group));
         let raft = raft::RawNode::new(&raft_config, raft_log_store.clone(), &logger)
+            .await
+            .unwrap();
+
+        let message_rx = options
+            .raft_network
+            .take_message_rx(options.raft_node)
             .await
             .unwrap();
 
@@ -131,9 +128,9 @@ impl RaftWorker {
             raft,
             raft_log_store,
             raft_network: options.raft_network,
-            raft_clients: BTreeMap::default(),
 
-            message_rx: options.message_rx,
+            proposal_rx: options.proposal_rx,
+            message_rx,
             apply_tx: options.apply_tx,
         }
     }
@@ -147,18 +144,15 @@ impl RaftWorker {
                 biased;
 
                 _ = ticker.tick() => {
-                    self.raft.tick().await;
+                    self.tick().await;
                 }
 
                 Some(msg) = self.message_rx.recv() => {
-                    match msg {
-                        RaftMessage::Proposal{ data, context } => {
-                            self.propose(data, context).await?;
-                        }
-                        RaftMessage::Raft(rm) => {
-                            self.step(*rm).await?;
-                        }
-                    }
+                    self.step(msg).await?;
+                }
+
+                Some(proposal) = self.proposal_rx.recv() => {
+                    self.propose(proposal).await?;
                 }
 
                 true = self.raft.has_ready() => {
@@ -170,16 +164,21 @@ impl RaftWorker {
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn propose(&mut self, data: Vec<u8>, context: Vec<u8>) -> Result<()> {
+    async fn tick(&mut self) {
+        self.raft.tick().await;
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn propose(&mut self, proposal: Proposal) -> Result<()> {
         self.raft
-            .propose(context, data)
+            .propose(proposal.context, proposal.data)
             .await
-            .map_err(Error::raft_v2_err)
+            .map_err(Error::RaftV2Error)
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
     async fn step(&mut self, msg: raft::prelude::Message) -> Result<()> {
-        self.raft.step(msg).await.map_err(Error::raft_v2_err)
+        self.raft.step(msg).await.map_err(Error::RaftV2Error)
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
@@ -222,23 +221,9 @@ impl RaftWorker {
         Ok(())
     }
 
-    // #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn send_messages(&mut self, messages: Vec<raft::prelude::Message>) -> Result<()> {
-        let mut raft_node_messages = BTreeMap::default();
-        for message in messages {
-            raft_node_messages
-                .entry(message.to)
-                .or_insert_with(|| Vec::with_capacity(10))
-                .push(message);
-        }
-        for (raft_node, messages) in raft_node_messages {
-            let mut client = self.raft_client(raft_node).await?;
-            for message in messages {
-                let data = bincode::serialize(&message).map_err(Error::serde_err)?;
-                client.raft(Request::new(RaftRequest { data })).await?;
-            }
-        }
-        Ok(())
+        self.raft_network.send(messages).await
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
@@ -254,13 +239,6 @@ impl RaftWorker {
         if entries.is_empty() {
             return Ok(());
         }
-        // for entry in entries.iter() {
-        //     match entry.entry_type() {
-        //         raft::prelude::EntryType::EntryNormal => todo!(),
-        //         raft::prelude::EntryType::EntryConfChange => todo!(),
-        //         raft::prelude::EntryType::EntryConfChangeV2 => todo!(),
-        //     }
-        // }
         self.apply_tx
             .send(GearCommand::Apply {
                 group: self.group,
@@ -294,27 +272,114 @@ impl RaftWorker {
         self.raft_log_store.put_hard_state(hs).await?;
         Ok(())
     }
-
-    async fn raft_client(&mut self, raft_node: u64) -> Result<RaftServiceClient<Channel>> {
-        // Avoid `.or_insert` for async function will always called.
-        if let Some(client) = self.raft_clients.get(&raft_node) {
-            return Ok(client.clone());
-        }
-        let client = self.raft_network.client(raft_node).await?;
-        self.raft_clients.insert(raft_node, client.clone());
-        Ok(client)
-    }
 }
 
 #[cfg(test)]
 mod tests {
+
+    use std::collections::BTreeMap;
+
+    use assert_matches::assert_matches;
+    use runkv_common::tracing_slog_drain::TracingSlogDrain;
+    use runkv_common::Worker;
+    use runkv_storage::raft_log_store_v2::store::RaftLogStoreOptions;
+    use test_log::test;
+
     use super::*;
+    use crate::components::raft_network::tests::MockRaftNetwork;
 
-    fn is_send_sync<T: Send + Sync>() {}
+    #[test(tokio::test)]
+    async fn test_raft_basic() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = tempdir.path().to_str().unwrap();
+        let raft_logger = build_raft_logger();
+        let raft_log_store = build_raft_log_store(path).await;
+        raft_log_store.add_group(1).await.unwrap();
+        raft_log_store.add_group(2).await.unwrap();
+        raft_log_store.add_group(3).await.unwrap();
+        let raft_network = MockRaftNetwork::default();
+        raft_network
+            .register(1, BTreeMap::from_iter([(1, 1), (2, 1), (3, 1)]))
+            .await
+            .unwrap();
+        macro_rules! worker {
+            ($id:expr) => {
+                build_raft_worker(
+                    1,
+                    1,
+                    $id,
+                    vec![1, 2, 3],
+                    raft_log_store.clone(),
+                    raft_logger.clone(),
+                    raft_network.clone(),
+                )
+                .await
+            };
+        }
 
-    #[test]
-    fn ensure_send_sync() {
-        is_send_sync::<raft::RawNode<RaftGroupLogStore>>();
-        is_send_sync::<RaftWorker>();
+        let (proposal_tx_1, mut apply_rx_1) = worker!(1);
+        let (_proposal_tx_2, mut apply_rx_2) = worker!(2);
+        let (_proposal_tx_3, mut apply_rx_3) = worker!(3);
+
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        proposal_tx_1
+            .send(Proposal {
+                data: vec![b'x'; 16],
+                context: vec![],
+            })
+            .unwrap();
+
+        let cmd = tokio::select! {
+            cmd = apply_rx_1.recv() => cmd,
+            cmd = apply_rx_2.recv() => cmd,
+            cmd = apply_rx_3.recv() => cmd,
+        };
+
+        assert_matches!(cmd, Some(GearCommand::Apply { group: 1, .. }));
+    }
+
+    fn build_raft_logger() -> slog::Logger {
+        slog::Logger::root(TracingSlogDrain, slog::o!("namespace" => "raft"))
+    }
+
+    async fn build_raft_log_store(path: &str) -> RaftLogStore {
+        let options = RaftLogStoreOptions {
+            log_dir_path: path.to_string(),
+            log_file_capacity: 64 << 20,
+            block_cache_capacity: 64 << 20,
+        };
+        RaftLogStore::open(options).await.unwrap()
+    }
+
+    async fn build_raft_worker<RN: RaftNetwork>(
+        group: u64,
+        node: u64,
+        raft_node: u64,
+        peers: Vec<u64>,
+        raft_log_store: RaftLogStore,
+        raft_logger: slog::Logger,
+        raft_network: RN,
+    ) -> (
+        mpsc::UnboundedSender<Proposal>,
+        mpsc::UnboundedReceiver<GearCommand>,
+    ) {
+        let (proposal_tx, proposal_rx) = mpsc::unbounded_channel();
+        let (apply_tx, apply_rx) = mpsc::unbounded_channel();
+        let options = RaftWorkerOptions {
+            group,
+            node,
+            raft_node,
+            raft_start_mode: RaftStartMode::Initialize { peers },
+            raft_log_store,
+            raft_logger,
+            raft_network,
+
+            proposal_rx,
+            apply_tx,
+        };
+        let mut worker = RaftWorker::build(options).await;
+        let _handle = tokio::spawn(async move { worker.run().await });
+        (proposal_tx, apply_rx)
     }
 }

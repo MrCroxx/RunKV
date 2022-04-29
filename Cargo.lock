@@ -42,6 +42,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5d78ce20460b82d3fa150275ed9d55e21064fc7951177baacf86a145c4a4b1f"
 
 [[package]]
+name = "assert_matches"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
+
+[[package]]
 name = "async-channel"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2043,7 +2049,6 @@ dependencies = [
 [[package]]
 name = "raft"
 version = "0.7.0"
-source = "git+https://github.com/mrcroxx/raft-rs?rev=0f7ae9334db9a73ef8c0d13d19a6dbf2a9077b54#0f7ae9334db9a73ef8c0d13d19a6dbf2a9077b54"
 dependencies = [
  "async-recursion",
  "async-trait",
@@ -2067,7 +2072,6 @@ dependencies = [
 [[package]]
 name = "raft-proto"
 version = "0.7.0"
-source = "git+https://github.com/mrcroxx/raft-rs?rev=0f7ae9334db9a73ef8c0d13d19a6dbf2a9077b54#0f7ae9334db9a73ef8c0d13d19a6dbf2a9077b54"
 dependencies = [
  "lazy_static",
  "prost",
@@ -2231,6 +2235,7 @@ dependencies = [
  "parking_lot 0.12.0",
  "serde",
  "serde_derive",
+ "slog",
  "test-log",
  "tokio",
  "toml",
@@ -2360,12 +2365,14 @@ name = "runkv-wheel"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "async-trait",
  "bincode",
  "bytes",
  "bytesize",
  "clap 3.1.6",
  "env_logger",
+ "futures",
  "humantime",
  "humantime-serde",
  "itertools",
@@ -2388,7 +2395,6 @@ dependencies = [
  "toml",
  "tonic",
  "tracing",
- "tracing-slog",
  "tracing-subscriber",
 ]
 
@@ -3148,17 +3154,6 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "tracing-slog"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "943e2eb329c27f5731cc63f62a4ff4526439b2fdbe61c8c9816a82ba80139d5f"
-dependencies = [
- "lazy_static",
- "slog",
- "tracing-core",
 ]
 
 [[package]]

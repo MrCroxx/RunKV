@@ -32,32 +32,16 @@ impl Error {
         Self::Other(e.into().to_string())
     }
 
-    pub fn transport_err(e: tonic::transport::Error) -> Self {
-        e.into()
-    }
-
     pub fn config_err(e: impl Into<Box<dyn std::error::Error>>) -> Self {
         Self::ConfigError(e.into().to_string())
-    }
-
-    pub fn storage_err(e: runkv_storage::Error) -> Error {
-        Self::StorageError(e)
     }
 
     pub fn serde_err(e: impl Into<Box<dyn std::error::Error>>) -> Self {
         Self::SerdeError(e.into().to_string())
     }
 
-    pub fn status(s: Status) -> Self {
-        Self::RpcStatus(s)
-    }
-
     pub fn raft_err(e: impl Into<Box<dyn std::error::Error>>) -> Self {
         RaftError::err(e).into()
-    }
-
-    pub fn raft_v2_err(e: raft::Error) -> Self {
-        e.into()
     }
 }
 

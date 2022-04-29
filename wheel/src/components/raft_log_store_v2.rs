@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
-use runkv_storage::raft_log_store::entry::RaftLogBatch;
-use runkv_storage::raft_log_store::RaftLogStore;
+use runkv_storage::raft_log_store_v2::entry::RaftLogBatch;
+use runkv_storage::raft_log_store_v2::RaftLogStore;
 
 use crate::error::{Error, Result};
 
@@ -45,28 +45,28 @@ impl RaftGroupLogStore {
     }
 
     pub async fn append(&self, batch: RaftLogBatch) -> Result<()> {
-        self.core.append(batch).await.map_err(Error::storage_err)
+        self.core.append(batch).await.map_err(Error::StorageError)
     }
 
     pub async fn put(&self, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
         self.core
             .put(self.group, key, value)
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
     }
 
     pub async fn get(&self, key: Vec<u8>) -> Result<Option<Vec<u8>>> {
         self.core
             .get(self.group, key)
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
     }
 
     pub async fn delete(&self, key: Vec<u8>) -> Result<()> {
         self.core
             .delete(self.group, key)
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
     }
 
     pub async fn put_hard_state(&self, hs: &raft::prelude::HardState) -> Result<()> {
@@ -98,22 +98,6 @@ impl RaftGroupLogStore {
     }
 }
 
-impl RaftGroupLogStore {
-    async fn first_index(&self) -> Result<core::result::Result<u64, u64>> {
-        self.core
-            .first_index(self.group, false)
-            .await
-            .map_err(Error::storage_err)
-    }
-
-    async fn next_index(&self) -> Result<core::result::Result<u64, u64>> {
-        self.core
-            .next_index(self.group, false)
-            .await
-            .map_err(Error::serde_err)
-    }
-}
-
 #[async_trait]
 impl raft::Storage for RaftGroupLogStore {
     /// `initial_state` is called when Raft is initialized. This interface will return a `RaftState`
@@ -121,15 +105,18 @@ impl raft::Storage for RaftGroupLogStore {
     ///
     /// `RaftState` could be initialized or not. If it's initialized it means the `Storage` is
     /// created with a configuration, and its last index and term should be greater than 0.
+    // #[tracing::instrument(level = "trace", skip(self))]
     async fn initial_state(&self) -> raft::Result<raft::RaftState> {
-        let hs = match self.get_hard_state().await.map_err(err)? {
-            None => return Ok(raft::RaftState::default()),
-            Some(hs) => hs,
-        };
-        let cs = match self.get_conf_state().await.map_err(err)? {
-            None => return Ok(raft::RaftState::default()),
-            Some(cs) => cs,
-        };
+        let hs = self
+            .get_hard_state()
+            .await
+            .map_err(err)?
+            .unwrap_or_default();
+        let cs = self
+            .get_conf_state()
+            .await
+            .map_err(err)?
+            .unwrap_or_default();
         Ok(raft::RaftState {
             hard_state: hs,
             conf_state: cs,
@@ -151,6 +138,7 @@ impl raft::Storage for RaftGroupLogStore {
     /// # Panics
     ///
     /// Panics if `high` is higher than `Storage::last_index(&self) + 1`.
+    // #[tracing::instrument(level = "trace", skip(self))]
     async fn entries(
         &self,
         low: u64,
@@ -160,7 +148,7 @@ impl raft::Storage for RaftGroupLogStore {
     ) -> raft::Result<Vec<raft::prelude::Entry>> {
         let high = match max_size {
             None => high,
-            Some(max_size) => std::cmp::min(high, low + std::cmp::max(max_size, 1)),
+            Some(max_size) => std::cmp::min(high, low.saturating_add(std::cmp::max(max_size, 1))),
         };
         let index = low;
         let max_len = (high - low) as usize;
@@ -190,9 +178,16 @@ impl raft::Storage for RaftGroupLogStore {
     /// [first_index()-1, last_index()]. The term of the entry before
     /// first_index is retained for matching purpose even though the
     /// rest of that entry may not be available.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn term(&self, idx: u64) -> raft::Result<u64> {
         let may_term = self.core.term(self.group, idx).await.map_err(err)?;
-        Ok(may_term.unwrap())
+        if let Some(term) = may_term {
+            return Ok(term);
+        }
+        if idx < self.first_index().await? {
+            return Err(raft::Error::Store(raft::StorageError::Compacted));
+        }
+        Err(raft::Error::Store(raft::StorageError::Unavailable))
     }
 
     /// Returns the index of the first log entry that is possible available via entries, which will
@@ -200,21 +195,15 @@ impl raft::Storage for RaftGroupLogStore {
     ///
     /// New created (but not initialized) `Storage` can be considered as truncated at 0 so that 1
     /// will be returned in this case.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn first_index(&self) -> raft::Result<u64> {
-        let index = match self.first_index().await.map_err(err)? {
-            Ok(index) => index,
-            Err(index) => index,
-        };
-        Ok(index)
+        self.core.masked_first_index(self.group).await.map_err(err)
     }
 
     /// The index of the last entry replicated in the `Storage`.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn last_index(&self) -> raft::Result<u64> {
-        let index = match self.next_index().await.map_err(err)? {
-            Ok(index) => index - 1,
-            Err(index) => index - 1,
-        };
-        Ok(index)
+        self.core.masked_last_index(self.group).await.map_err(err)
     }
 
     /// Returns the most recent snapshot.
@@ -224,6 +213,7 @@ impl raft::Storage for RaftGroupLogStore {
     /// snapshot and call snapshot later.
     /// A snapshot's index must not less than the `request_index`.
     /// `to` indicates which peer is requesting the snapshot.
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn snapshot(
         &self,
         _request_index: u64,
