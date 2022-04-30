@@ -11,6 +11,7 @@ use bytesize::ByteSize;
 use components::network::RaftNetwork;
 use components::raft_manager::{RaftManager, RaftManagerOptions};
 use error::{Error, Result};
+use hyper::service::{make_service_fn, service_fn};
 use meta::mem::MemoryMetaStore;
 use meta::MetaStoreRef;
 use runkv_common::channel_pool::ChannelPool;
@@ -44,6 +45,9 @@ pub async fn bootstrap_wheel(
         tokio::spawn(async move { worker.run().await });
     }
 
+    let listen_addr = format!("{}:{}", config.prometheus.host, config.prometheus.port);
+    boot_prometheus_service(listen_addr);
+
     Server::builder()
         .add_service(WheelServiceServer::new(wheel.clone()))
         .add_service(RaftServiceServer::new(wheel.clone()))
@@ -51,6 +55,24 @@ pub async fn bootstrap_wheel(
         .serve(addr_str.parse().map_err(Error::err)?)
         .await
         .map_err(Error::err)
+}
+
+pub fn boot_prometheus_service(listen_addr: String) {
+    tokio::spawn(async move {
+        info!(
+            "Prometheus listener for Prometheus is set up on http://{}",
+            listen_addr
+        );
+        let listen_prometheus_addr = listen_addr.parse().unwrap();
+        let serve_future =
+            hyper::Server::bind(&listen_prometheus_addr).serve(make_service_fn(|_| async {
+                Ok::<_, hyper::Error>(service_fn(Wheel::prometheus_serve_req))
+            }));
+
+        if let Err(err) = serve_future.await {
+            tracing::error!("server error: {}", err);
+        }
+    });
 }
 
 pub async fn build_wheel(config: &WheelConfig) -> Result<(Wheel, Vec<BoxedWorker>)> {

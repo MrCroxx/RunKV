@@ -1,4 +1,6 @@
-use runkv_common::config::{CacheConfig, LsmTreeConfig, MinioConfig, Node, S3Config};
+use runkv_common::config::{
+    CacheConfig, LsmTreeConfig, MinioConfig, Node, PrometheusConfig, S3Config,
+};
 use serde::Deserialize;
 
 #[derive(Deserialize, Clone, Debug)]
@@ -17,6 +19,7 @@ pub struct WheelConfig {
     pub cache: CacheConfig,
     pub lsm_tree: LsmTreeConfig,
     pub raft_log_store: RaftLogStoreConfig,
+    pub prometheus: PrometheusConfig,
 }
 
 #[derive(Deserialize, Clone, Debug)]
