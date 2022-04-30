@@ -247,7 +247,6 @@ impl Wheel {
             .header(CONTENT_TYPE, encoder.format_type())
             .body(Body::from(buffer))
             .unwrap();
-
         Ok(response)
     }
 }
