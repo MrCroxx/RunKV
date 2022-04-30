@@ -120,7 +120,7 @@ impl RaftManager {
         let lsm_tree = ObjectStoreLsmTree::new(lsm_tree_options);
 
         // Build raft group log store.
-        let raft_log_store = RaftGroupLogStore::new(group, self.raft_log_store.clone());
+        let raft_log_store = RaftGroupLogStore::new(raft_node, self.raft_log_store.clone());
 
         // Build FSM.
         let fsm_options = ObjectLsmTreeFsmOptions {
@@ -147,7 +147,7 @@ impl RaftManager {
             raft_node,
 
             raft_start_mode: RaftStartMode::Initialize { peers },
-            raft_log_store: self.raft_log_store.clone(),
+            raft_log_store,
             raft_logger,
             raft_network: self.raft_network.clone(),
 

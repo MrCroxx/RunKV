@@ -182,12 +182,6 @@ impl ObjectStoreLsmTreeCore {
             + 4 * SKIPLIST_NODE_TOWER_MAX_HEIGHT
             + 8;
 
-        // println!(
-        //     "remain:{} approximate:{}",
-        //     self.memtable.borrow().mem_remain(),
-        //     approximate_size
-        // );
-
         let mut guard = self.memtables.write();
         // Rotate memtable if needed.
         if guard.memtable.table.mem_remain() < approximate_size {

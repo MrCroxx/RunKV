@@ -181,7 +181,6 @@ impl MemStates {
         } else {
             state.first_index + state.indices.len() as u64 - 1
         };
-        println!("==========> mask last index [{}]: mask last index: {}, indices len: {}, first index: {}, indices: {:?}", group, mask_last_index,state.indices.len(),state.first_index, state.indices);
         Ok(mask_last_index)
     }
 

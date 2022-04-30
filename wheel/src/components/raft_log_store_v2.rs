@@ -252,3 +252,42 @@ impl raft::Storage for RaftGroupLogStore {
         todo!()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use raft::Storage;
+    use runkv_storage::raft_log_store_v2::entry::RaftLogBatchBuilder;
+    use runkv_storage::raft_log_store_v2::store::RaftLogStoreOptions;
+    use test_log::test;
+
+    use super::*;
+
+    #[test(tokio::test)]
+    async fn test_clone_safe() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = tempdir.path().to_str().unwrap();
+
+        let options = RaftLogStoreOptions {
+            log_dir_path: path.to_string(),
+            log_file_capacity: 64 << 20,
+            block_cache_capacity: 64 << 20,
+        };
+        let raft_log_store = RaftLogStore::open(options).await.unwrap();
+
+        raft_log_store.add_group(1).await.unwrap();
+
+        let raft_node = RaftGroupLogStore::new(1, raft_log_store);
+        let raft_node_clone = raft_node.clone();
+
+        let mut builder = RaftLogBatchBuilder::default();
+        builder.add(1, 1, 1, &[b'c'; 16], &[b'd'; 16]);
+        let mut batches = builder.build();
+        let batch = batches.remove(0);
+
+        raft_node.append(batch).await.unwrap();
+
+        let l1 = raft_node.last_index().await;
+        let l2 = raft_node_clone.last_index().await;
+        assert_eq!(l1, l2);
+    }
+}

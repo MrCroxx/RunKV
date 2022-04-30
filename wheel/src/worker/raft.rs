@@ -3,7 +3,6 @@ use std::time::Duration;
 use async_trait::async_trait;
 use runkv_common::Worker;
 use runkv_storage::raft_log_store_v2::entry::RaftLogBatchBuilder;
-use runkv_storage::raft_log_store_v2::RaftLogStore;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::{trace, warn};
@@ -32,7 +31,7 @@ pub struct RaftWorkerOptions<RN: RaftNetwork, F: Fsm> {
     pub raft_node: u64,
 
     pub raft_start_mode: RaftStartMode,
-    pub raft_log_store: RaftLogStore,
+    pub raft_log_store: RaftGroupLogStore,
     pub raft_logger: slog::Logger,
     pub raft_network: RN,
 
@@ -106,27 +105,20 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
             // max_committed_size_per_ready: todo!(),
             ..Default::default()
         };
-        println!("==========> raft config - id: {}", options.raft_node);
-        println!("==========> raft config - applied: {}", applied);
-        // println!(
-        //     "==========> raft config - raft log store: {:?}",
-        //     options.raft_log_store
-        // );
         raft_config.validate().map_err(Error::err)?;
 
-        let raft_log_store = RaftGroupLogStore::new(options.group, options.raft_log_store.clone());
+        let raft_log_store = options.raft_log_store.clone();
 
         if let RaftStartMode::Initialize { peers } = options.raft_start_mode {
             let cs = raft::prelude::ConfState {
                 voters: peers,
                 ..Default::default()
             };
-            println!("==========> cs: {:?}", cs);
             raft_log_store.put_conf_state(&cs).await.unwrap();
         };
 
-        let logger = options.raft_logger.new(slog::o!("group" => options.group));
-        let raft = raft::RawNode::new(&raft_config, raft_log_store.clone(), &logger).await?;
+        let raft =
+            raft::RawNode::new(&raft_config, raft_log_store.clone(), &options.raft_logger).await?;
 
         let message_rx = options
             .raft_network
@@ -272,7 +264,13 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
         let mut builder = RaftLogBatchBuilder::default();
         for entry in entries {
             let data = encode_entry_data(&entry);
-            builder.add(self.group, entry.term, entry.index, &entry.context, &data);
+            builder.add(
+                self.raft_node,
+                entry.term,
+                entry.index,
+                &entry.context,
+                &data,
+            );
         }
         let batches = builder.build();
         trace!(
@@ -320,18 +318,18 @@ mod tests {
         raft_log_store.add_group(3).await.unwrap();
         let raft_network = MockRaftNetwork::default();
         raft_network
-            .register(1, BTreeMap::from_iter([(1, 1), (2, 1), (3, 1)]))
+            .register(100, BTreeMap::from_iter([(1, 10), (2, 10), (3, 10)]))
             .await
             .unwrap();
 
         macro_rules! worker {
             ($id:expr) => {
                 build_raft_worker(
-                    1,
-                    1,
+                    100,
+                    10,
                     $id,
                     vec![1, 2, 3],
-                    raft_log_store.clone(),
+                    RaftGroupLogStore::new($id, raft_log_store.clone()),
                     raft_logger.clone(),
                     raft_network.clone(),
                 )
@@ -396,7 +394,7 @@ mod tests {
         node: u64,
         raft_node: u64,
         peers: Vec<u64>,
-        raft_log_store: RaftLogStore,
+        raft_log_store: RaftGroupLogStore,
         raft_logger: slog::Logger,
         raft_network: RN,
     ) -> (
