@@ -124,7 +124,7 @@ impl MemStates {
     pub async fn term(&self, group: u64, index: u64) -> Result<Option<u64>> {
         state!(self.states, group, guard, state);
 
-        if state.indices.is_empty() && index == state.first_index - 1 {
+        if state.indices.is_empty() || index == state.first_index - 1 {
             return Ok(Some(state.phantom_term));
         }
 
@@ -181,6 +181,7 @@ impl MemStates {
         } else {
             state.first_index + state.indices.len() as u64 - 1
         };
+        println!("==========> mask last index [{}]: mask last index: {}, indices len: {}, first index: {}, indices: {:?}", group, mask_last_index,state.indices.len(),state.first_index, state.indices);
         Ok(mask_last_index)
     }
 

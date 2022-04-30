@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::{trace, warn};
 
-use crate::components::command::GearCommand;
+use crate::components::fsm_v2::Fsm;
 use crate::components::raft_log_store_v2::{encode_entry_data, RaftGroupLogStore};
 use crate::components::raft_network::RaftNetwork;
 use crate::error::{Error, Result};
@@ -23,19 +23,10 @@ pub struct Proposal {
 
 pub enum RaftStartMode {
     Initialize { peers: Vec<u64> },
-    Restart { applied: u64 },
+    Restart,
 }
 
-impl RaftStartMode {
-    fn applied(&self) -> u64 {
-        match self {
-            Self::Initialize { .. } => 0,
-            Self::Restart { applied } => *applied,
-        }
-    }
-}
-
-pub struct RaftWorkerOptions<RN: RaftNetwork> {
+pub struct RaftWorkerOptions<RN: RaftNetwork, F: Fsm> {
     pub group: u64,
     pub node: u64,
     pub raft_node: u64,
@@ -46,43 +37,61 @@ pub struct RaftWorkerOptions<RN: RaftNetwork> {
     pub raft_network: RN,
 
     pub proposal_rx: mpsc::UnboundedReceiver<Proposal>,
-    pub apply_tx: mpsc::UnboundedSender<GearCommand>,
+
+    pub fsm: F,
 }
 
-pub struct RaftWorker<RN: RaftNetwork> {
+pub struct RaftWorker<RN: RaftNetwork, F: Fsm> {
     group: u64,
-    _node: u64,
-    _raft_node: u64,
+    node: u64,
+    raft_node: u64,
 
     raft: raft::RawNode<RaftGroupLogStore>,
     raft_log_store: RaftGroupLogStore,
     raft_network: RN,
+    raft_soft_state: Option<raft::SoftState>,
 
     message_rx: mpsc::UnboundedReceiver<raft::prelude::Message>,
     proposal_rx: mpsc::UnboundedReceiver<Proposal>,
-    apply_tx: mpsc::UnboundedSender<GearCommand>,
+
+    fsm: F,
+}
+
+impl<RN: RaftNetwork, F: Fsm> std::fmt::Debug for RaftWorker<RN, F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RaftWorker")
+            .field("node", &self.node)
+            .field("group", &self.group)
+            .field("raft_node", &self.raft_node)
+            .finish()
+    }
 }
 
 #[async_trait]
-impl<RN: RaftNetwork> Worker for RaftWorker<RN> {
+impl<RN: RaftNetwork, F: Fsm> Worker for RaftWorker<RN, F> {
     async fn run(&mut self) -> anyhow::Result<()> {
         // TODO: Gracefully kill.
         loop {
             match self.run_inner().await {
                 Ok(_) => return Ok(()),
-                Err(e) => warn!("error occur when uploader running: {}", e),
+                Err(e) => warn!("error occur when raft worker running: {}", e),
             }
         }
     }
 }
 
-impl<RN: RaftNetwork> RaftWorker<RN> {
-    pub async fn build(options: RaftWorkerOptions<RN>) -> Self {
+impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
+    pub async fn build(options: RaftWorkerOptions<RN, F>) -> Result<Self> {
+        let applied = match options.raft_start_mode {
+            RaftStartMode::Initialize { .. } => 0,
+            RaftStartMode::Restart => options.fsm.raft_applied_index().await?,
+        };
+
         let raft_config = raft::Config {
             id: options.raft_node,
             // election_tick: todo!(),
             // heartbeat_tick: todo!(),
-            applied: options.raft_start_mode.applied(),
+            applied,
             // max_size_per_msg: todo!(),
             // max_inflight_msgs: todo!(),
             check_quorum: true,
@@ -97,7 +106,13 @@ impl<RN: RaftNetwork> RaftWorker<RN> {
             // max_committed_size_per_ready: todo!(),
             ..Default::default()
         };
-        raft_config.validate().unwrap();
+        println!("==========> raft config - id: {}", options.raft_node);
+        println!("==========> raft config - applied: {}", applied);
+        // println!(
+        //     "==========> raft config - raft log store: {:?}",
+        //     options.raft_log_store
+        // );
+        raft_config.validate().map_err(Error::err)?;
 
         let raft_log_store = RaftGroupLogStore::new(options.group, options.raft_log_store.clone());
 
@@ -106,33 +121,33 @@ impl<RN: RaftNetwork> RaftWorker<RN> {
                 voters: peers,
                 ..Default::default()
             };
+            println!("==========> cs: {:?}", cs);
             raft_log_store.put_conf_state(&cs).await.unwrap();
         };
 
         let logger = options.raft_logger.new(slog::o!("group" => options.group));
-        let raft = raft::RawNode::new(&raft_config, raft_log_store.clone(), &logger)
-            .await
-            .unwrap();
+        let raft = raft::RawNode::new(&raft_config, raft_log_store.clone(), &logger).await?;
 
         let message_rx = options
             .raft_network
             .take_message_rx(options.raft_node)
-            .await
-            .unwrap();
+            .await?;
 
-        Self {
+        Ok(Self {
             group: options.group,
-            _node: options.node,
-            _raft_node: options.raft_node,
+            node: options.node,
+            raft_node: options.raft_node,
 
             raft,
             raft_log_store,
             raft_network: options.raft_network,
+            raft_soft_state: None,
+
+            fsm: options.fsm,
 
             proposal_rx: options.proposal_rx,
             message_rx,
-            apply_tx: options.apply_tx,
-        }
+        })
     }
 
     async fn run_inner(&mut self) -> Result<()> {
@@ -163,12 +178,12 @@ impl<RN: RaftNetwork> RaftWorker<RN> {
         }
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn tick(&mut self) {
         self.raft.tick().await;
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn propose(&mut self, proposal: Proposal) -> Result<()> {
         self.raft
             .propose(proposal.context, proposal.data)
@@ -176,14 +191,22 @@ impl<RN: RaftNetwork> RaftWorker<RN> {
             .map_err(Error::RaftV2Error)
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn step(&mut self, msg: raft::prelude::Message) -> Result<()> {
         self.raft.step(msg).await.map_err(Error::RaftV2Error)
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn handle_ready(&mut self) -> Result<()> {
         let mut ready = self.raft.ready().await;
+
+        // 0. Update soft state.
+        if let Some(ss) = ready.ss() {
+            self.raft_soft_state = Some(raft::SoftState {
+                leader_id: ss.leader_id,
+                raft_state: ss.raft_state,
+            });
+        }
 
         // 1. Send messages.
         self.send_messages(ready.take_messages()).await?;
@@ -221,12 +244,12 @@ impl<RN: RaftNetwork> RaftWorker<RN> {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn send_messages(&mut self, messages: Vec<raft::prelude::Message>) -> Result<()> {
         self.raft_network.send(messages).await
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn apply_snapshot(&mut self, snapshot: &raft::prelude::Snapshot) -> Result<()> {
         // Impl me!!!
         // Impl me!!!
@@ -234,21 +257,17 @@ impl<RN: RaftNetwork> RaftWorker<RN> {
         todo!()
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn apply_log_entries(&mut self, entries: Vec<raft::prelude::Entry>) -> Result<()> {
-        if entries.is_empty() {
-            return Ok(());
-        }
-        self.apply_tx
-            .send(GearCommand::Apply {
-                group: self.group,
-                range: entries.first().unwrap().index..entries.last().unwrap().index + 1,
-            })
-            .map_err(Error::err)?;
+        let is_leader = match &self.raft_soft_state {
+            None => false,
+            Some(ss) => ss.raft_state == raft::StateRole::Leader,
+        };
+        self.fsm.apply(self.group, is_leader, entries).await?;
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn append_log_entries(&mut self, entries: Vec<raft::prelude::Entry>) -> Result<()> {
         let mut builder = RaftLogBatchBuilder::default();
         for entry in entries {
@@ -267,7 +286,7 @@ impl<RN: RaftNetwork> RaftWorker<RN> {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn store_hard_state(&mut self, hs: &raft::prelude::HardState) -> Result<()> {
         self.raft_log_store.put_hard_state(hs).await?;
         Ok(())
@@ -283,9 +302,11 @@ mod tests {
     use runkv_common::tracing_slog_drain::TracingSlogDrain;
     use runkv_common::Worker;
     use runkv_storage::raft_log_store_v2::store::RaftLogStoreOptions;
+    use runkv_storage::raft_log_store_v2::RaftLogStore;
     use test_log::test;
 
     use super::*;
+    use crate::components::fsm_v2::tests::MockFsm;
     use crate::components::raft_network::tests::MockRaftNetwork;
 
     #[test(tokio::test)]
@@ -302,6 +323,7 @@ mod tests {
             .register(1, BTreeMap::from_iter([(1, 1), (2, 1), (3, 1)]))
             .await
             .unwrap();
+
         macro_rules! worker {
             ($id:expr) => {
                 build_raft_worker(
@@ -323,20 +345,37 @@ mod tests {
 
         tokio::time::sleep(Duration::from_secs(3)).await;
 
+        let data = vec![b'd'; 16];
+        let context = vec![b'c'; 16];
+
         proposal_tx_1
             .send(Proposal {
-                data: vec![b'x'; 16],
-                context: vec![],
+                data: data.clone(),
+                context: context.clone(),
             })
             .unwrap();
 
-        let cmd = tokio::select! {
-            cmd = apply_rx_1.recv() => cmd,
-            cmd = apply_rx_2.recv() => cmd,
-            cmd = apply_rx_3.recv() => cmd,
-        };
-
-        assert_matches!(cmd, Some(GearCommand::Apply { group: 1, .. }));
+        loop {
+            let entry = tokio::select! {
+                entry = apply_rx_1.recv() => entry,
+                entry = apply_rx_2.recv() => entry,
+                entry = apply_rx_3.recv() => entry,
+            };
+            let entry = entry.unwrap();
+            if entry.entry_type() != raft::prelude::EntryType::EntryNormal || entry.data.is_empty()
+            {
+                continue;
+            }
+            assert_matches!(entry, raft::prelude::Entry {
+                data: edata,
+                context: econtext,
+                ..
+            } => {
+                assert_eq!(edata, data);
+                assert_eq!(econtext, context);
+            });
+            break;
+        }
     }
 
     fn build_raft_logger() -> slog::Logger {
@@ -362,10 +401,10 @@ mod tests {
         raft_network: RN,
     ) -> (
         mpsc::UnboundedSender<Proposal>,
-        mpsc::UnboundedReceiver<GearCommand>,
+        mpsc::UnboundedReceiver<raft::prelude::Entry>,
     ) {
         let (proposal_tx, proposal_rx) = mpsc::unbounded_channel();
-        let (apply_tx, apply_rx) = mpsc::unbounded_channel();
+        let (fsm, apply_rx) = MockFsm::new(true);
         let options = RaftWorkerOptions {
             group,
             node,
@@ -376,9 +415,10 @@ mod tests {
             raft_network,
 
             proposal_rx,
-            apply_tx,
+
+            fsm,
         };
-        let mut worker = RaftWorker::build(options).await;
+        let mut worker = RaftWorker::build(options).await.unwrap();
         let _handle = tokio::spawn(async move { worker.run().await });
         (proposal_tx, apply_rx)
     }

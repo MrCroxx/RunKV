@@ -39,6 +39,14 @@ pub struct RaftGroupLogStore {
     core: RaftLogStore,
 }
 
+impl std::fmt::Debug for RaftGroupLogStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RaftGroupLogStore")
+            .field("group", &self.group)
+            .finish()
+    }
+}
+
 impl RaftGroupLogStore {
     pub fn new(group: u64, core: RaftLogStore) -> Self {
         Self { group, core }
@@ -96,6 +104,25 @@ impl RaftGroupLogStore {
         let hs = bincode::deserialize(&buf).map_err(Error::serde_err)?;
         Ok(Some(hs))
     }
+
+    pub async fn entries(&self, index: u64, max_len: usize) -> Result<Vec<raft::prelude::Entry>> {
+        let raw_entries = self.core.entries(self.group, index, max_len).await?;
+        let entries = raw_entries
+            .into_iter()
+            .map(|raw_entry| {
+                let (raw_entry_type, _, data) = decode_entry_data(&raw_entry.data);
+                raft::prelude::Entry {
+                    entry_type: raw_entry_type,
+                    term: raw_entry.term,
+                    index: raw_entry.index,
+                    data: data.to_vec(),
+                    context: raw_entry.ctx,
+                    ..Default::default()
+                }
+            })
+            .collect_vec();
+        Ok(entries)
+    }
 }
 
 #[async_trait]
@@ -105,7 +132,7 @@ impl raft::Storage for RaftGroupLogStore {
     ///
     /// `RaftState` could be initialized or not. If it's initialized it means the `Storage` is
     /// created with a configuration, and its last index and term should be greater than 0.
-    // #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn initial_state(&self) -> raft::Result<raft::RaftState> {
         let hs = self
             .get_hard_state()
@@ -138,7 +165,7 @@ impl raft::Storage for RaftGroupLogStore {
     /// # Panics
     ///
     /// Panics if `high` is higher than `Storage::last_index(&self) + 1`.
-    // #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn entries(
         &self,
         low: u64,
@@ -178,7 +205,7 @@ impl raft::Storage for RaftGroupLogStore {
     /// [first_index()-1, last_index()]. The term of the entry before
     /// first_index is retained for matching purpose even though the
     /// rest of that entry may not be available.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn term(&self, idx: u64) -> raft::Result<u64> {
         let may_term = self.core.term(self.group, idx).await.map_err(err)?;
         if let Some(term) = may_term {
@@ -195,13 +222,13 @@ impl raft::Storage for RaftGroupLogStore {
     ///
     /// New created (but not initialized) `Storage` can be considered as truncated at 0 so that 1
     /// will be returned in this case.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn first_index(&self) -> raft::Result<u64> {
         self.core.masked_first_index(self.group).await.map_err(err)
     }
 
     /// The index of the last entry replicated in the `Storage`.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn last_index(&self) -> raft::Result<u64> {
         self.core.masked_last_index(self.group).await.map_err(err)
     }
@@ -213,7 +240,7 @@ impl raft::Storage for RaftGroupLogStore {
     /// snapshot and call snapshot later.
     /// A snapshot's index must not less than the `request_index`.
     /// `to` indicates which peer is requesting the snapshot.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn snapshot(
         &self,
         _request_index: u64,

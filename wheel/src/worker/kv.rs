@@ -78,7 +78,7 @@ impl Worker for KvWorker {
         loop {
             match self.run_inner().await {
                 Ok(_) => return Ok(()),
-                Err(e) => warn!("error occur when uploader running: {}", e),
+                Err(e) => warn!("error occur when kv worker running: {}", e),
             }
         }
     }
@@ -190,7 +190,7 @@ impl Applier {
         loop {
             match self.run_inner().await {
                 Ok(_) => return Ok(()),
-                Err(e) => warn!("error occur when uploader running: {}", e),
+                Err(e) => warn!("error occur when applier running: {}", e),
             }
         }
     }

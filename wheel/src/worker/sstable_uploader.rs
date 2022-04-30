@@ -46,6 +46,14 @@ pub struct SstableUploader {
     sstable_sequential_id: AtomicU64,
 }
 
+impl std::fmt::Debug for SstableUploader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SstableUploader")
+            .field("raft_node", &self.raft_node)
+            .finish()
+    }
+}
+
 #[async_trait]
 impl Worker for SstableUploader {
     async fn run(&mut self) -> anyhow::Result<()> {

@@ -104,6 +104,16 @@ impl GrpcRaftNetwork {
         let channel = self.channel_pool.get(node).await.map_err(Error::err)?;
         Ok(RaftServiceClient::new(channel))
     }
+
+    pub async fn raft_nodes(&self, group: u64) -> Result<Vec<u64>> {
+        let guard = self.core.read().await;
+        let raft_nodes = guard
+            .groups
+            .get(&group)
+            .ok_or(RaftManageError::RaftGroupNotExists(group))?;
+        let raft_nodes = raft_nodes.iter().copied().collect_vec();
+        Ok(raft_nodes)
+    }
 }
 
 #[async_trait]
