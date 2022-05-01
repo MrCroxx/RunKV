@@ -20,7 +20,6 @@ hyper = { version = "^0.14", features = ["server", "http1", "tcp"] }
 itertools = "0.10.3"
 lazy_static = "^1.4"
 moka = { version = "0.7", features = ["future"] }
-openraft = { git = "https://github.com/datafuselabs/openraft", rev = "ca8a09c1898dbcaa4c2bf49bf5dabc5221e0b908" }
 parking_lot = "0.12"
 prometheus = "0.13.0"
 prost = "0.9"

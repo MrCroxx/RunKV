@@ -263,20 +263,20 @@ impl RaftLogStore {
         self.core.states.ctx(group, index).await
     }
 
-    pub async fn first_index(
-        &self,
-        group: u64,
-        unmask: bool,
-    ) -> Result<core::result::Result<u64, u64>> {
-        self.core.states.first_index(group, unmask).await
+    pub async fn first_index(&self, group: u64) -> Result<u64> {
+        self.core.states.first_index(group).await
     }
 
-    pub async fn next_index(
-        &self,
-        group: u64,
-        unmask: bool,
-    ) -> Result<core::result::Result<u64, u64>> {
-        self.core.states.next_index(group, unmask).await
+    pub async fn last_index(&self, group: u64) -> Result<u64> {
+        self.core.states.last_index(group).await
+    }
+
+    pub async fn masked_first_index(&self, group: u64) -> Result<u64> {
+        self.core.states.masked_first_index(group).await
+    }
+
+    pub async fn masked_last_index(&self, group: u64) -> Result<u64> {
+        self.core.states.masked_last_index(group).await
     }
 
     pub async fn put(&self, group: u64, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
