@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -36,6 +37,7 @@ fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
 }
 
 pub struct WheelOptions {
+    pub node: u64,
     pub meta_store: MetaStoreRef,
     pub channel_pool: ChannelPool,
     pub raft_network: GrpcRaftNetwork,
@@ -54,12 +56,14 @@ struct WheelInner {
 
 #[derive(Clone)]
 pub struct Wheel {
+    node: u64,
     inner: Arc<WheelInner>,
 }
 
 impl Wheel {
     pub fn new(options: WheelOptions) -> Self {
         Self {
+            node: options.node,
             inner: Arc::new(WheelInner {
                 meta_store: options.meta_store,
                 channel_pool: options.channel_pool,
@@ -69,6 +73,12 @@ impl Wheel {
                 request_id: AtomicU64::new(0),
             }),
         }
+    }
+}
+
+impl std::fmt::Debug for Wheel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Wheel").field("node", &self.node).finish()
     }
 }
 
@@ -129,7 +139,7 @@ impl Wheel {
         Ok(response)
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn txn_inner(&self, request: TxnRequest) -> Result<TxnResponse> {
         // Pick raft leader of the request.
         let raft_nodes = self.txn_raft_nodes(&request).await?;
@@ -218,7 +228,7 @@ impl Wheel {
 
 #[async_trait]
 impl WheelService for Wheel {
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn add_endpoints(
         &self,
         request: Request<AddEndpointsRequest>,
@@ -235,7 +245,7 @@ impl WheelService for Wheel {
         Ok(Response::new(AddEndpointsResponse::default()))
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn add_key_range(
         &self,
         request: Request<AddKeyRangeRequest>,
@@ -244,6 +254,19 @@ impl WheelService for Wheel {
         self.inner
             .meta_store
             .add_key_range(req.key_range.unwrap(), req.group, &req.raft_nodes)
+            .await
+            .map_err(internal)?;
+
+        self.inner
+            .raft_network
+            .register(
+                req.group,
+                BTreeMap::from_iter(
+                    req.nodes
+                        .iter()
+                        .map(|(&raft_node, &node)| (raft_node, node)),
+                ),
+            )
             .await
             .map_err(internal)?;
 
@@ -259,7 +282,7 @@ impl WheelService for Wheel {
         Ok(Response::new(rsp))
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn initialize_raft_group(
         &self,
         _request: Request<InitializeRaftGroupRequest>,
@@ -270,7 +293,7 @@ impl WheelService for Wheel {
 
 #[async_trait]
 impl RaftService for Wheel {
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn append_entries(
         &self,
         _request: Request<AppendEntriesRequest>,
@@ -278,7 +301,7 @@ impl RaftService for Wheel {
         unreachable!()
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn install_snapshot(
         &self,
         _request: Request<InstallSnapshotRequest>,
@@ -286,7 +309,7 @@ impl RaftService for Wheel {
         unreachable!()
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn vote(
         &self,
         _request: Request<VoteRequest>,
@@ -294,7 +317,7 @@ impl RaftService for Wheel {
         unreachable!()
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn raft(
         &self,
         request: Request<RaftRequest>,
@@ -315,7 +338,7 @@ impl RaftService for Wheel {
 
 #[async_trait]
 impl KvService for Wheel {
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn get(
         &self,
         request: Request<GetRequest>,
@@ -325,7 +348,7 @@ impl KvService for Wheel {
         Ok(Response::new(rsp))
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn put(
         &self,
         request: Request<PutRequest>,
@@ -335,7 +358,7 @@ impl KvService for Wheel {
         Ok(Response::new(rsp))
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn delete(
         &self,
         request: Request<DeleteRequest>,
@@ -345,7 +368,7 @@ impl KvService for Wheel {
         Ok(Response::new(rsp))
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn snapshot(
         &self,
         request: Request<SnapshotRequest>,
@@ -355,7 +378,7 @@ impl KvService for Wheel {
         Ok(Response::new(rsp))
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn txn(
         &self,
         request: Request<TxnRequest>,

@@ -63,34 +63,6 @@ impl GrpcRaftNetwork {
         }
     }
 
-    /// Register raft node info to raft network. `raft_nodes` maps raft node id to node id.
-    pub async fn register(&self, group: u64, raft_nodes: BTreeMap<u64, u64>) -> Result<()> {
-        let mut guard = self.core.write().await;
-        match guard.groups.entry(group) {
-            Entry::Occupied(_) => return Err(RaftManageError::RaftGroupAlreadyExists(group).into()),
-            Entry::Vacant(v) => {
-                v.insert(raft_nodes.keys().copied().collect_vec());
-            }
-        }
-        for (raft_node, node) in raft_nodes {
-            match guard.raft_nodes.entry(raft_node) {
-                Entry::Occupied(o) => {
-                    // TODO: Remove inserted group.
-                    return Err(RaftManageError::RaftNodeAlreadyExists {
-                        group,
-                        raft_node,
-                        node: *o.get(),
-                    }
-                    .into());
-                }
-                Entry::Vacant(v) => {
-                    v.insert(node);
-                }
-            }
-        }
-        Ok(())
-    }
-
     pub async fn raft_nodes(&self, group: u64) -> Result<Vec<u64>> {
         let guard = self.core.read().await;
         let raft_nodes = guard
@@ -124,6 +96,7 @@ impl RaftNetwork for GrpcRaftNetwork {
                 .into());
             }
             guard.raft_nodes.insert(raft_node, node);
+            // FIXME: Chnanels doesn't belong to the current node should not be created.
             let (tx, rx) = mpsc::unbounded_channel();
             guard.message_channels.insert(raft_node, (tx, Some(rx)));
         }

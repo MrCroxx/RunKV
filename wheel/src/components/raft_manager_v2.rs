@@ -20,7 +20,7 @@ use tracing::error;
 use super::fsm_v2::{ObjectLsmTreeFsm, ObjectLsmTreeFsmOptions};
 use super::lsm_tree::{ObjectStoreLsmTree, ObjectStoreLsmTreeOptions};
 use super::raft_log_store_v2::RaftGroupLogStore;
-use super::raft_network::GrpcRaftNetwork;
+use super::raft_network::{GrpcRaftNetwork, RaftNetwork};
 use crate::error::{Error, RaftError, Result};
 use crate::worker::raft::{Proposal, RaftStartMode, RaftWorker, RaftWorkerOptions};
 use crate::worker::sstable_uploader::{SstableUploader, SstableUploaderOptions};
@@ -113,6 +113,7 @@ impl RaftManager {
         let lsm_tree = ObjectStoreLsmTree::new(lsm_tree_options);
 
         // Build raft group log store.
+        self.raft_log_store.add_group(raft_node).await?;
         let raft_log_store = RaftGroupLogStore::new(raft_node, self.raft_log_store.clone());
 
         // Build FSM.

@@ -20,7 +20,7 @@ openraft = { git = "https://github.com/datafuselabs/openraft", rev = "ca8a09c189
 parking_lot = "0.12"
 prost = "0.9"
 raft = { git = "https://github.com/mrcroxx/raft-rs", rev = "f44c57464e9939c66f5e1bcb6913e9be28213689" }
-# TODO: Remove this line.
+# Uncomment this line if you want to debug raft-rs locally.
 # raft = { path = "../../raft-rs" }
 rand = "0.8.5"
 runkv-common = { path = "../common" }

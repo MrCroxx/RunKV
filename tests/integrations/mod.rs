@@ -121,14 +121,14 @@ async fn test_concurrent_put_get() {
         .await
         .unwrap();
     tokio::time::sleep(Duration::from_secs(3)).await;
-    wheel_client
-        .initialize_raft_group(InitializeRaftGroupRequest {
-            leader: 1,
-            raft_nodes: vec![1, 2, 3],
-        })
-        .await
-        .unwrap();
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    // wheel_client
+    //     .initialize_raft_group(InitializeRaftGroupRequest {
+    //         leader: 1,
+    //         raft_nodes: vec![1, 2, 3],
+    //     })
+    //     .await
+    //     .unwrap();
+    // tokio::time::sleep(Duration::from_secs(3)).await;
 
     // TODO: Restore concurrent test with [`KvServiceClient`].
 
@@ -141,7 +141,7 @@ async fn test_concurrent_put_get() {
     .await
     .unwrap();
 
-    let futures = (1..=100)
+    let futures = (1..=2000)
         .map(|i| {
             let channel_clone = channel.clone();
             async move {
