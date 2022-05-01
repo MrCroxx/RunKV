@@ -74,6 +74,23 @@ impl Wheel {
             }),
         }
     }
+
+    pub async fn prometheus_service(
+        _request: http::Request<hyper::Body>,
+    ) -> Result<http::Response<hyper::Body>> {
+        use prometheus::Encoder;
+
+        let encoder = prometheus::TextEncoder::new();
+        let metric_families = prometheus::gather();
+        let mut buffer = vec![];
+        encoder.encode(&metric_families, &mut buffer).unwrap();
+        let response = hyper::Response::builder()
+            .status(200)
+            .header(hyper::header::CONTENT_TYPE, encoder.format_type())
+            .body(hyper::Body::from(buffer))
+            .unwrap();
+        Ok(response)
+    }
 }
 
 impl std::fmt::Debug for Wheel {

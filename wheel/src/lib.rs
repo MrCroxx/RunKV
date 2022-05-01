@@ -12,6 +12,7 @@ use bytesize::ByteSize;
 use components::raft_manager_v2::{RaftManager, RaftManagerOptions};
 use components::raft_network::GrpcRaftNetwork;
 use error::{Error, Result};
+use hyper::service::{make_service_fn, service_fn};
 use meta::mem::MemoryMetaStore;
 use meta::MetaStoreRef;
 use runkv_common::channel_pool::ChannelPool;
@@ -39,10 +40,19 @@ pub async fn bootstrap_wheel(
     wheel: Wheel,
     workers: Vec<BoxedWorker>,
 ) -> Result<()> {
+    let enable_metrics = match std::env::var("RUNKV_METRICS") {
+        Err(_) => false,
+        Ok(val) => val.parse().unwrap(),
+    };
+
     let addr_str = format!("{}:{}", config.host, config.port);
 
     for mut worker in workers.into_iter() {
         tokio::spawn(async move { worker.run().await });
+    }
+
+    if enable_metrics {
+        bootstrap_prometheus_service(config);
     }
 
     Server::builder()
@@ -52,6 +62,25 @@ pub async fn bootstrap_wheel(
         .serve(addr_str.parse().map_err(Error::err)?)
         .await
         .map_err(Error::err)
+}
+
+pub fn bootstrap_prometheus_service(config: &WheelConfig) {
+    let listen_addr = format!("{}:{}", config.prometheus.host, config.prometheus.port);
+    let prometheus_service_addr = listen_addr.parse().unwrap();
+    tokio::spawn(async move {
+        info!(
+            "Prometheus listener for Prometheus is set up on http://{}",
+            listen_addr
+        );
+        if let Err(e) = hyper::Server::bind(&prometheus_service_addr)
+            .serve(make_service_fn(|_| async {
+                Ok::<_, hyper::Error>(service_fn(Wheel::prometheus_service))
+            }))
+            .await
+        {
+            tracing::error!("promethrus service error: {}", e);
+        }
+    });
 }
 
 pub async fn build_wheel(config: &WheelConfig) -> Result<(Wheel, Vec<BoxedWorker>)> {
