@@ -66,7 +66,7 @@ impl openraft::RaftNetwork<RaftTypeConfig> for RaftNetworkConnection {
             .client
             .append_entries(request)
             .await
-            .map_err(Error::status)
+            .map_err(Error::RpcStatus)
             .map_err(append_entries_err)?;
         let resp = response.into_inner();
         Ok(bincode::deserialize(&resp.data)
@@ -97,7 +97,7 @@ impl openraft::RaftNetwork<RaftTypeConfig> for RaftNetworkConnection {
             .client
             .install_snapshot(request)
             .await
-            .map_err(Error::status)
+            .map_err(Error::RpcStatus)
             .map_err(install_snapshot_err)?;
         let resp = response.into_inner();
         Ok(bincode::deserialize(&resp.data)
@@ -124,7 +124,7 @@ impl openraft::RaftNetwork<RaftTypeConfig> for RaftNetworkConnection {
             .client
             .vote(request)
             .await
-            .map_err(Error::status)
+            .map_err(Error::RpcStatus)
             .map_err(vote_err)?;
         let resp = response.into_inner();
         Ok(bincode::deserialize(&resp.data)

@@ -5,6 +5,7 @@ pub mod config;
 pub mod log;
 pub mod notify_pool;
 pub mod time;
+pub mod tracing_slog_drain;
 
 use async_trait::async_trait;
 

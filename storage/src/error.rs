@@ -1,6 +1,7 @@
 use crate::manifest::ManifestError;
 use crate::object_store::ObjectStoreError;
 use crate::raft_log_store::error::RaftLogStoreError;
+use crate::raft_log_store_v2::error::RaftLogStoreError as RaftLogStoreErrorV2;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -16,6 +17,8 @@ pub enum Error {
     IoError(#[from] std::io::Error),
     #[error("raft log store error: {0}")]
     RaftLogStoreError(#[from] RaftLogStoreError),
+    #[error("raft log store error: {0}")]
+    RaftLogStoreErrorV2(#[from] RaftLogStoreErrorV2),
     #[error("other: {0}")]
     Other(String),
 }

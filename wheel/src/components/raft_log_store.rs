@@ -50,7 +50,7 @@ impl<F: Fsm> RaftGroupLogStore<F> {
             .core
             .get(self.group, APPLIED_LOG_ID_KEY.to_vec())
             .await
-            .map_err(Error::storage_err)?
+            .map_err(Error::StorageError)?
         {
             None => return Ok(None),
             Some(data) => data,
@@ -93,7 +93,7 @@ impl<F: Fsm> RaftGroupLogStore<F> {
         self.core
             .compact(self.group, index)
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
     }
 }
 
@@ -114,7 +114,7 @@ impl<F: Fsm> RaftGroupLogStore<F> {
                 self.core
                     .put(self.group, MEMBERSHIP_KEY.to_vec(), value)
                     .await
-                    .map_err(Error::storage_err)?;
+                    .map_err(Error::StorageError)?;
                 None
             }
         };
@@ -145,7 +145,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
         self.core
             .put(self.group, VOTE_KEY.to_vec(), value)
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
             .map_err(err)?;
         Ok(())
     }
@@ -162,7 +162,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
             .core
             .get(self.group, VOTE_KEY.to_vec())
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
             .map_err(err)?;
         let vote = match buf {
             None => None,
@@ -219,7 +219,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
             self.core
                 .append(batch)
                 .await
-                .map_err(Error::storage_err)
+                .map_err(Error::StorageError)
                 .map_err(err)?;
         }
         Ok(())
@@ -245,7 +245,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
         self.core
             .truncate(self.group, log_id.index)
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
             .map_err(|e| err(e, log_id))?;
         Ok(())
     }
@@ -274,14 +274,14 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
         self.core
             .put(self.group, PRUGE_LOG_ID_KEY.to_vec(), value)
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
             .map_err(|e| err(e, log_id))?;
 
         // Perform log compact.
         self.core
             .mask(self.group, log_id.index + 1)
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
             .map_err(|e| err(e, log_id))?;
 
         Ok(())
@@ -307,7 +307,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
             .core
             .get(self.group, APPLIED_LOG_ID_KEY.to_vec())
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
             .map_err(err)?;
         let applied_log_id = match applied_log_id {
             None => None,
@@ -322,7 +322,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
             .core
             .get(self.group, MEMBERSHIP_KEY.to_vec())
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
             .map_err(err)?;
         let membership = match membership {
             Some(raw) => bincode::deserialize(&raw)
@@ -386,7 +386,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
             self.core
                 .put(self.group, APPLIED_LOG_ID_KEY.to_vec(), value)
                 .await
-                .map_err(Error::storage_err)
+                .map_err(Error::StorageError)
                 .map_err(err)?;
         }
 
@@ -455,7 +455,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
         self.core
             .put(self.group, SNAPSHOT_META.to_vec(), buf_meta)
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
             .map_err(err)?;
 
         let mut buf_data = Vec::with_capacity(DEFAULT_SNAPSHOT_BUFFER_CAPACITY);
@@ -472,7 +472,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
         self.core
             .put(self.group, SNAPSHOT_DATA.to_vec(), buf_data)
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
             .map_err(err)?;
 
         Ok(openraft::StateMachineChanges {
@@ -506,7 +506,7 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
             .core
             .get(self.group, SNAPSHOT_META.to_vec())
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
             .map_err(err)?;
 
         let meta = match meta {
@@ -520,10 +520,10 @@ impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
             .core
             .get(self.group, SNAPSHOT_DATA.to_vec())
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
             .map_err(err)?;
         let data = data.ok_or_else(|| {
-            err(Error::storage_err(runkv_storage::Error::Other(format!(
+            err(Error::StorageError(runkv_storage::Error::Other(format!(
                 "snapshot data not found in raft log store, group: {}",
                 self.group
             ))))
@@ -559,7 +559,7 @@ impl<F: Fsm> openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore<F> {
             .core
             .get(self.group, PRUGE_LOG_ID_KEY.to_vec())
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
             .map_err(err)?;
         let purge_log_id = match purge_log_id {
             None => None,
@@ -575,7 +575,7 @@ impl<F: Fsm> openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore<F> {
             .core
             .next_index(self.group, false)
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
             .map_err(err)?;
         let last_log_id = match next_index {
             Ok(next_index) => {
@@ -584,14 +584,14 @@ impl<F: Fsm> openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore<F> {
                     .core
                     .term(self.group, last_index)
                     .await
-                    .map_err(Error::storage_err)
+                    .map_err(Error::StorageError)
                     .map_err(err)?
                     .unwrap();
                 let ctx = self
                     .core
                     .ctx(self.group, last_index)
                     .await
-                    .map_err(Error::storage_err)
+                    .map_err(Error::StorageError)
                     .map_err(err)?
                     .unwrap();
                 let node_id = (&ctx[..]).get_u64_le();
@@ -644,7 +644,7 @@ impl<F: Fsm> openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore<F> {
             .core
             .may_entries(self.group, start, (end - start) as usize, false)
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
             .map_err(err)?;
 
         trace!("raw entries: {:?}", raw_entries);
@@ -698,7 +698,7 @@ impl<F: Fsm> openraft::RaftSnapshotBuilder<RaftTypeConfig, Cursor<Vec<u8>>>
             .core
             .get(self.group, APPLIED_LOG_ID_KEY.to_vec())
             .await
-            .map_err(Error::storage_err)
+            .map_err(Error::StorageError)
             .map_err(err)?
             .unwrap();
         let applied_log_id: openraft::LogId<u64> = bincode::deserialize(&applied_log_id)

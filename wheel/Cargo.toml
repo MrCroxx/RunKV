@@ -12,6 +12,7 @@ bytes = "1"
 bytesize = { version = "1.1.0", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "3.1.6", features = ["derive"] }
+futures = "0.3"
 http = "0.2.6"
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
@@ -23,12 +24,16 @@ openraft = { git = "https://github.com/datafuselabs/openraft", rev = "ca8a09c189
 parking_lot = "0.12"
 prometheus = "0.13.0"
 prost = "0.9"
+raft = { git = "https://github.com/mrcroxx/raft-rs", rev = "f44c57464e9939c66f5e1bcb6913e9be28213689" }
+# Uncomment this line if you want to debug raft-rs locally.
+# raft = { path = "../../raft-rs" }
 rand = "0.8.5"
 runkv-common = { path = "../common" }
 runkv-proto = { path = "../proto" }
 runkv-storage = { path = "../storage" }
 serde = "1.0"
 serde_derive = "1.0"
+slog = "2.7" # Required by "raft".
 tempfile = "3"
 thiserror = "1.0"
 tokio = { version = "1", features = [
@@ -43,5 +48,6 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 
 [dev-dependencies]
+assert_matches = "1.5.0"
 env_logger = "*"
 test-log = "0.2.10"

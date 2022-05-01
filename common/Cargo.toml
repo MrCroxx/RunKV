@@ -26,6 +26,7 @@ opentelemetry-jaeger = { version = "0.16", features = [
 parking_lot = "0.12"
 serde = "1.0"
 serde_derive = "1.0"
+slog = "2.7"
 tokio = { version = "1", features = ["sync"] }
 toml = "0.4.2"
 tonic = "0.6.2"

@@ -68,8 +68,15 @@ message VoteResponse {
   bytes data = 2;
 }
 
+message RaftRequest {
+  bytes data = 1;
+}
+
+message RaftResponse {}
+
 service RaftService {
   rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse);
   rpc InstallSnapshot(InstallSnapshotRequest) returns (InstallSnapshotResponse);
   rpc Vote(VoteRequest) returns (VoteResponse);
+  rpc Raft(RaftRequest) returns (RaftResponse);
 }

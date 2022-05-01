@@ -3,13 +3,14 @@ pub mod config;
 pub mod error;
 pub mod meta;
 pub mod service;
+pub mod service_v2;
 pub mod worker;
 
 use std::sync::Arc;
 
 use bytesize::ByteSize;
-use components::network::RaftNetwork;
-use components::raft_manager::{RaftManager, RaftManagerOptions};
+use components::raft_manager_v2::{RaftManager, RaftManagerOptions};
+use components::raft_network::GrpcRaftNetwork;
 use error::{Error, Result};
 use hyper::service::{make_service_fn, service_fn};
 use meta::mem::MemoryMetaStore;
@@ -24,10 +25,10 @@ use runkv_proto::wheel::raft_service_server::RaftServiceServer;
 use runkv_proto::wheel::wheel_service_server::WheelServiceServer;
 use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions, SstableStoreRef};
 use runkv_storage::manifest::{VersionManager, VersionManagerOptions};
-use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
-use runkv_storage::raft_log_store::RaftLogStore;
+use runkv_storage::raft_log_store_v2::store::RaftLogStoreOptions;
+use runkv_storage::raft_log_store_v2::RaftLogStore;
 use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
-use service::{Wheel, WheelOptions};
+use service_v2::{Wheel, WheelOptions};
 use tonic::transport::Server;
 use tracing::info;
 use worker::heartbeater::{Heartbeater, HeartbeaterOptions};
@@ -73,7 +74,7 @@ pub fn bootstrap_prometheus_service(config: &WheelConfig) {
         );
         if let Err(e) = hyper::Server::bind(&prometheus_service_addr)
             .serve(make_service_fn(|_| async {
-                Ok::<_, hyper::Error>(service_fn(Wheel::prometheus_serve_req))
+                Ok::<_, hyper::Error>(service_fn(Wheel::prometheus_service))
             }))
             .await
         {
@@ -99,7 +100,7 @@ pub async fn build_wheel_with_object_store(
 
     let meta_store = build_meta_store()?;
 
-    let version_syncer = build_heartbeater(
+    let heartbeater = build_heartbeater(
         config,
         version_manager.clone(),
         meta_store.clone(),
@@ -109,10 +110,10 @@ pub async fn build_wheel_with_object_store(
     let txn_notify_pool = build_txn_notify_pool();
 
     let raft_log_store = build_raft_log_store(config).await?;
-    let raft_network = build_raft_network(channel_pool.clone());
+    let raft_network = build_raft_network(config, channel_pool.clone());
     let raft_manager = build_raft_manager(
         config,
-        raft_log_store.clone(),
+        raft_log_store,
         raft_network.clone(),
         txn_notify_pool.clone(),
         version_manager.clone(),
@@ -121,9 +122,9 @@ pub async fn build_wheel_with_object_store(
     )?;
 
     let options = WheelOptions {
+        node: config.id,
         meta_store,
         channel_pool,
-        raft_log_store,
         raft_network,
         raft_manager,
         txn_notify_pool,
@@ -131,7 +132,7 @@ pub async fn build_wheel_with_object_store(
 
     let wheel = Wheel::new(options);
 
-    Ok((wheel, vec![Box::new(version_syncer)]))
+    Ok((wheel, vec![Box::new(heartbeater)]))
 }
 
 async fn build_object_store(config: &WheelConfig) -> ObjectStoreRef {
@@ -239,17 +240,17 @@ async fn build_raft_log_store(config: &WheelConfig) -> Result<RaftLogStore> {
     };
     RaftLogStore::open(raft_log_store_options)
         .await
-        .map_err(Error::storage_err)
+        .map_err(Error::StorageError)
 }
 
-fn build_raft_network(channel_pool: ChannelPool) -> RaftNetwork {
-    RaftNetwork::new(channel_pool)
+fn build_raft_network(config: &WheelConfig, channel_pool: ChannelPool) -> GrpcRaftNetwork {
+    GrpcRaftNetwork::new(config.id, channel_pool)
 }
 
 fn build_raft_manager(
     config: &WheelConfig,
     raft_log_store: RaftLogStore,
-    raft_network: RaftNetwork,
+    raft_network: GrpcRaftNetwork,
     txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
     version_manager: VersionManager,
     sstable_store: SstableStoreRef,
@@ -264,8 +265,8 @@ fn build_raft_manager(
         version_manager,
         sstable_store,
         channel_pool,
-        lsm_tree_options: crate::components::raft_manager::LsmTreeOptions {
-            shard_write_buffer_capacity: config
+        lsm_tree_options: crate::components::raft_manager_v2::LsmTreeOptions {
+            write_buffer_capacity: config
                 .buffer
                 .write_buffer_capacity
                 .parse::<ByteSize>()

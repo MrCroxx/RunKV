@@ -22,8 +22,8 @@ use runkv_proto::wheel::wheel_service_server::WheelService;
 use runkv_proto::wheel::{
     AddEndpointsRequest, AddEndpointsResponse, AddKeyRangeRequest, AddKeyRangeResponse,
     AppendEntriesRequest, AppendEntriesResponse, InitializeRaftGroupRequest,
-    InitializeRaftGroupResponse, InstallSnapshotRequest, InstallSnapshotResponse, VoteRequest,
-    VoteResponse,
+    InitializeRaftGroupResponse, InstallSnapshotRequest, InstallSnapshotResponse, RaftRequest,
+    RaftResponse, VoteRequest, VoteResponse,
 };
 use runkv_storage::raft_log_store::RaftLogStore;
 use tonic::{Request, Response, Status};
@@ -410,6 +410,14 @@ impl RaftService for Wheel {
         };
         Ok(Response::new(response))
     }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn raft(
+        &self,
+        _request: Request<RaftRequest>,
+    ) -> core::result::Result<Response<RaftResponse>, Status> {
+        todo!()
+    }
 }
 
 #[async_trait]
@@ -577,6 +585,14 @@ pub mod tests {
                 data: rsp_data,
             };
             Ok(Response::new(response))
+        }
+
+        #[tracing::instrument(level = "trace", skip(self))]
+        async fn raft(
+            &self,
+            _request: Request<RaftRequest>,
+        ) -> core::result::Result<Response<RaftResponse>, Status> {
+            todo!()
         }
     }
 }

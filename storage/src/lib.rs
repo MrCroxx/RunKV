@@ -8,6 +8,7 @@ mod error;
 mod lsm_tree;
 mod object_store;
 pub mod raft_log_store;
+pub mod raft_log_store_v2;
 pub mod utils;
 
 pub use error::*;
