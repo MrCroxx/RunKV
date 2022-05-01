@@ -39,14 +39,20 @@ pub async fn bootstrap_wheel(
     wheel: Wheel,
     workers: Vec<BoxedWorker>,
 ) -> Result<()> {
+    let enable_metrics = match std::env::var("RUNKV_METRICS") {
+        Err(_) => false,
+        Ok(val) => val.parse().unwrap(),
+    };
+
     let addr_str = format!("{}:{}", config.host, config.port);
 
     for mut worker in workers.into_iter() {
         tokio::spawn(async move { worker.run().await });
     }
 
-    let listen_addr = format!("{}:{}", config.prometheus.host, config.prometheus.port);
-    boot_prometheus_service(listen_addr);
+    if enable_metrics {
+        bootstrap_prometheus_service(config);
+    }
 
     Server::builder()
         .add_service(WheelServiceServer::new(wheel.clone()))
@@ -57,20 +63,21 @@ pub async fn bootstrap_wheel(
         .map_err(Error::err)
 }
 
-pub fn boot_prometheus_service(listen_addr: String) {
+pub fn bootstrap_prometheus_service(config: &WheelConfig) {
+    let listen_addr = format!("{}:{}", config.prometheus.host, config.prometheus.port);
+    let prometheus_service_addr = listen_addr.parse().unwrap();
     tokio::spawn(async move {
         info!(
             "Prometheus listener for Prometheus is set up on http://{}",
             listen_addr
         );
-        let listen_prometheus_addr = listen_addr.parse().unwrap();
-        let serve_future =
-            hyper::Server::bind(&listen_prometheus_addr).serve(make_service_fn(|_| async {
+        if let Err(e) = hyper::Server::bind(&prometheus_service_addr)
+            .serve(make_service_fn(|_| async {
                 Ok::<_, hyper::Error>(service_fn(Wheel::prometheus_serve_req))
-            }));
-
-        if let Err(err) = serve_future.await {
-            tracing::error!("server error: {}", err);
+            }))
+            .await
+        {
+            tracing::error!("promethrus service error: {}", e);
         }
     });
 }
