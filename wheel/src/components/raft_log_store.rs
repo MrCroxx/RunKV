@@ -1,770 +1,293 @@
-use std::io::Cursor;
-
 use async_trait::async_trait;
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
-use openraft::EffectiveMembership;
-use runkv_storage::raft_log_store::entry::RaftLogBatchBuilder;
+use runkv_storage::raft_log_store::entry::RaftLogBatch;
 use runkv_storage::raft_log_store::RaftLogStore;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
-use tracing::trace;
 
-use super::fsm::Fsm;
-use super::RaftTypeConfig;
 use crate::error::{Error, Result};
 
-const VOTE_KEY: &[u8] = b"vote";
-const MEMBERSHIP_KEY: &[u8] = b"membership";
-const APPLIED_LOG_ID_KEY: &[u8] = b"applied_state";
-const SNAPSHOT_META: &[u8] = b"snapshot_meta";
-const SNAPSHOT_DATA: &[u8] = b"snapshot_data";
-const PRUGE_LOG_ID_KEY: &[u8] = b"purge_log_id";
+const RAFT_HARD_STATE_KEY: &[u8] = b"raft_hard_state";
+const RAFT_CONF_STATE_KEY: &[u8] = b"raft_conf_state";
 
-const DEFAULT_SNAPSHOT_BUFFER_CAPACITY: usize = 64 << 10;
+const DEFAULT_RAFT_LOG_ENTRY_CAPACITY: usize = 64;
+
+pub fn encode_entry_data(entry: &raft::prelude::Entry) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(DEFAULT_RAFT_LOG_ENTRY_CAPACITY);
+    buf.put_i32_le(entry.entry_type);
+    buf.put_slice(&entry.data);
+    buf
+}
+
+pub fn decode_entry_data(mut buf: &[u8]) -> (i32, raft::prelude::EntryType, &[u8]) {
+    let raw_entry_type = buf.get_i32_le();
+    let entry_type = match raw_entry_type {
+        0 => raft::prelude::EntryType::EntryNormal,
+        1 => raft::prelude::EntryType::EntryConfChange,
+        2 => raft::prelude::EntryType::EntryConfChangeV2,
+        _ => unreachable!(),
+    };
+    (raw_entry_type, entry_type, buf)
+}
+
+fn err(e: impl Into<Error>) -> raft::Error {
+    raft::Error::Store(raft::StorageError::Other(e.into().into()))
+}
 
 #[derive(Clone)]
-pub struct RaftGroupLogStore<F: Fsm> {
+pub struct RaftGroupLogStore {
     group: u64,
     core: RaftLogStore,
-    fsm: F,
 }
 
-impl<F: Fsm> RaftGroupLogStore<F> {
-    pub fn new(group: u64, core: RaftLogStore, fsm: F) -> Self {
-        Self { group, core, fsm }
+impl std::fmt::Debug for RaftGroupLogStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RaftGroupLogStore")
+            .field("group", &self.group)
+            .finish()
     }
 }
 
-pub fn storage_io_error(
-    e: Error,
-    subject: openraft::ErrorSubject<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-    verb: openraft::ErrorVerb,
-) -> openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId> {
-    openraft::StorageIOError::new(subject, verb, openraft::AnyError::new(&e)).into()
-}
-
-impl<F: Fsm> RaftGroupLogStore<F> {
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub async fn applied_index(&self) -> Result<Option<u64>> {
-        let applied_log_id = match self
-            .core
-            .get(self.group, APPLIED_LOG_ID_KEY.to_vec())
-            .await
-            .map_err(Error::StorageError)?
-        {
-            None => return Ok(None),
-            Some(data) => data,
-        };
-        let applied_log_id: openraft::LogId<u64> =
-            bincode::deserialize(&applied_log_id).map_err(Error::serde_err)?;
-        Ok(Some(applied_log_id.index))
+impl RaftGroupLogStore {
+    pub fn new(group: u64, core: RaftLogStore) -> Self {
+        Self { group, core }
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub async fn entries(&self, index: u64, max_len: usize) -> Result<Vec<Vec<u8>>> {
-        let raft_entries = self.core.entries(self.group, index, max_len).await?;
-        let entries = raft_entries.into_iter().map(|re| re.data).collect_vec();
-        Ok(entries)
+    pub async fn append(&self, batch: RaftLogBatch) -> Result<()> {
+        self.core.append(batch).await.map_err(Error::StorageError)
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
     pub async fn put(&self, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
         self.core
             .put(self.group, key, value)
             .await
-            .map_err(|e| e.into())
+            .map_err(Error::StorageError)
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
     pub async fn get(&self, key: Vec<u8>) -> Result<Option<Vec<u8>>> {
-        self.core.get(self.group, key).await.map_err(|e| e.into())
+        self.core
+            .get(self.group, key)
+            .await
+            .map_err(Error::StorageError)
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
     pub async fn delete(&self, key: Vec<u8>) -> Result<()> {
         self.core
             .delete(self.group, key)
             .await
-            .map_err(|e| e.into())
-    }
-
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub async fn compact(&self, index: u64) -> Result<()> {
-        self.core
-            .compact(self.group, index)
-            .await
             .map_err(Error::StorageError)
     }
-}
 
-impl<F: Fsm> RaftGroupLogStore<F> {
-    async fn apply(&self, entry: &openraft::Entry<RaftTypeConfig>) -> Result<Option<()>> {
-        let resp = match entry.payload {
-            openraft::EntryPayload::Blank => None,
-            openraft::EntryPayload::Normal(ref request) => Some(
-                self.fsm
-                    .apply(self.group, entry.log_id.index, request)
-                    .await?,
-            ),
-            openraft::EntryPayload::Membership(ref membership) => {
-                trace!("save membership: {:?}", membership);
-                let effective_membership =
-                    openraft::EffectiveMembership::new(Some(entry.log_id), membership.to_owned());
-                let value = bincode::serialize(&effective_membership).map_err(Error::serde_err)?;
-                self.core
-                    .put(self.group, MEMBERSHIP_KEY.to_vec(), value)
-                    .await
-                    .map_err(Error::StorageError)?;
-                None
-            }
-        };
-        Ok(resp)
-    }
-}
-
-#[async_trait]
-impl<F: Fsm> openraft::RaftStorage<RaftTypeConfig> for RaftGroupLogStore<F> {
-    type SnapshotData = Cursor<Vec<u8>>;
-
-    type LogReader = Self;
-
-    type SnapshotBuilder = Self;
-
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn save_vote(
-        &mut self,
-        vote: &openraft::Vote<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-    ) -> core::result::Result<
-        (),
-        openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-    > {
-        let err = |e| storage_io_error(e, openraft::ErrorSubject::Vote, openraft::ErrorVerb::Write);
-        let value = bincode::serialize(&vote)
-            .map_err(Error::serde_err)
-            .map_err(err)?;
-        self.core
-            .put(self.group, VOTE_KEY.to_vec(), value)
-            .await
-            .map_err(Error::StorageError)
-            .map_err(err)?;
-        Ok(())
+    pub async fn put_hard_state(&self, hs: &raft::prelude::HardState) -> Result<()> {
+        let value = bincode::serialize(hs).map_err(Error::serde_err)?;
+        self.put(RAFT_HARD_STATE_KEY.to_vec(), value).await
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn read_vote(
-        &mut self,
-    ) -> core::result::Result<
-        Option<openraft::Vote<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>>,
-        openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-    > {
-        let err = |e| storage_io_error(e, openraft::ErrorSubject::Vote, openraft::ErrorVerb::Read);
-        let buf = self
-            .core
-            .get(self.group, VOTE_KEY.to_vec())
-            .await
-            .map_err(Error::StorageError)
-            .map_err(err)?;
-        let vote = match buf {
-            None => None,
-            Some(buf) => Some(
-                bincode::deserialize(&buf)
-                    .map_err(Error::serde_err)
-                    .map_err(err)?,
-            ),
-        };
-        Ok(vote)
-    }
-
-    /// Get the log reader.
-    ///
-    /// The method is intentionally async to give the implementation a chance to use asynchronous
-    /// sync primitives to serialize access to the common internal object, if needed.
-    async fn get_log_reader(&mut self) -> Self::LogReader {
-        self.clone()
-    }
-
-    /// Append a payload of entries to the log.
-    ///
-    /// Though the entries will always be presented in order, each entry's index should be used to
-    /// determine its location to be written in the log.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn append_to_log(
-        &mut self,
-        entries: &[&openraft::Entry<RaftTypeConfig>],
-    ) -> core::result::Result<
-        (),
-        openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-    > {
-        let err = |e| storage_io_error(e, openraft::ErrorSubject::Logs, openraft::ErrorVerb::Write);
-
-        trace!("append to log: {:?}", entries);
-
-        let mut builder = RaftLogBatchBuilder::default();
-        for entry in entries.iter() {
-            let data = bincode::serialize(&entry.payload)
-                .map_err(Error::serde_err)
-                .map_err(err)?;
-            let mut ctx = Vec::with_capacity(8);
-            ctx.put_u64_le(entry.log_id.leader_id.node_id);
-            builder.add(
-                self.group,
-                entry.log_id.leader_id.term,
-                entry.log_id.index,
-                &ctx,
-                &data,
-            );
-        }
-        let batches = builder.build();
-        for batch in batches {
-            self.core
-                .append(batch)
-                .await
-                .map_err(Error::StorageError)
-                .map_err(err)?;
-        }
-        Ok(())
-    }
-
-    /// Delete conflict log entries since `log_id`, inclusive.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn delete_conflict_logs_since(
-        &mut self,
-        log_id: openraft::LogId<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-    ) -> core::result::Result<
-        (),
-        openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-    > {
-        let err = |e, id| {
-            storage_io_error(
-                e,
-                openraft::ErrorSubject::Log(id),
-                openraft::ErrorVerb::Write,
-            )
-        };
-
-        self.core
-            .truncate(self.group, log_id.index)
-            .await
-            .map_err(Error::StorageError)
-            .map_err(|e| err(e, log_id))?;
-        Ok(())
-    }
-
-    /// Delete applied log entries upto `log_id`, inclusive.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn purge_logs_upto(
-        &mut self,
-        log_id: openraft::LogId<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-    ) -> core::result::Result<
-        (),
-        openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-    > {
-        let err = |e, id| {
-            storage_io_error(
-                e,
-                openraft::ErrorSubject::Log(id),
-                openraft::ErrorVerb::Write,
-            )
-        };
-
-        // Record purge log id.
-        let value = bincode::serialize(&log_id)
-            .map_err(Error::serde_err)
-            .map_err(|e| err(e, log_id))?;
-        self.core
-            .put(self.group, PRUGE_LOG_ID_KEY.to_vec(), value)
-            .await
-            .map_err(Error::StorageError)
-            .map_err(|e| err(e, log_id))?;
-
-        // Perform log compact.
-        self.core
-            .mask(self.group, log_id.index + 1)
-            .await
-            .map_err(Error::StorageError)
-            .map_err(|e| err(e, log_id))?;
-
-        Ok(())
-    }
-
-    /// Returns the last applied log id which is recorded in state machine, and the last applied
-    /// membership log id and membership config.
-    // NOTE: This can be made into sync, provided all state machines will use atomic read or the
-    // like.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn last_applied_state(
-        &mut self,
-    ) -> core::result::Result<
-        (
-            Option<openraft::LogId<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>>,
-            openraft::EffectiveMembership<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-        ),
-        openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-    > {
-        let err = |e| storage_io_error(e, openraft::ErrorSubject::Store, openraft::ErrorVerb::Read);
-
-        let applied_log_id = self
-            .core
-            .get(self.group, APPLIED_LOG_ID_KEY.to_vec())
-            .await
-            .map_err(Error::StorageError)
-            .map_err(err)?;
-        let applied_log_id = match applied_log_id {
-            None => None,
-            Some(raw) => Some(
-                bincode::deserialize(&raw)
-                    .map_err(Error::serde_err)
-                    .map_err(err)?,
-            ),
-        };
-
-        let membership = self
-            .core
-            .get(self.group, MEMBERSHIP_KEY.to_vec())
-            .await
-            .map_err(Error::StorageError)
-            .map_err(err)?;
-        let membership = match membership {
-            Some(raw) => bincode::deserialize(&raw)
-                .map_err(Error::serde_err)
-                .map_err(err)?,
-            None => EffectiveMembership::default(),
-        };
-        Ok((applied_log_id, membership))
-    }
-
-    /// Apply the given payload of entries to the state machine.
-    ///
-    /// The Raft protocol guarantees that only logs which have been _committed_, that is, logs which
-    /// have been replicated to a quorum of the cluster, will be applied to the state machine.
-    ///
-    /// This is where the business logic of interacting with your application's state machine
-    /// should live. This is 100% application specific. Perhaps this is where an application
-    /// specific transaction is being started, or perhaps committed. This may be where a key/value
-    /// is being stored.
-    ///
-    /// An impl should do:
-    /// - Store the last applied log id.
-    /// - Deal with the EntryPayload::Normal() log, which is business logic log.
-    /// - Deal with EntryPayload::Membership, store the membership config.
-    // TODO The reply should happen asynchronously, somehow. Make this method synchronous and
-    // instead of using the result, pass a channel where to post the completion. The Raft core can
-    // then collect completions on this channel and update the client with the result once all
-    // the preceding operations have been applied to the state machine. This way we'll reach
-    // operation pipelining w/o the need to wait for the completion of each operation inline.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn apply_to_state_machine(
-        &mut self,
-        entries: &[&openraft::Entry<RaftTypeConfig>],
-    ) -> core::result::Result<
-        Vec<<RaftTypeConfig as openraft::RaftTypeConfig>::R>,
-        openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-    > {
-        let err = |e| storage_io_error(e, openraft::ErrorSubject::Logs, openraft::ErrorVerb::Write);
-
-        if entries.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let range = entries.first().unwrap().log_id.index..entries.last().unwrap().log_id.index + 1;
-
-        self.fsm
-            .pre_apply(self.group, range.clone())
-            .await
-            .map_err(err)?;
-
-        let mut resps = Vec::with_capacity(entries.len());
-        for entry in entries.iter() {
-            let resp = self.apply(entry).await.map_err(err)?;
-            resps.push(resp);
-        }
-
-        if let Some(&entry) = entries.last() {
-            let value = bincode::serialize(&entry.log_id)
-                .map_err(Error::serde_err)
-                .map_err(err)?;
-            self.core
-                .put(self.group, APPLIED_LOG_ID_KEY.to_vec(), value)
-                .await
-                .map_err(Error::StorageError)
-                .map_err(err)?;
-        }
-
-        self.fsm.post_apply(self.group, range).await.map_err(err)?;
-
-        Ok(resps)
-    }
-
-    /// Get the snapshot builder for the state machine.
-    ///
-    /// The method is intentionally async to give the implementation a chance to use asynchronous
-    /// sync primitives to serialize access to the common internal object, if needed.
-    async fn get_snapshot_builder(&mut self) -> Self::SnapshotBuilder {
-        self.clone()
-    }
-
-    /// Create a new blank snapshot, returning a writable handle to the snapshot object.
-    ///
-    /// Raft will use this handle to receive snapshot data.
-    ///
-    /// ### implementation guide
-    /// See the [storage chapter of the guide](https://datafuselabs.github.io/openraft/storage.html)
-    /// for details on log compaction / snapshotting.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn begin_receiving_snapshot(
-        &mut self,
-    ) -> core::result::Result<
-        Box<Self::SnapshotData>,
-        openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-    > {
-        Ok(Box::new(Cursor::new(Vec::new())))
-    }
-
-    /// Install a snapshot which has finished streaming from the cluster leader.
-    ///
-    /// All other snapshots should be deleted at this point.
-    ///
-    /// ### snapshot
-    /// A snapshot created from an earlier call to `begin_receiving_snapshot` which provided the
-    /// snapshot.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn install_snapshot(
-        &mut self,
-        meta: &openraft::SnapshotMeta<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-        mut snapshot: Box<Self::SnapshotData>,
-    ) -> core::result::Result<
-        openraft::StateMachineChanges<RaftTypeConfig>,
-        openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-    > {
-        let err = |e| {
-            storage_io_error(
-                e,
-                openraft::ErrorSubject::Snapshot(meta.to_owned()),
-                openraft::ErrorVerb::Write,
-            )
-        };
-
-        self.fsm
-            .install_snapshot(self.group, meta.last_log_id.index, snapshot.as_ref())
-            .await
-            .map_err(err)?;
-
-        let buf_meta = bincode::serialize(meta)
-            .map_err(Error::serde_err)
-            .map_err(err)?;
-        self.core
-            .put(self.group, SNAPSHOT_META.to_vec(), buf_meta)
-            .await
-            .map_err(Error::StorageError)
-            .map_err(err)?;
-
-        let mut buf_data = Vec::with_capacity(DEFAULT_SNAPSHOT_BUFFER_CAPACITY);
-        snapshot
-            .seek(std::io::SeekFrom::Start(0))
-            .await
-            .map_err(Error::err)
-            .map_err(err)?;
-        snapshot
-            .read_to_end(&mut buf_data)
-            .await
-            .map_err(Error::err)
-            .map_err(err)?;
-        self.core
-            .put(self.group, SNAPSHOT_DATA.to_vec(), buf_data)
-            .await
-            .map_err(Error::StorageError)
-            .map_err(err)?;
-
-        Ok(openraft::StateMachineChanges {
-            last_applied: meta.last_log_id,
-            is_snapshot: true,
-        })
-    }
-
-    /// Get a readable handle to the current snapshot, along with its metadata.
-    ///
-    /// ### implementation algorithm
-    /// Implementing this method should be straightforward. Check the configured snapshot
-    /// directory for any snapshot files. A proper implementation will only ever have one
-    /// active snapshot, though another may exist while it is being created. As such, it is
-    /// recommended to use a file naming pattern which will allow for easily distinguishing between
-    /// the current live snapshot, and any new snapshot which is being created.
-    ///
-    /// A proper snapshot implementation will store the term, index and membership config as part
-    /// of the snapshot, which should be decoded for creating this method's response data.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn get_current_snapshot(
-        &mut self,
-    ) -> core::result::Result<
-        Option<openraft::storage::Snapshot<RaftTypeConfig, Self::SnapshotData>>,
-        openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-    > {
-        let err =
-            |e| storage_io_error(e, openraft::ErrorSubject::Store, openraft::ErrorVerb::Write);
-
-        let meta = self
-            .core
-            .get(self.group, SNAPSHOT_META.to_vec())
-            .await
-            .map_err(Error::StorageError)
-            .map_err(err)?;
-
-        let meta = match meta {
+    pub async fn get_hard_state(&self) -> Result<Option<raft::prelude::HardState>> {
+        let buf = match self.get(RAFT_HARD_STATE_KEY.to_vec()).await? {
             None => return Ok(None),
-            Some(meta) => bincode::deserialize(&meta)
-                .map_err(Error::serde_err)
-                .map_err(err)?,
+            Some(buf) => buf,
         };
-
-        let data = self
-            .core
-            .get(self.group, SNAPSHOT_DATA.to_vec())
-            .await
-            .map_err(Error::StorageError)
-            .map_err(err)?;
-        let data = data.ok_or_else(|| {
-            err(Error::StorageError(runkv_storage::Error::Other(format!(
-                "snapshot data not found in raft log store, group: {}",
-                self.group
-            ))))
-        })?;
-
-        Ok(Some(openraft::storage::Snapshot {
-            meta,
-            snapshot: Box::new(Cursor::new(data)),
-        }))
-    }
-}
-
-#[async_trait]
-impl<F: Fsm> openraft::RaftLogReader<RaftTypeConfig> for RaftGroupLogStore<F> {
-    /// Returns the last deleted log id and the last log id.
-    ///
-    /// The impl should not consider the applied log id in state machine.
-    /// The returned `last_log_id` could be the log id of the last present log entry, or the
-    /// `last_purged_log_id` if there is no entry at all.
-    // NOTE: This can be made into sync, provided all state machines will use atomic read or the
-    // like.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn get_log_state(
-        &mut self,
-    ) -> core::result::Result<
-        openraft::storage::LogState<RaftTypeConfig>,
-        openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-    > {
-        let err = |e| storage_io_error(e, openraft::ErrorSubject::Store, openraft::ErrorVerb::Read);
-
-        // Get purge log id.
-        let purge_log_id = self
-            .core
-            .get(self.group, PRUGE_LOG_ID_KEY.to_vec())
-            .await
-            .map_err(Error::StorageError)
-            .map_err(err)?;
-        let purge_log_id = match purge_log_id {
-            None => None,
-            Some(purge_log_id) => Some(
-                bincode::deserialize(&purge_log_id)
-                    .map_err(Error::serde_err)
-                    .map_err(err)?,
-            ),
-        };
-
-        // Get last log id.
-        let next_index = self
-            .core
-            .next_index(self.group, false)
-            .await
-            .map_err(Error::StorageError)
-            .map_err(err)?;
-        let last_log_id = match next_index {
-            Ok(next_index) => {
-                let last_index = next_index - 1;
-                let term = self
-                    .core
-                    .term(self.group, last_index)
-                    .await
-                    .map_err(Error::StorageError)
-                    .map_err(err)?
-                    .unwrap();
-                let ctx = self
-                    .core
-                    .ctx(self.group, last_index)
-                    .await
-                    .map_err(Error::StorageError)
-                    .map_err(err)?
-                    .unwrap();
-                let node_id = (&ctx[..]).get_u64_le();
-                Some(openraft::LogId {
-                    leader_id: openraft::LeaderId::<u64> { term, node_id },
-                    index: last_index,
-                })
-            }
-            Err(_) => purge_log_id,
-        };
-
-        Ok(openraft::storage::LogState {
-            last_purged_log_id: purge_log_id,
-            last_log_id,
-        })
+        let hs = bincode::deserialize(&buf).map_err(Error::serde_err)?;
+        Ok(Some(hs))
     }
 
-    /// Get a series of log entries from storage.
-    ///
-    /// The start value is inclusive in the search and the stop value is non-inclusive: `[start,
-    /// stop)`.
-    ///
-    /// Entry that is not found is allowed.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn try_get_log_entries<
-        RB: std::ops::RangeBounds<u64> + Clone + std::fmt::Debug + Send + Sync,
-    >(
-        &mut self,
-        range: RB,
-    ) -> core::result::Result<
-        Vec<openraft::Entry<RaftTypeConfig>>,
-        openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-    > {
-        let err = |e| storage_io_error(e, openraft::ErrorSubject::Store, openraft::ErrorVerb::Read);
+    pub async fn put_conf_state(&self, cs: &raft::prelude::ConfState) -> Result<()> {
+        let value = bincode::serialize(cs).map_err(Error::serde_err)?;
+        self.put(RAFT_CONF_STATE_KEY.to_vec(), value).await
+    }
 
-        let start = match range.start_bound() {
-            std::ops::Bound::Included(v) => *v,
-            std::ops::Bound::Excluded(v) => *v + 1,
-            std::ops::Bound::Unbounded => 0,
+    pub async fn get_conf_state(&self) -> Result<Option<raft::prelude::ConfState>> {
+        let buf = match self.get(RAFT_CONF_STATE_KEY.to_vec()).await? {
+            None => return Ok(None),
+            Some(buf) => buf,
         };
-        let end = match range.end_bound() {
-            std::ops::Bound::Excluded(v) => *v,
-            std::ops::Bound::Included(v) => *v + 1,
-            std::ops::Bound::Unbounded => u64::MAX,
-        };
+        let hs = bincode::deserialize(&buf).map_err(Error::serde_err)?;
+        Ok(Some(hs))
+    }
 
-        trace!("try get log entries: {:?} => [{}..{})", range, start, end);
-
-        let raw_entries = self
-            .core
-            .may_entries(self.group, start, (end - start) as usize, false)
-            .await
-            .map_err(Error::StorageError)
-            .map_err(err)?;
-
-        trace!("raw entries: {:?}", raw_entries);
-
-        let mut entries = Vec::with_capacity(raw_entries.len());
-        for raw_entry in raw_entries.into_iter() {
-            let payload = bincode::deserialize(&raw_entry.data)
-                .map_err(Error::serde_err)
-                .map_err(err)?;
-            let entry = openraft::Entry {
-                log_id: openraft::LogId {
-                    leader_id: openraft::LeaderId {
-                        term: raw_entry.term,
-                        node_id: (&raw_entry.ctx[..]).get_u64_le(),
-                    },
+    pub async fn entries(&self, index: u64, max_len: usize) -> Result<Vec<raft::prelude::Entry>> {
+        let raw_entries = self.core.entries(self.group, index, max_len).await?;
+        let entries = raw_entries
+            .into_iter()
+            .map(|raw_entry| {
+                let (raw_entry_type, _, data) = decode_entry_data(&raw_entry.data);
+                raft::prelude::Entry {
+                    entry_type: raw_entry_type,
+                    term: raw_entry.term,
                     index: raw_entry.index,
-                },
-                payload,
-            };
-            entries.push(entry);
-        }
-
-        trace!("entries: {:?}", entries);
-
+                    data: data.to_vec(),
+                    context: raw_entry.ctx,
+                    ..Default::default()
+                }
+            })
+            .collect_vec();
         Ok(entries)
     }
 }
 
 #[async_trait]
-impl<F: Fsm> openraft::RaftSnapshotBuilder<RaftTypeConfig, Cursor<Vec<u8>>>
-    for RaftGroupLogStore<F>
-{
-    /// Build snapshot
+impl raft::Storage for RaftGroupLogStore {
+    /// `initial_state` is called when Raft is initialized. This interface will return a `RaftState`
+    /// which contains `HardState` and `ConfState`.
     ///
-    /// A snapshot has to contain information about exactly all logs up to the last applied.
-    ///
-    /// Building snapshot can be done by:
-    /// - Performing log compaction, e.g. merge log entries that operates on the same key, like a
-    ///   LSM-tree does,
-    /// - or by fetching a snapshot from the state machine.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn build_snapshot(
-        &mut self,
-    ) -> core::result::Result<
-        openraft::storage::Snapshot<RaftTypeConfig, Cursor<Vec<u8>>>,
-        openraft::StorageError<<RaftTypeConfig as openraft::RaftTypeConfig>::NodeId>,
-    > {
-        let err = |e| storage_io_error(e, openraft::ErrorSubject::Store, openraft::ErrorVerb::Read);
-
-        let applied_log_id = self
-            .core
-            .get(self.group, APPLIED_LOG_ID_KEY.to_vec())
+    /// `RaftState` could be initialized or not. If it's initialized it means the `Storage` is
+    /// created with a configuration, and its last index and term should be greater than 0.
+    #[tracing::instrument(level = "trace")]
+    async fn initial_state(&self) -> raft::Result<raft::RaftState> {
+        let hs = self
+            .get_hard_state()
             .await
-            .map_err(Error::StorageError)
             .map_err(err)?
-            .unwrap();
-        let applied_log_id: openraft::LogId<u64> = bincode::deserialize(&applied_log_id)
-            .map_err(Error::serde_err)
-            .map_err(err)?;
+            .unwrap_or_default();
+        let cs = self
+            .get_conf_state()
+            .await
+            .map_err(err)?
+            .unwrap_or_default();
+        Ok(raft::RaftState {
+            hard_state: hs,
+            conf_state: cs,
+        })
+    }
 
-        let index = applied_log_id.index;
-        let snapshot_id = format!("snapshot-{}", applied_log_id.index);
-
-        let snapshot_meta = openraft::storage::SnapshotMeta {
-            last_log_id: applied_log_id,
-            snapshot_id,
+    /// Returns a slice of log entries in the range `[low, high)`.
+    /// max_size limits the total size of the log entries returned if not `None`, however
+    /// the slice of entries returned will always have length at least 1 if entries are
+    /// found in the range.
+    ///
+    /// Entries are supported to be fetched asynchorously depending on the context. Async is
+    /// optional. Storage should check context.can_async() first and decide whether to fetch
+    /// entries asynchorously based on its own implementation. If the entries are fetched
+    /// asynchorously, storage should return LogTemporarilyUnavailable, and application needs to
+    /// call `on_entries_fetched(context)` to trigger re-fetch of the entries after the storage
+    /// finishes fetching the entries.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `high` is higher than `Storage::last_index(&self) + 1`.
+    #[tracing::instrument(level = "trace")]
+    async fn entries(
+        &self,
+        low: u64,
+        high: u64,
+        max_size: Option<u64>,
+        _context: raft::GetEntriesContext,
+    ) -> raft::Result<Vec<raft::prelude::Entry>> {
+        let high = match max_size {
+            None => high,
+            Some(max_size) => std::cmp::min(high, low.saturating_add(std::cmp::max(max_size, 1))),
         };
-
-        let snapshot_data = self
-            .fsm
-            .build_snapshot(self.group, index)
+        let index = low;
+        let max_len = (high - low) as usize;
+        let raw_entries = self
+            .core
+            .may_entries(self.group, index, max_len, false)
             .await
             .map_err(err)?;
-        let snapshot = openraft::storage::Snapshot {
-            meta: snapshot_meta,
-            snapshot: Box::new(snapshot_data),
-        };
+        let entries = raw_entries
+            .into_iter()
+            .map(|raw_entry| {
+                let (raw_entry_type, _, data) = decode_entry_data(&raw_entry.data);
+                raft::prelude::Entry {
+                    entry_type: raw_entry_type,
+                    term: raw_entry.term,
+                    index: raw_entry.index,
+                    data: data.to_vec(),
+                    context: raw_entry.ctx,
+                    ..Default::default()
+                }
+            })
+            .collect_vec();
+        Ok(entries)
+    }
 
-        Ok(snapshot)
+    /// Returns the term of entry idx, which must be in the range
+    /// [first_index()-1, last_index()]. The term of the entry before
+    /// first_index is retained for matching purpose even though the
+    /// rest of that entry may not be available.
+    #[tracing::instrument(level = "trace")]
+    async fn term(&self, idx: u64) -> raft::Result<u64> {
+        let may_term = self.core.term(self.group, idx).await.map_err(err)?;
+        if let Some(term) = may_term {
+            return Ok(term);
+        }
+        if idx < self.first_index().await? {
+            return Err(raft::Error::Store(raft::StorageError::Compacted));
+        }
+        Err(raft::Error::Store(raft::StorageError::Unavailable))
+    }
+
+    /// Returns the index of the first log entry that is possible available via entries, which will
+    /// always equal to `truncated index` plus 1.
+    ///
+    /// New created (but not initialized) `Storage` can be considered as truncated at 0 so that 1
+    /// will be returned in this case.
+    #[tracing::instrument(level = "trace")]
+    async fn first_index(&self) -> raft::Result<u64> {
+        self.core.masked_first_index(self.group).await.map_err(err)
+    }
+
+    /// The index of the last entry replicated in the `Storage`.
+    #[tracing::instrument(level = "trace")]
+    async fn last_index(&self) -> raft::Result<u64> {
+        self.core.masked_last_index(self.group).await.map_err(err)
+    }
+
+    /// Returns the most recent snapshot.
+    ///
+    /// If snapshot is temporarily unavailable, it should return SnapshotTemporarilyUnavailable,
+    /// so raft state machine could know that Storage needs some time to prepare
+    /// snapshot and call snapshot later.
+    /// A snapshot's index must not less than the `request_index`.
+    /// `to` indicates which peer is requesting the snapshot.
+    #[tracing::instrument(level = "trace")]
+    async fn snapshot(
+        &self,
+        _request_index: u64,
+        _to: u64,
+    ) -> raft::Result<raft::prelude::Snapshot> {
+        // Impl me!!!
+        // Impl me!!!
+        // Impl me!!!
+        todo!()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
-    use openraft::testing::Suite;
-    use rand::distributions::Alphanumeric;
-    use rand::{thread_rng, Rng};
+    use raft::Storage;
+    use runkv_storage::raft_log_store::entry::RaftLogBatchBuilder;
     use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
     use test_log::test;
 
     use super::*;
-    use crate::components::fsm::tests::MockFsm;
 
-    #[test]
-    fn test_raft_log_store() {
+    #[test(tokio::test)]
+    async fn test_clone_safe() {
         let tempdir = tempfile::tempdir().unwrap();
-        let tempdir_ref = &tempdir;
+        let path = tempdir.path().to_str().unwrap();
 
-        Suite::test_all(|| async move {
-            let path = Path::new(tempdir_ref.path()).join(
-                thread_rng()
-                    .sample_iter(&Alphanumeric)
-                    .take(16)
-                    .map(char::from)
-                    .collect::<String>(),
-            );
-            trace!("create new raft log store in path: {:?}", path);
-            tokio::fs::create_dir_all(path.clone()).await.unwrap();
-            let options = RaftLogStoreOptions {
-                log_dir_path: path.to_str().unwrap().to_string(),
-                log_file_capacity: 100,
-                block_cache_capacity: 1024,
-            };
-            let store = RaftLogStore::open(options).await.unwrap();
-            store.add_group(1).await.unwrap();
-            RaftGroupLogStore::new(1, store, MockFsm::default())
-        })
-        .unwrap();
-        drop(tempdir);
+        let options = RaftLogStoreOptions {
+            log_dir_path: path.to_string(),
+            log_file_capacity: 64 << 20,
+            block_cache_capacity: 64 << 20,
+        };
+        let raft_log_store = RaftLogStore::open(options).await.unwrap();
+
+        raft_log_store.add_group(1).await.unwrap();
+
+        let raft_node = RaftGroupLogStore::new(1, raft_log_store);
+        let raft_node_clone = raft_node.clone();
+
+        let mut builder = RaftLogBatchBuilder::default();
+        builder.add(1, 1, 1, &[b'c'; 16], &[b'd'; 16]);
+        let mut batches = builder.build();
+        let batch = batches.remove(0);
+
+        raft_node.append(batch).await.unwrap();
+
+        let l1 = raft_node.last_index().await;
+        let l2 = raft_node_clone.last_index().await;
+        assert_eq!(l1, l2);
     }
 }

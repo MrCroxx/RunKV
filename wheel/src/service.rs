@@ -3,10 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hyper::header::CONTENT_TYPE;
-use hyper::Body;
 use itertools::Itertools;
-use prometheus::{Encoder, TextEncoder};
 use runkv_common::channel_pool::ChannelPool;
 use runkv_common::config::Node;
 use runkv_common::notify_pool::NotifyPool;
@@ -25,26 +22,25 @@ use runkv_proto::wheel::{
     InitializeRaftGroupResponse, InstallSnapshotRequest, InstallSnapshotResponse, RaftRequest,
     RaftResponse, VoteRequest, VoteResponse,
 };
-use runkv_storage::raft_log_store::RaftLogStore;
 use tonic::{Request, Response, Status};
-use tracing::{trace, trace_span, Instrument};
+use tracing::{trace_span, Instrument};
 
 use crate::components::command::Command;
-use crate::components::gear::Gear;
-use crate::components::network::RaftNetwork;
 use crate::components::raft_manager::RaftManager;
-use crate::components::Raft;
-use crate::error::{Error, KvError, RaftError, Result};
+use crate::components::raft_network::{GrpcRaftNetwork, RaftNetwork};
+use crate::error::{Error, KvError, Result};
 use crate::meta::MetaStoreRef;
+use crate::worker::raft::Proposal;
+
 fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
     Status::internal(e.into().to_string())
 }
 
 pub struct WheelOptions {
+    pub node: u64,
     pub meta_store: MetaStoreRef,
     pub channel_pool: ChannelPool,
-    pub raft_log_store: RaftLogStore,
-    pub raft_network: RaftNetwork,
+    pub raft_network: GrpcRaftNetwork,
     pub raft_manager: RaftManager,
     pub txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
 }
@@ -52,8 +48,7 @@ pub struct WheelOptions {
 struct WheelInner {
     meta_store: MetaStoreRef,
     channel_pool: ChannelPool,
-    _raft_log_store: RaftLogStore,
-    _raft_network: RaftNetwork,
+    raft_network: GrpcRaftNetwork,
     raft_manager: RaftManager,
     txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
     request_id: AtomicU64,
@@ -61,22 +56,46 @@ struct WheelInner {
 
 #[derive(Clone)]
 pub struct Wheel {
+    node: u64,
     inner: Arc<WheelInner>,
 }
 
 impl Wheel {
     pub fn new(options: WheelOptions) -> Self {
         Self {
+            node: options.node,
             inner: Arc::new(WheelInner {
                 meta_store: options.meta_store,
                 channel_pool: options.channel_pool,
-                _raft_log_store: options.raft_log_store,
-                _raft_network: options.raft_network,
+                raft_network: options.raft_network,
                 raft_manager: options.raft_manager,
                 txn_notify_pool: options.txn_notify_pool,
                 request_id: AtomicU64::new(0),
             }),
         }
+    }
+
+    pub async fn prometheus_service(
+        _request: http::Request<hyper::Body>,
+    ) -> Result<http::Response<hyper::Body>> {
+        use prometheus::Encoder;
+
+        let encoder = prometheus::TextEncoder::new();
+        let metric_families = prometheus::gather();
+        let mut buffer = vec![];
+        encoder.encode(&metric_families, &mut buffer).unwrap();
+        let response = hyper::Response::builder()
+            .status(200)
+            .header(hyper::header::CONTENT_TYPE, encoder.format_type())
+            .body(hyper::Body::from(buffer))
+            .unwrap();
+        Ok(response)
+    }
+}
+
+impl std::fmt::Debug for Wheel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Wheel").field("node", &self.node).finish()
     }
 }
 
@@ -137,13 +156,12 @@ impl Wheel {
         Ok(response)
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn txn_inner(&self, request: TxnRequest) -> Result<TxnResponse> {
         // Pick raft leader of the request.
-        let (raft_node, raft) = match self.leader(&request).await? {
-            (group, _, None) => return Err(KvError::NoValidLeader(group).into()),
-            (_, raft_node, Some(raft)) => (raft_node, raft),
-        };
+        let raft_nodes = self.txn_raft_nodes(&request).await?;
+        assert!(!raft_nodes.is_empty());
+        let raft_node = *raft_nodes.first().unwrap();
 
         let read_only = request.ops.iter().all(|op| {
             matches!(
@@ -174,12 +192,18 @@ impl Wheel {
         };
         let buf = cmd.encode_to_vec().map_err(Error::serde_err)?;
 
-        raft.client_write(openraft::raft::ClientWriteRequest::new(
-            openraft::EntryPayload::Normal(buf),
-        ))
-        .instrument(trace_span!("openraft_client_write"))
-        .await
-        .map_err(RaftError::err)?;
+        let proposal_tx = self
+            .inner
+            .raft_manager
+            .get_proposal_channel(raft_node)
+            .await?;
+
+        proposal_tx
+            .send(Proposal {
+                data: buf,
+                context: vec![],
+            })
+            .map_err(Error::err)?;
 
         // Wait for resposne.
         let response = rx
@@ -189,9 +213,7 @@ impl Wheel {
         response
     }
 
-    /// Returns `(group, raft node, Option<Raft>)`.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn leader<'a>(&self, request: &'a TxnRequest) -> Result<(u64, u64, Option<Raft<Gear>>)> {
+    async fn txn_raft_nodes<'a>(&self, request: &'a TxnRequest) -> Result<Vec<u64>> {
         assert!(!request.ops.is_empty());
 
         let key = |req: &'a kv_op_request::Request| -> &'a [u8] {
@@ -209,51 +231,21 @@ impl Wheel {
             .map(|op| key(op.request.as_ref().unwrap()))
             .collect_vec();
 
-        let (range, group, raft_nodes) = self
+        let (_range, _group, raft_nodes) = self
             .inner
             .meta_store
             .all_in_range(&keys)
             .await?
             .ok_or_else(|| KvError::InvalidShard(format!("request {:?}", request)))?;
 
-        trace!(
-            range = ?range,
-            group = group,
-            raft_nodes = ?raft_nodes,
-            "request {:?} in:",
-            request
-        );
-
-        for raft_node in raft_nodes {
-            let raft = self.inner.raft_manager.get_raft_node(raft_node).await?;
-            if raft.is_leader().await.is_ok() {
-                return Ok((group, raft_node, Some(raft)));
-            }
-        }
-
-        Ok((group, 0, None))
-    }
-}
-
-impl Wheel {
-    pub async fn prometheus_serve_req(_req: http::Request<Body>) -> Result<http::Response<Body>> {
-        let encoder = TextEncoder::new();
-        let metric_families = prometheus::gather();
-        let mut buffer = vec![];
-        encoder.encode(&metric_families, &mut buffer).unwrap();
-
-        let response = hyper::Response::builder()
-            .status(200)
-            .header(CONTENT_TYPE, encoder.format_type())
-            .body(Body::from(buffer))
-            .unwrap();
-        Ok(response)
+        // TODO: Find the potential leader.
+        Ok(raft_nodes)
     }
 }
 
 #[async_trait]
 impl WheelService for Wheel {
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn add_endpoints(
         &self,
         request: Request<AddEndpointsRequest>,
@@ -270,7 +262,7 @@ impl WheelService for Wheel {
         Ok(Response::new(AddEndpointsResponse::default()))
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn add_key_range(
         &self,
         request: Request<AddKeyRangeRequest>,
@@ -283,19 +275,22 @@ impl WheelService for Wheel {
             .map_err(internal)?;
 
         self.inner
-            .raft_manager
-            .update_routers(BTreeMap::from_iter(
-                req.nodes
-                    .iter()
-                    .map(|(&raft_node, &node)| (raft_node, node)),
-            ))
+            .raft_network
+            .register(
+                req.group,
+                BTreeMap::from_iter(
+                    req.nodes
+                        .iter()
+                        .map(|(&raft_node, &node)| (raft_node, node)),
+                ),
+            )
             .await
             .map_err(internal)?;
 
         for raft_node in req.raft_nodes.iter() {
             self.inner
                 .raft_manager
-                .add_raft_node(req.group, *raft_node)
+                .create_raft_node(req.group, *raft_node)
                 .await
                 .map_err(internal)?;
         }
@@ -304,125 +299,63 @@ impl WheelService for Wheel {
         Ok(Response::new(rsp))
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn initialize_raft_group(
         &self,
-        request: Request<InitializeRaftGroupRequest>,
+        _request: Request<InitializeRaftGroupRequest>,
     ) -> core::result::Result<Response<InitializeRaftGroupResponse>, Status> {
-        let req = request.into_inner();
-        self.inner
-            .raft_manager
-            .initialize_raft_group(req.leader, &req.raft_nodes)
-            .await
-            .map_err(internal)?;
-        Ok(Response::new(InitializeRaftGroupResponse::default()))
+        unreachable!()
     }
 }
 
 #[async_trait]
 impl RaftService for Wheel {
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn append_entries(
         &self,
-        request: Request<AppendEntriesRequest>,
+        _request: Request<AppendEntriesRequest>,
     ) -> core::result::Result<Response<AppendEntriesResponse>, Status> {
-        let req = request.into_inner();
-        let raft = self
-            .inner
-            .raft_manager
-            .get_raft_node(req.id)
-            .await
-            .map_err(internal)?;
-        let req_data = bincode::deserialize(&req.data)
-            .map_err(Error::serde_err)
-            .map_err(internal)?;
-        let rsp = raft
-            .append_entries(req_data)
-            .await
-            .map_err(Error::raft_err)
-            .map_err(internal)?;
-        let rsp_data = bincode::serialize(&rsp)
-            .map_err(Error::serde_err)
-            .map_err(internal)?;
-        let response = AppendEntriesResponse {
-            id: req.id,
-            data: rsp_data,
-        };
-        Ok(Response::new(response))
+        unreachable!()
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn install_snapshot(
         &self,
-        request: Request<InstallSnapshotRequest>,
+        _request: Request<InstallSnapshotRequest>,
     ) -> core::result::Result<Response<InstallSnapshotResponse>, Status> {
-        let req = request.into_inner();
-        let raft = self
-            .inner
-            .raft_manager
-            .get_raft_node(req.id)
-            .await
-            .map_err(internal)?;
-        let req_data = bincode::deserialize(&req.data)
-            .map_err(Error::serde_err)
-            .map_err(internal)?;
-        let rsp = raft
-            .install_snapshot(req_data)
-            .await
-            .map_err(Error::raft_err)
-            .map_err(internal)?;
-        let rsp_data = bincode::serialize(&rsp)
-            .map_err(Error::serde_err)
-            .map_err(internal)?;
-        let response = InstallSnapshotResponse {
-            id: req.id,
-            data: rsp_data,
-        };
-        Ok(Response::new(response))
+        unreachable!()
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn vote(
         &self,
-        request: Request<VoteRequest>,
+        _request: Request<VoteRequest>,
     ) -> core::result::Result<Response<VoteResponse>, Status> {
-        let req = request.into_inner();
-        let raft = self
-            .inner
-            .raft_manager
-            .get_raft_node(req.id)
-            .await
-            .map_err(internal)?;
-        let req_data = bincode::deserialize(&req.data)
-            .map_err(Error::serde_err)
-            .map_err(internal)?;
-        let rsp = raft
-            .vote(req_data)
-            .await
-            .map_err(Error::raft_err)
-            .map_err(internal)?;
-        let rsp_data = bincode::serialize(&rsp)
-            .map_err(Error::serde_err)
-            .map_err(internal)?;
-        let response = VoteResponse {
-            id: req.id,
-            data: rsp_data,
-        };
-        Ok(Response::new(response))
+        unreachable!()
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn raft(
         &self,
-        _request: Request<RaftRequest>,
+        request: Request<RaftRequest>,
     ) -> core::result::Result<Response<RaftResponse>, Status> {
-        todo!()
+        let req = request.into_inner();
+        let msg = bincode::deserialize(&req.data)
+            .map_err(Error::serde_err)
+            .map_err(internal)?;
+        self.inner
+            .raft_network
+            .recv(vec![msg])
+            .await
+            .map_err(internal)?;
+        let rsp = RaftResponse::default();
+        Ok(Response::new(rsp))
     }
 }
 
 #[async_trait]
 impl KvService for Wheel {
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn get(
         &self,
         request: Request<GetRequest>,
@@ -432,7 +365,7 @@ impl KvService for Wheel {
         Ok(Response::new(rsp))
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn put(
         &self,
         request: Request<PutRequest>,
@@ -442,7 +375,7 @@ impl KvService for Wheel {
         Ok(Response::new(rsp))
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn delete(
         &self,
         request: Request<DeleteRequest>,
@@ -452,7 +385,7 @@ impl KvService for Wheel {
         Ok(Response::new(rsp))
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn snapshot(
         &self,
         request: Request<SnapshotRequest>,
@@ -462,7 +395,7 @@ impl KvService for Wheel {
         Ok(Response::new(rsp))
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     async fn txn(
         &self,
         request: Request<TxnRequest>,
@@ -470,129 +403,5 @@ impl KvService for Wheel {
         let req = request.into_inner();
         let rsp = self.txn_inner(req).await.map_err(internal)?;
         Ok(Response::new(rsp))
-    }
-}
-
-#[cfg(test)]
-pub mod tests {
-
-    use std::net::SocketAddr;
-
-    use runkv_proto::wheel::raft_service_server::RaftServiceServer;
-    use tonic::transport::Server;
-    use tracing::trace;
-
-    use super::*;
-
-    pub struct MockRaftService {
-        raft_manager: RaftManager,
-    }
-
-    impl MockRaftService {
-        pub async fn bootstrap(raft_manager: RaftManager, addr: SocketAddr) {
-            let service = Self { raft_manager };
-            trace!("Bootstrap mock raft service on {}", addr);
-            Server::builder()
-                .add_service(RaftServiceServer::new(service))
-                .serve(addr)
-                .await
-                .map_err(Error::err)
-                .unwrap();
-        }
-    }
-
-    #[async_trait]
-    impl RaftService for MockRaftService {
-        async fn append_entries(
-            &self,
-            request: Request<AppendEntriesRequest>,
-        ) -> core::result::Result<Response<AppendEntriesResponse>, Status> {
-            let req = request.into_inner();
-            let raft = self
-                .raft_manager
-                .get_raft_node(req.id)
-                .await
-                .map_err(internal)?;
-            let req_data = bincode::deserialize(&req.data)
-                .map_err(Error::serde_err)
-                .map_err(internal)?;
-            let rsp = raft
-                .append_entries(req_data)
-                .await
-                .map_err(Error::raft_err)
-                .map_err(internal)?;
-            let rsp_data = bincode::serialize(&rsp)
-                .map_err(Error::serde_err)
-                .map_err(internal)?;
-            let response = AppendEntriesResponse {
-                id: req.id,
-                data: rsp_data,
-            };
-            Ok(Response::new(response))
-        }
-
-        async fn install_snapshot(
-            &self,
-            request: Request<InstallSnapshotRequest>,
-        ) -> core::result::Result<Response<InstallSnapshotResponse>, Status> {
-            let req = request.into_inner();
-            let raft = self
-                .raft_manager
-                .get_raft_node(req.id)
-                .await
-                .map_err(internal)?;
-            let req_data = bincode::deserialize(&req.data)
-                .map_err(Error::serde_err)
-                .map_err(internal)?;
-            let rsp = raft
-                .install_snapshot(req_data)
-                .await
-                .map_err(Error::raft_err)
-                .map_err(internal)?;
-            let rsp_data = bincode::serialize(&rsp)
-                .map_err(Error::serde_err)
-                .map_err(internal)?;
-            let response = InstallSnapshotResponse {
-                id: req.id,
-                data: rsp_data,
-            };
-            Ok(Response::new(response))
-        }
-
-        async fn vote(
-            &self,
-            request: Request<VoteRequest>,
-        ) -> core::result::Result<Response<VoteResponse>, Status> {
-            let req = request.into_inner();
-            let raft = self
-                .raft_manager
-                .get_raft_node(req.id)
-                .await
-                .map_err(internal)?;
-            let req_data = bincode::deserialize(&req.data)
-                .map_err(Error::serde_err)
-                .map_err(internal)?;
-            let rsp = raft
-                .vote(req_data)
-                .await
-                .map_err(Error::raft_err)
-                .map_err(internal)?;
-            let rsp_data = bincode::serialize(&rsp)
-                .map_err(Error::serde_err)
-                .map_err(internal)?;
-            let response = VoteResponse {
-                id: req.id,
-                data: rsp_data,
-            };
-            Ok(Response::new(response))
-        }
-
-        #[tracing::instrument(level = "trace", skip(self))]
-        async fn raft(
-            &self,
-            _request: Request<RaftRequest>,
-        ) -> core::result::Result<Response<RaftResponse>, Status> {
-            todo!()
-        }
     }
 }

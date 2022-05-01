@@ -3,13 +3,12 @@ pub mod config;
 pub mod error;
 pub mod meta;
 pub mod service;
-pub mod service_v2;
 pub mod worker;
 
 use std::sync::Arc;
 
 use bytesize::ByteSize;
-use components::raft_manager_v2::{RaftManager, RaftManagerOptions};
+use components::raft_manager::{RaftManager, RaftManagerOptions};
 use components::raft_network::GrpcRaftNetwork;
 use error::{Error, Result};
 use hyper::service::{make_service_fn, service_fn};
@@ -25,10 +24,10 @@ use runkv_proto::wheel::raft_service_server::RaftServiceServer;
 use runkv_proto::wheel::wheel_service_server::WheelServiceServer;
 use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions, SstableStoreRef};
 use runkv_storage::manifest::{VersionManager, VersionManagerOptions};
-use runkv_storage::raft_log_store_v2::store::RaftLogStoreOptions;
-use runkv_storage::raft_log_store_v2::RaftLogStore;
+use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
+use runkv_storage::raft_log_store::RaftLogStore;
 use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
-use service_v2::{Wheel, WheelOptions};
+use service::{Wheel, WheelOptions};
 use tonic::transport::Server;
 use tracing::info;
 use worker::heartbeater::{Heartbeater, HeartbeaterOptions};
@@ -265,7 +264,7 @@ fn build_raft_manager(
         version_manager,
         sstable_store,
         channel_pool,
-        lsm_tree_options: crate::components::raft_manager_v2::LsmTreeOptions {
+        lsm_tree_options: crate::components::raft_manager::LsmTreeOptions {
             write_buffer_capacity: config
                 .buffer
                 .write_buffer_capacity

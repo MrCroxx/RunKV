@@ -2,13 +2,13 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use runkv_common::Worker;
-use runkv_storage::raft_log_store_v2::entry::RaftLogBatchBuilder;
+use runkv_storage::raft_log_store::entry::RaftLogBatchBuilder;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::{trace, warn};
 
-use crate::components::fsm_v2::Fsm;
-use crate::components::raft_log_store_v2::{encode_entry_data, RaftGroupLogStore};
+use crate::components::fsm::Fsm;
+use crate::components::raft_log_store::{encode_entry_data, RaftGroupLogStore};
 use crate::components::raft_network::RaftNetwork;
 use crate::error::{Error, Result};
 
@@ -180,12 +180,12 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
         self.raft
             .propose(proposal.context, proposal.data)
             .await
-            .map_err(Error::RaftV2Error)
+            .map_err(Error::RaftError)
     }
 
     #[tracing::instrument(level = "trace")]
     async fn step(&mut self, msg: raft::prelude::Message) -> Result<()> {
-        self.raft.step(msg).await.map_err(Error::RaftV2Error)
+        self.raft.step(msg).await.map_err(Error::RaftError)
     }
 
     #[tracing::instrument(level = "trace")]
@@ -299,12 +299,12 @@ mod tests {
     use assert_matches::assert_matches;
     use runkv_common::tracing_slog_drain::TracingSlogDrain;
     use runkv_common::Worker;
-    use runkv_storage::raft_log_store_v2::store::RaftLogStoreOptions;
-    use runkv_storage::raft_log_store_v2::RaftLogStore;
+    use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
+    use runkv_storage::raft_log_store::RaftLogStore;
     use test_log::test;
 
     use super::*;
-    use crate::components::fsm_v2::tests::MockFsm;
+    use crate::components::fsm::tests::MockFsm;
     use crate::components::raft_network::tests::MockRaftNetwork;
 
     #[test(tokio::test)]

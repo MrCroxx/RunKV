@@ -9,6 +9,28 @@ use crate::error::Result;
 
 const DEFAULT_INDICES_INIT_CAPACITY: usize = 1024;
 
+macro_rules! state {
+    ($states:expr, $group:expr, $guard:ident, $state:ident) => {
+        let $guard = $states.read().await;
+        let $state = $guard
+            .get(&$group)
+            .ok_or(RaftLogStoreError::GroupNotExists($group))?
+            .read()
+            .await;
+    };
+}
+
+macro_rules! state_mut {
+    ($states:expr, $group:expr, $guard:ident, $state:ident) => {
+        let $guard = $states.read().await;
+        let mut $state = $guard
+            .get(&$group)
+            .ok_or(RaftLogStoreError::GroupNotExists($group))?
+            .write()
+            .await;
+    };
+}
+
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct EntryIndex {
     /// Prevent log entries with lower terms added from GC shadowing those with the same indices
@@ -27,6 +49,7 @@ pub struct MemState {
     mask_index: u64,
     indices: Vec<EntryIndex>,
     kvs: BTreeMap<Vec<u8>, Vec<u8>>,
+    phantom_term: u64,
 }
 
 pub struct MemStates {
@@ -43,32 +66,36 @@ impl Default for MemStates {
 }
 
 impl MemStates {
+    #[tracing::instrument(level = "trace", skip(self))]
     pub async fn add_group(&self, group: u64) -> Result<()> {
         let mut guard = self.states.write().await;
         match guard.entry(group) {
             Entry::Occupied(_) => return Err(RaftLogStoreError::GroupAlreadyExists(group).into()),
             Entry::Vacant(v) => {
                 v.insert(RwLock::new(MemState {
-                    first_index: 0,
-                    mask_index: 0,
+                    first_index: 1,
+                    mask_index: 1,
                     indices: Vec::with_capacity(DEFAULT_INDICES_INIT_CAPACITY),
                     kvs: BTreeMap::default(),
+                    phantom_term: 0,
                 }));
             }
         }
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub async fn may_add_group(&self, group: u64) -> bool {
         let mut guard = self.states.write().await;
         match guard.entry(group) {
             Entry::Occupied(_) => false,
             Entry::Vacant(v) => {
                 v.insert(RwLock::new(MemState {
-                    first_index: 0,
-                    mask_index: 0,
+                    first_index: 1,
+                    mask_index: 1,
                     indices: Vec::with_capacity(DEFAULT_INDICES_INIT_CAPACITY),
                     kvs: BTreeMap::default(),
+                    phantom_term: 0,
                 }));
                 true
             }
@@ -78,6 +105,7 @@ impl MemStates {
     /// # Safety
     ///
     /// Removed group needs to be guaranteed never be used again.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub async fn remove_group(&self, group: u64) -> Result<()> {
         let mut guard = self.states.write().await;
         match guard.entry(group) {
@@ -92,13 +120,14 @@ impl MemStates {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub async fn term(&self, group: u64, index: u64) -> Result<Option<u64>> {
-        let guard = self.states.read().await;
-        let state = guard
-            .get(&group)
-            .ok_or(RaftLogStoreError::GroupNotExists(group))?
-            .read()
-            .await;
+        state!(self.states, group, guard, state);
+
+        if state.indices.is_empty() || index == state.first_index - 1 {
+            return Ok(Some(state.phantom_term));
+        }
+
         if index < state.first_index || index >= state.first_index + state.indices.len() as u64 {
             Ok(None)
         } else {
@@ -108,13 +137,10 @@ impl MemStates {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub async fn ctx(&self, group: u64, index: u64) -> Result<Option<Vec<u8>>> {
-        let guard = self.states.read().await;
-        let state = guard
-            .get(&group)
-            .ok_or(RaftLogStoreError::GroupNotExists(group))?
-            .read()
-            .await;
+        state!(self.states, group, guard, state);
+
         if index < state.first_index || index >= state.first_index + state.indices.len() as u64 {
             Ok(None)
         } else {
@@ -124,58 +150,42 @@ impl MemStates {
         }
     }
 
-    pub async fn first_index(
-        &self,
-        group: u64,
-        unmask: bool,
-    ) -> Result<core::result::Result<u64, u64>> {
-        let guard = self.states.read().await;
-        let state = guard
-            .get(&group)
-            .ok_or(RaftLogStoreError::GroupNotExists(group))?
-            .read()
-            .await;
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub async fn first_index(&self, group: u64) -> Result<u64> {
+        state!(self.states, group, guard, state);
 
-        let index = if unmask {
-            state.first_index
-        } else {
-            std::cmp::max(state.first_index, state.mask_index)
-        };
-
-        if state.first_index + state.indices.len() as u64 <= index {
-            Ok(Err(index))
-        } else {
-            Ok(Ok(index))
-        }
+        Ok(state.first_index)
     }
 
-    pub async fn next_index(
-        &self,
-        group: u64,
-        unmask: bool,
-    ) -> Result<core::result::Result<u64, u64>> {
-        let guard = self.states.read().await;
-        let state = guard
-            .get(&group)
-            .ok_or(RaftLogStoreError::GroupNotExists(group))?
-            .read()
-            .await;
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub async fn last_index(&self, group: u64) -> Result<u64> {
+        state!(self.states, group, guard, state);
 
-        let index = if unmask {
-            state.first_index
+        let last_index = state.first_index + state.indices.len() as u64 - 1;
+        Ok(last_index)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub async fn masked_first_index(&self, group: u64) -> Result<u64> {
+        state!(self.states, group, guard, state);
+
+        Ok(state.mask_index)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub async fn masked_last_index(&self, group: u64) -> Result<u64> {
+        state!(self.states, group, guard, state);
+
+        let mask_last_index = if state.indices.is_empty() {
+            state.mask_index - 1
         } else {
-            std::cmp::max(state.first_index, state.mask_index)
+            state.first_index + state.indices.len() as u64 - 1
         };
-        let next_index = state.first_index + state.indices.len() as u64;
-
-        if next_index <= index {
-            Ok(Err(next_index))
-        } else {
-            Ok(Ok(next_index))
-        }
+        Ok(mask_last_index)
     }
 
     /// Append raft log indices.
+    #[tracing::instrument(level = "trace", skip(self, indices))]
     pub async fn append(
         &self,
         group: u64,
@@ -183,22 +193,12 @@ impl MemStates {
         mut indices: Vec<EntryIndex>,
     ) -> Result<()> {
         debug_assert!(!indices.is_empty());
-        let guard = self.states.read().await;
-        let mut state = guard
-            .get(&group)
-            .ok_or(RaftLogStoreError::GroupNotExists(group))?
-            .write()
-            .await;
+        state_mut!(self.states, group, guard, state);
 
-        let mut state_next_index = state.first_index + state.indices.len() as u64;
+        let state_next_index = state.first_index + state.indices.len() as u64;
 
         // Return error if there is gap in raft log.
-
-        if state_next_index == 0 {
-            // Accpet anyway.
-            state.first_index = first_index;
-            state_next_index = first_index;
-        } else if first_index > state_next_index {
+        if first_index > state_next_index {
             return Err(RaftLogStoreError::RaftLogGap {
                 start: state_next_index,
                 end: first_index,
@@ -240,13 +240,9 @@ impl MemStates {
     }
 
     /// Truncate raft log of given `group` since given `index`.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub async fn truncate(&self, group: u64, index: u64) -> Result<()> {
-        let guard = self.states.read().await;
-        let mut state = guard
-            .get(&group)
-            .ok_or(RaftLogStoreError::GroupNotExists(group))?
-            .write()
-            .await;
+        state_mut!(self.states, group, guard, state);
 
         if index < state.first_index {
             return Err(RaftLogStoreError::RaftLogGap {
@@ -257,13 +253,11 @@ impl MemStates {
         }
 
         if index >= state.first_index + state.indices.len() as u64 {
-            // TODO: For adaptation to openraft, which may truncate on a larger index.
-            // return Err(RaftLogStoreError::RaftLogGap {
-            //     start: state.first_index + state.indices.len() as u64,
-            //     end: index,
-            // }
-            // .into());
-            return Ok(());
+            return Err(RaftLogStoreError::RaftLogGap {
+                start: state.first_index + state.indices.len() as u64,
+                end: index,
+            }
+            .into());
         }
 
         let len = (index - state.first_index) as usize;
@@ -273,60 +267,51 @@ impl MemStates {
     }
 
     /// Compact any indices before the given index.
+    // #[tracing::instrument(level = "trace", skip(self))]
     pub async fn compact(&self, group: u64, index: u64) -> Result<()> {
-        let guard = self.states.read().await;
-        let mut state = guard
-            .get(&group)
-            .ok_or(RaftLogStoreError::GroupNotExists(group))?
-            .write()
-            .await;
-
-        trace!("compact log before {} of group {}", index, group);
+        state_mut!(self.states, group, guard, state);
 
         // Ignore outdated compact command.
         if index <= state.first_index {
             return Ok(());
         }
 
-        // If given index is greater than `next_index`, truncate all indices and accepts anyway.
+        // If given index is greater than `next_index`, clear all indices and set `first_index` to
+        // compact index.
         if index > state.first_index + state.indices.len() as u64 {
+            // Accurate term cannot be known for there is log gap. Use the largest one instead.
+            if let Some(index) = state.indices.last() {
+                state.phantom_term = index.term;
+            }
+            state.first_index = index;
             state.indices.clear();
-            state.first_index = 0;
-
-            trace!("first index after compact: {}", state.first_index);
-
             return Ok(());
         }
 
-        // Truncate indices.
+        // Compact indices.
         let len = (index - state.first_index) as usize;
-        state.indices.drain(..len);
+        if let Some(index) = state.indices.drain(..len).last() {
+            state.phantom_term = index.term;
+        }
         state.first_index = index;
-
-        trace!("first index after compact: {}", state.first_index);
 
         Ok(())
     }
 
     /// Mask any indices before the given index.
     ///
-    /// Masked indices are not deleted from the state, but can only be accessed with `unmask` set to
-    /// `true`.
+    /// Masked indices are not deleted from the state, they should not be accessed by raft
+    /// algorithm.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub async fn mask(&self, group: u64, index: u64) -> Result<()> {
-        let guard = self.states.read().await;
-        let mut state = guard
-            .get(&group)
-            .ok_or(RaftLogStoreError::GroupNotExists(group))?
-            .write()
-            .await;
-
-        trace!("mask log before {} of group {}", index, group);
+        state_mut!(self.states, group, guard, state);
 
         if index > state.first_index + state.indices.len() as u64 {
-            state.indices.clear();
-            state.first_index = 0;
-            state.mask_index = 0;
-            return Ok(());
+            return Err(RaftLogStoreError::RaftLogGap {
+                start: state.first_index + state.indices.len() as u64,
+                end: index,
+            }
+            .into());
         }
         state.mask_index = index;
 
@@ -340,12 +325,7 @@ impl MemStates {
         max_len: usize,
         unmask: bool,
     ) -> Result<(u64, Vec<EntryIndex>)> {
-        let guard = self.states.read().await;
-        let state = guard
-            .get(&group)
-            .ok_or(RaftLogStoreError::GroupNotExists(group))?
-            .read()
-            .await;
+        state!(self.states, group, guard, state);
 
         let start_index = std::cmp::max(
             index,
@@ -382,12 +362,7 @@ impl MemStates {
     }
 
     pub async fn entries(&self, group: u64, index: u64, max_len: usize) -> Result<Vec<EntryIndex>> {
-        let guard = self.states.read().await;
-        let state = guard
-            .get(&group)
-            .ok_or(RaftLogStoreError::GroupNotExists(group))?
-            .read()
-            .await;
+        state!(self.states, group, guard, state);
 
         if index < state.first_index {
             return Err(RaftLogStoreError::RaftLogGap {
@@ -413,34 +388,22 @@ impl MemStates {
     }
 
     pub async fn put(&self, group: u64, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
-        let guard = self.states.read().await;
-        let mut state = guard
-            .get(&group)
-            .ok_or(RaftLogStoreError::GroupNotExists(group))?
-            .write()
-            .await;
+        state_mut!(self.states, group, guard, state);
+
         state.kvs.insert(key, value);
         Ok(())
     }
 
     pub async fn delete(&self, group: u64, key: Vec<u8>) -> Result<()> {
-        let guard = self.states.read().await;
-        let mut state = guard
-            .get(&group)
-            .ok_or(RaftLogStoreError::GroupNotExists(group))?
-            .write()
-            .await;
+        state_mut!(self.states, group, guard, state);
+
         state.kvs.remove(&key);
         Ok(())
     }
 
     pub async fn get(&self, group: u64, key: Vec<u8>) -> Result<Option<Vec<u8>>> {
-        let guard = self.states.read().await;
-        let state = guard
-            .get(&group)
-            .ok_or(RaftLogStoreError::GroupNotExists(group))?
-            .read()
-            .await;
+        state!(self.states, group, guard, state);
+
         Ok(state.kvs.get(&key).cloned())
     }
 }
@@ -497,7 +460,7 @@ mod tests {
         assert!(states.entries(1, 401, usize::MAX).await.is_err());
 
         assert!(states.truncate(1, 250).await.is_err());
-        // assert!(states.truncate(1, 401).await.is_err());
+        assert!(states.truncate(1, 401).await.is_err());
         states.truncate(1, 301).await.unwrap();
         assert_range(&states, 1, 251..301).await;
 
