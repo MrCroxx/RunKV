@@ -8,7 +8,6 @@ use runkv_common::channel_pool::ChannelPool;
 use runkv_proto::wheel::raft_service_client::RaftServiceClient;
 use runkv_proto::wheel::RaftRequest;
 use tokio::sync::{mpsc, RwLock};
-use tonic::transport::Channel;
 use tonic::Request;
 
 use crate::error::{Error, RaftManageError, Result};
@@ -90,19 +89,6 @@ impl GrpcRaftNetwork {
             }
         }
         Ok(())
-    }
-
-    pub async fn client(&self, raft_node: u64) -> Result<RaftServiceClient<Channel>> {
-        let guard = self.core.read().await;
-        let node = *guard
-            .raft_nodes
-            .get(&raft_node)
-            .ok_or(RaftManageError::RaftNodeNotExists {
-                raft_node,
-                node: self.node,
-            })?;
-        let channel = self.channel_pool.get(node).await.map_err(Error::err)?;
-        Ok(RaftServiceClient::new(channel))
     }
 
     pub async fn raft_nodes(&self, group: u64) -> Result<Vec<u64>> {

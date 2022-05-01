@@ -16,8 +16,8 @@ const RAFT_HEARTBEAT_TICK_DURATION: Duration = Duration::from_millis(100);
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Proposal {
-    data: Vec<u8>,
-    context: Vec<u8>,
+    pub data: Vec<u8>,
+    pub context: Vec<u8>,
 }
 
 pub enum RaftStartMode {

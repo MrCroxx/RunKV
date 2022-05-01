@@ -53,11 +53,6 @@ struct RaftManagerInner {
     raft_worker_handles: BTreeMap<u64, JoinHandle<()>>,
     sstable_uploader_handles: BTreeMap<u64, JoinHandle<()>>,
     sequences: BTreeMap<u64, Arc<AtomicU64>>,
-    // /// `{ raft node id -> Raft }`.
-    // /// `{raft node id -> sequence }`
-    // rafts: BTreeMap<u64, Raft<Gear>>,
-    // /// `{raft node id -> ObjectStoreLsmTree }`
-    // lsm_trees: BTreeMap<u64, ObjectStoreLsmTree>,
 }
 
 #[derive(Clone)]
@@ -100,8 +95,6 @@ impl RaftManager {
                 raft_worker_handles: BTreeMap::default(),
                 sstable_uploader_handles: BTreeMap::default(),
                 sequences: BTreeMap::default(),
-                // rafts: BTreeMap::default(),
-                // lsm_trees: BTreeMap::default(),
             })),
         }
     }
@@ -221,6 +214,22 @@ impl RaftManager {
         Ok(())
     }
 
+    // TODO: REMOVE ME.
+    pub async fn get_proposal_channel(
+        &self,
+        raft_node: u64,
+    ) -> Result<mpsc::UnboundedSender<Proposal>> {
+        let inner = self.inner.read().await;
+        inner.proposal_txs.get(&raft_node).cloned().ok_or_else(|| {
+            RaftError::RaftNodeNotExists {
+                raft_node,
+                node: self.node,
+            }
+            .into()
+        })
+    }
+
+    // TODO: REMOVE ME.
     pub async fn get_sequence(&self, raft_node: u64) -> Result<Arc<AtomicU64>> {
         let inner = self.inner.read().await;
         inner.sequences.get(&raft_node).cloned().ok_or_else(|| {

@@ -3,6 +3,7 @@ pub mod config;
 pub mod error;
 pub mod meta;
 pub mod service;
+pub mod service_v2;
 pub mod worker;
 
 use std::sync::Arc;
