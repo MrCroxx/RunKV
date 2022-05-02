@@ -58,7 +58,7 @@ tmux new -d -s runkv-minio ${PREFIX_BIN}/minio server --address 127.0.0.1:9000 -
 # run jaeger
 tmux new -d -s runkv-jaeger ${PREFIX_BIN}/jaeger
 # run prometheus
-tmux new -d -s runkv-prometheus ${PREFIX_BIN}/prometheus/prometheus --config.file=tests/etc/prometheus.yml --web.listen-address=127.0.0.1:9091 --storage.tsdb.path=${PREFIX_DATA}/prometheus-data
+tmux new -d -s runkv-prometheus ${PREFIX_BIN}/prometheus/prometheus --config.file=etc/prometheus.yml --web.listen-address=127.0.0.1:9091 --storage.tsdb.path=${PREFIX_DATA}/prometheus-data
 # create test bucket
 tmux new -d -s runkv-mcli ' \
 ${PREFIX_BIN}/mcli alias set local http://127.0.0.1:9000 minioadmin minioadmin ; \
@@ -74,7 +74,7 @@ category = "Develop"
 description = "Kill development environment."
 script = '''
 #!/bin/bash
-tmux kill-session -t runkv-minio
-tmux kill-session -t runkv-jaeger
-tmux kill-session -t runkv-prometheus
+tmux send-keys -t runkv-minio C-c
+tmux send-keys -t runkv-jaeger C-c
+tmux send-keys -t runkv-prometheus C-c
 '''

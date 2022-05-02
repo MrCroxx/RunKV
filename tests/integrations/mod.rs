@@ -131,7 +131,7 @@ async fn test_concurrent_put_get() {
     .await
     .unwrap();
 
-    let futures = (1..=1000)
+    let futures = (1..=100)
         .map(|i| {
             let channel_clone = channel.clone();
             async move {

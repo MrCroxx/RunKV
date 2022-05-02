@@ -13,7 +13,6 @@ dependencies = ["prepare"]
 description = "Download and extract Grafana"
 script = '''
 #!/bin/bash
-echo "begin download-grafana"
 set -e
 if [ -d "${PREFIX_BIN}/grafana" ]; then
     exit 0
