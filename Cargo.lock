@@ -2174,6 +2174,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bincode",
  "bytes",
  "bytesize",
  "chrono",
@@ -2233,10 +2234,10 @@ name = "runkv-proto"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bincode",
  "bytes",
  "prost",
  "prost-build",
+ "runkv-common",
  "serde",
  "serde_derive",
  "tonic",

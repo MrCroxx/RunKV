@@ -7,11 +7,10 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use bytes::Bytes;
 use futures::future;
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
-use runkv_common::log::init_runkv_logger;
+use runkv_common::log::{init_runkv_logger, shutdown_runkv_logger};
 use runkv_exhauster::config::ExhausterConfig;
 use runkv_exhauster::{bootstrap_exhauster, build_exhauster_with_object_store};
 use runkv_proto::common::Endpoint;
@@ -19,14 +18,13 @@ use runkv_proto::kv::kv_service_client::KvServiceClient;
 use runkv_proto::kv::{DeleteRequest, GetRequest, PutRequest};
 use runkv_proto::meta::KeyRange;
 use runkv_proto::wheel::wheel_service_client::WheelServiceClient;
-use runkv_proto::wheel::{AddEndpointsRequest, AddKeyRangeRequest, InitializeRaftGroupRequest};
+use runkv_proto::wheel::{AddEndpointsRequest, AddKeyRangeRequest};
 use runkv_rudder::config::RudderConfig;
 use runkv_rudder::{bootstrap_rudder, build_rudder_with_object_store};
 use runkv_storage::MemObjectStore;
 use runkv_wheel::config::WheelConfig;
 use runkv_wheel::{bootstrap_wheel, build_wheel_with_object_store};
 use test_log::test;
-use tonic::transport::Channel;
 use tonic::Request;
 use tracing::trace;
 
@@ -120,7 +118,7 @@ async fn test_concurrent_put_get() {
         }))
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    tokio::time::sleep(Duration::from_secs(10)).await;
 
     let channel = tonic::transport::Endpoint::from_shared(format!(
         "http://{}:{}",
@@ -208,7 +206,9 @@ async fn test_concurrent_put_get() {
         .collect_vec();
     future::join_all(futures).await;
 
-    drop(tempdir)
+    drop(tempdir);
+
+    // shutdown_runkv_logger();
 }
 
 fn key(i: u64) -> Vec<u8> {

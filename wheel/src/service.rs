@@ -5,14 +5,16 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use itertools::Itertools;
 use runkv_common::channel_pool::ChannelPool;
+use runkv_common::coding::BytesSerde;
 use runkv_common::config::Node;
+use runkv_common::context::Context;
 use runkv_common::notify_pool::NotifyPool;
 use runkv_proto::common::Endpoint;
 use runkv_proto::kv::kv_service_server::KvService;
 use runkv_proto::kv::{
-    kv_op_request, kv_op_response, BytesSerde, DeleteRequest, DeleteResponse, GetRequest,
-    GetResponse, KvOpRequest, PutRequest, PutResponse, SnapshotRequest, SnapshotResponse,
-    TxnRequest, TxnResponse,
+    kv_op_request, kv_op_response, DeleteRequest, DeleteResponse, GetRequest, GetResponse,
+    KvOpRequest, PutRequest, PutResponse, SnapshotRequest, SnapshotResponse, TxnRequest,
+    TxnResponse,
 };
 use runkv_proto::wheel::raft_service_server::RaftService;
 use runkv_proto::wheel::wheel_service_server::WheelService;
@@ -156,8 +158,10 @@ impl Wheel {
         Ok(response)
     }
 
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = "trace", fields(request_id))]
     async fn txn_inner(&self, request: TxnRequest) -> Result<TxnResponse> {
+        let span = tracing::Span::current();
+        let span_id = span.id();
         // Pick raft leader of the request.
         let raft_nodes = self.txn_raft_nodes(&request).await?;
         assert!(!raft_nodes.is_empty());
@@ -177,20 +181,26 @@ impl Wheel {
         };
 
         // Register request.
-        let id = self.inner.request_id.fetch_add(1, Ordering::SeqCst) + 1;
+        let request_id = self.inner.request_id.fetch_add(1, Ordering::SeqCst) + 1;
+        span.record("request_id", &request_id);
         let rx = self
             .inner
             .txn_notify_pool
-            .register(id)
+            .register(request_id)
             .map_err(Error::err)?;
 
         // Propose cmd with raft leader.
         let cmd = Command::TxnRequest {
-            request_id: id,
+            request_id,
             sequence,
             request,
         };
-        let buf = cmd.encode_to_vec().map_err(Error::serde_err)?;
+        let ctx = Context {
+            span_id: span_id.map_or(0, |id| id.into_u64()),
+            request_id,
+        };
+        let data = cmd.encode_to_vec().map_err(Error::serde_err)?;
+        let context = ctx.encode_to_vec().map_err(Error::serde_err)?;
 
         let proposal_tx = self
             .inner
@@ -199,10 +209,7 @@ impl Wheel {
             .await?;
 
         proposal_tx
-            .send(Proposal {
-                data: buf,
-                context: vec![],
-            })
+            .send(Proposal { data, context })
             .map_err(Error::err)?;
 
         // Wait for resposne.

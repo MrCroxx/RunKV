@@ -1,6 +1,7 @@
 use std::ops::Range;
 
-use runkv_proto::kv::{BytesSerde, TxnRequest};
+use runkv_common::coding::BytesSerde;
+use runkv_proto::kv::TxnRequest;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 

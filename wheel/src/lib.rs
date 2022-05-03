@@ -1,3 +1,5 @@
+#![feature(let_chains)]
+
 pub mod components;
 pub mod config;
 pub mod error;
