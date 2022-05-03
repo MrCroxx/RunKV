@@ -25,6 +25,7 @@ use runkv_storage::MemObjectStore;
 use runkv_wheel::config::WheelConfig;
 use runkv_wheel::{bootstrap_wheel, build_wheel_with_object_store};
 use test_log::test;
+use tonic::transport::Channel;
 use tonic::Request;
 use tracing::trace;
 
@@ -33,7 +34,42 @@ const WHEEL_CONFIG_PATH: &str = "etc/wheel.toml";
 const EXHAUSTER_CONFIG_PATH: &str = "etc/exhauster.toml";
 const LSM_TREE_CONFIG_PATH: &str = "etc/lsm_tree.toml";
 
-#[tokio::test]
+async fn add_key_range(
+    wheel_client: &mut WheelServiceClient<Channel>,
+    start: &[u8],
+    end: &[u8],
+    group: u64,
+    raft_nodes: &[u64],
+    node: u64,
+) {
+    wheel_client
+        .add_key_range(Request::new(AddKeyRangeRequest {
+            key_range: Some(KeyRange {
+                start_key: start.to_vec(),
+                end_key: end.to_vec(),
+            }),
+            group,
+            raft_nodes: raft_nodes.to_vec(),
+            nodes: HashMap::from_iter(raft_nodes.iter().map(|&raft_node| (raft_node, node))),
+        }))
+        .await
+        .unwrap();
+}
+
+async fn add_key_ranges(wheel_client: &mut WheelServiceClient<Channel>, node: u64) {
+    add_key_range(wheel_client, b"k0", b"k0z", 10, &[11, 12, 13], node).await;
+    add_key_range(wheel_client, b"k1", b"k1z", 20, &[21, 22, 23], node).await;
+    add_key_range(wheel_client, b"k2", b"k2z", 30, &[31, 32, 33], node).await;
+    add_key_range(wheel_client, b"k3", b"k3z", 40, &[41, 42, 43], node).await;
+    add_key_range(wheel_client, b"k4", b"k4z", 50, &[51, 52, 53], node).await;
+    add_key_range(wheel_client, b"k5", b"k5z", 60, &[61, 62, 63], node).await;
+    add_key_range(wheel_client, b"k6", b"k6z", 70, &[71, 72, 73], node).await;
+    add_key_range(wheel_client, b"k7", b"k7z", 80, &[81, 82, 83], node).await;
+    add_key_range(wheel_client, b"k8", b"k8z", 90, &[91, 92, 93], node).await;
+    add_key_range(wheel_client, b"k9", b"k9z", 100, &[101, 102, 103], node).await;
+}
+
+#[test(tokio::test)]
 async fn test_concurrent_put_get() {
     init_runkv_logger("runkv_tests");
 
@@ -102,22 +138,9 @@ async fn test_concurrent_put_get() {
         .await
         .unwrap();
     tokio::time::sleep(Duration::from_secs(1)).await;
-    wheel_client
-        .add_key_range(Request::new(AddKeyRangeRequest {
-            key_range: Some(KeyRange {
-                start_key: b"k".to_vec(),
-                end_key: b"kz".to_vec(),
-            }),
-            group: 1,
-            raft_nodes: vec![1, 2, 3],
-            nodes: HashMap::from_iter([
-                (1, wheel_config.id),
-                (2, wheel_config.id),
-                (3, wheel_config.id),
-            ]),
-        }))
-        .await
-        .unwrap();
+
+    add_key_ranges(&mut wheel_client, wheel_config.id).await;
+
     tokio::time::sleep(Duration::from_secs(10)).await;
 
     let channel = tonic::transport::Endpoint::from_shared(format!(
@@ -129,78 +152,82 @@ async fn test_concurrent_put_get() {
     .await
     .unwrap();
 
-    let futures = (1..=1000)
-        .map(|i| {
+    let futures = (0..1000)
+        .map(|c| {
             let channel_clone = channel.clone();
             async move {
-                let mut rng = thread_rng();
-                let mut client = KvServiceClient::new(channel_clone);
-                tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
-                trace!("put {:?}", key(i));
-                client
-                    .put(Request::new(PutRequest {
-                        key: key(i),
-                        value: value(i),
-                    }))
-                    .await
-                    .unwrap();
-                tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
-                trace!("get {:?}", key(i));
-                assert_eq!(
+                for t in 0..1 {
+                    let i = t + c;
+                    let mut rng = thread_rng();
+                    let channel_clone_clone = channel_clone.clone();
+                    let mut client = KvServiceClient::new(channel_clone_clone);
+                    tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                    trace!("put {:?}", key(i));
                     client
-                        .get(Request::new(GetRequest {
+                        .put(Request::new(PutRequest {
                             key: key(i),
-                            sequence: 0,
+                            value: value(i),
                         }))
                         .await
-                        .unwrap()
-                        .into_inner()
-                        .value,
-                    value(i)
-                );
-                tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
-                trace!("delete {:?}", key(i));
-                client
-                    .delete(Request::new(DeleteRequest { key: key(i) }))
-                    .await
-                    .unwrap();
-                tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
-                trace!("get {:?}", key(i));
-                assert_eq!(
+                        .unwrap();
+                    tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                    trace!("get {:?}", key(i));
+                    assert_eq!(
+                        client
+                            .get(Request::new(GetRequest {
+                                key: key(i),
+                                sequence: 0,
+                            }))
+                            .await
+                            .unwrap()
+                            .into_inner()
+                            .value,
+                        value(i)
+                    );
+                    tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                    trace!("delete {:?}", key(i));
                     client
-                        .get(Request::new(GetRequest {
+                        .delete(Request::new(DeleteRequest { key: key(i) }))
+                        .await
+                        .unwrap();
+                    tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                    trace!("get {:?}", key(i));
+                    assert_eq!(
+                        client
+                            .get(Request::new(GetRequest {
+                                key: key(i),
+                                sequence: 0,
+                            }))
+                            .await
+                            .unwrap()
+                            .into_inner()
+                            .value,
+                        vec![]
+                    );
+                    tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                    trace!("put {:?}", key(i));
+                    client
+                        .put(Request::new(PutRequest {
                             key: key(i),
-                            sequence: 0,
+                            value: value(i),
                         }))
                         .await
-                        .unwrap()
-                        .into_inner()
-                        .value,
-                    vec![]
-                );
-                tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
-                trace!("put {:?}", key(i));
-                client
-                    .put(Request::new(PutRequest {
-                        key: key(i),
-                        value: value(i),
-                    }))
-                    .await
-                    .unwrap();
-                tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
-                trace!("get {:?}", key(i));
-                assert_eq!(
-                    client
-                        .get(Request::new(GetRequest {
-                            key: key(i),
-                            sequence: 0,
-                        }))
-                        .await
-                        .unwrap()
-                        .into_inner()
-                        .value,
-                    value(i)
-                );
+                        .unwrap();
+                    tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
+                    trace!("get {:?}", key(i));
+                    assert_eq!(
+                        client
+                            .get(Request::new(GetRequest {
+                                key: key(i),
+                                sequence: 0,
+                            }))
+                            .await
+                            .unwrap()
+                            .into_inner()
+                            .value,
+                        value(i)
+                    );
+                }
             }
         })
         .collect_vec();
@@ -212,11 +239,11 @@ async fn test_concurrent_put_get() {
 }
 
 fn key(i: u64) -> Vec<u8> {
-    format!("k{:064}", i).as_bytes().to_vec()
+    format!("k{:03}{:61}", i, 0).as_bytes().to_vec()
 }
 
 fn value(i: u64) -> Vec<u8> {
-    format!("v{:064}", i).as_bytes().to_vec()
+    format!("v{:03}{:61}", i, 0).as_bytes().to_vec()
 }
 
 fn concat_toml(path1: &str, path2: &str) -> String {

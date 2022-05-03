@@ -95,8 +95,8 @@ impl Log {
         Ok(())
     }
 
-    /// Push [`entry`] to log file. Returns `(file id, offset, len)`.
-    pub async fn push(&self, entry: Entry) -> Result<(u64, usize, usize)> {
+    /// Append [`entry`] to log file. Returns `(file id, offset, len)`.
+    pub async fn append(&self, entry: Entry) -> Result<(u64, usize, usize)> {
         let mut guard = self.core.lock().await;
         let file_id = guard.first_log_file_id + guard.frozen_files.len() as u64;
         let start = guard.active_file.metadata().await?.len() as usize;
@@ -226,7 +226,7 @@ mod tests {
         assert_eq!(entries.len(), 4);
 
         for entry in entries.iter().cloned() {
-            log.push(entry).await.unwrap();
+            log.append(entry).await.unwrap();
         }
         assert_eq!(log.core.lock().await.frozen_files.len(), 4);
         let mut buf = vec![];
