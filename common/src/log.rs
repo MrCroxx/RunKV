@@ -25,10 +25,11 @@ pub fn init_runkv_logger(service_name: &str) {
         // Configure RunKV's own crates to log at TRACE level, and ignore all third-party crates.
         let filter = tracing_subscriber::filter::Targets::new()
             // Enable trace for most modules.
+            .with_target("runkv_common", tracing::Level::TRACE)
+            .with_target("runkv_storage", tracing::Level::TRACE)
             .with_target("runkv_rudder", tracing::Level::TRACE)
             .with_target("runkv_wheel", tracing::Level::TRACE)
             .with_target("runkv_exhauster", tracing::Level::TRACE)
-            .with_target("runkv_storage", tracing::Level::TRACE)
             .with_target("runkv_tests", tracing::Level::TRACE)
             .with_target("openraft::raft", tracing::Level::TRACE)
             .with_target("raft", tracing::Level::TRACE)
@@ -41,5 +42,16 @@ pub fn init_runkv_logger(service_name: &str) {
         tracing_subscriber::registry()
             .with(opentelemetry_layer)
             .init();
+    }
+}
+
+pub fn shutdown_runkv_logger() {
+    let enable_jaeger_tracing = match std::env::var("RUNKV_TRACE") {
+        Err(_) => false,
+        Ok(val) => val.parse().unwrap(),
+    };
+
+    if enable_jaeger_tracing {
+        opentelemetry::global::shutdown_tracer_provider();
     }
 }

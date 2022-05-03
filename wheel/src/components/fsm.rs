@@ -2,6 +2,7 @@ use std::ops::Range;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use runkv_common::context::Context;
 use runkv_common::notify_pool::NotifyPool;
 use runkv_proto::kv::{
     kv_op_request, kv_op_response, DeleteRequest, DeleteResponse, GetRequest, GetResponse,
@@ -132,6 +133,12 @@ impl ObjectLsmTreeFsm {
     async fn apply_normal(&self, entry: raft::prelude::Entry) -> Result<()> {
         if entry.data.is_empty() {
             return Ok(());
+        }
+        if cfg!(feature = "tracing") && let raft::prelude::EntryType::EntryNormal = entry.entry_type() && !entry.data.is_empty() {
+            let span = tracing::Span::current();
+            let ctx: Context = bincode::deserialize(&entry.context).map_err(Error::serde_err)?;
+            span.follows_from(tracing::Id::from_u64(ctx.span_id));
+            span.record("request_id", &ctx.request_id);
         }
         let cmd = bincode::deserialize(&entry.data).map_err(Error::serde_err)?;
         match cmd {
@@ -273,7 +280,9 @@ impl Fsm for ObjectLsmTreeFsm {
 
         // Update `done index`.
         let done_index = last_apply_index;
-        self.store_index(DONE_INDEX_KEY, done_index).await?;
+        if last_done_index != done_index {
+            self.store_index(DONE_INDEX_KEY, done_index).await?;
+        }
 
         Ok(())
     }

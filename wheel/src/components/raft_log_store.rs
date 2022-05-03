@@ -205,7 +205,7 @@ impl raft::Storage for RaftGroupLogStore {
     /// [first_index()-1, last_index()]. The term of the entry before
     /// first_index is retained for matching purpose even though the
     /// rest of that entry may not be available.
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = "trace", ret, err)]
     async fn term(&self, idx: u64) -> raft::Result<u64> {
         let may_term = self.core.term(self.group, idx).await.map_err(err)?;
         if let Some(term) = may_term {
