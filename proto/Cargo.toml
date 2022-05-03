@@ -6,9 +6,9 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0"
-bincode = "1.3.3"
 bytes = "1"
 prost = "0.9"
+runkv-common = { path = "../common" }
 serde = "1.0"
 serde_derive = "1.0"
 tonic = "0.6.2"

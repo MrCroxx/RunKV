@@ -1,6 +1,16 @@
 use bytes::{Buf, BufMut};
 use serde::Deserialize;
 
+pub trait BytesSerde<'de>: serde::Serialize + serde::Deserialize<'de> + Sized {
+    fn encode_to_vec(&self) -> anyhow::Result<Vec<u8>> {
+        bincode::serialize(self).map_err(|e| anyhow::anyhow!("bincode serialize error: {}", e))
+    }
+
+    fn decode(slice: &'de [u8]) -> anyhow::Result<Self> {
+        bincode::deserialize(slice).map_err(|e| anyhow::anyhow!("bincode deserialize error: {}", e))
+    }
+}
+
 #[derive(Deserialize, Clone, Copy, Debug)]
 pub enum CompressionAlgorithm {
     None,
