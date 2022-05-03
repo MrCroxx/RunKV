@@ -178,20 +178,20 @@ impl Wheel {
         };
 
         // Register request.
-        let id = self.inner.request_id.fetch_add(1, Ordering::SeqCst) + 1;
+        let request_id = self.inner.request_id.fetch_add(1, Ordering::SeqCst) + 1;
         let rx = self
             .inner
             .txn_notify_pool
-            .register(id)
+            .register(request_id)
             .map_err(Error::err)?;
 
         // Propose cmd with raft leader.
         let cmd = Command::TxnRequest {
-            request_id: id,
+            request_id,
             sequence,
             request,
         };
-        let buf = cmd.encode_to_vec().map_err(Error::serde_err)?;
+        let data = cmd.encode_to_vec().map_err(Error::serde_err)?;
 
         let proposal_tx = self
             .inner
@@ -201,7 +201,7 @@ impl Wheel {
 
         proposal_tx
             .send(Proposal {
-                data: buf,
+                data,
                 context: vec![],
             })
             .map_err(Error::err)?;
