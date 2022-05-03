@@ -152,7 +152,7 @@ impl RaftLogStore {
 
         let raw = batch.take_raw();
         let entry = LogEntry::RaftLogBatch(batch);
-        let (file_id, write_offset, _write_len) = self.core.log.push(entry).await?;
+        let (file_id, write_offset, _write_len) = self.core.log.append(entry).await?;
 
         let block_offset = write_offset + data_segment_offset + 1;
         let block_len = data_segment_len;
@@ -176,7 +176,7 @@ impl RaftLogStore {
     pub async fn truncate(&self, group: u64, index: u64) -> Result<()> {
         self.core
             .log
-            .push(LogEntry::Truncate(Truncate { group, index }))
+            .append(LogEntry::Truncate(Truncate { group, index }))
             .await?;
         self.core.states.truncate(group, index).await?;
         Ok(())
@@ -186,7 +186,7 @@ impl RaftLogStore {
     pub async fn compact(&self, group: u64, index: u64) -> Result<()> {
         self.core
             .log
-            .push(LogEntry::Compact(Compact { group, index }))
+            .append(LogEntry::Compact(Compact { group, index }))
             .await?;
         self.core.states.compact(group, index).await?;
         Ok(())
@@ -199,7 +199,7 @@ impl RaftLogStore {
     pub async fn mask(&self, group: u64, index: u64) -> Result<()> {
         self.core
             .log
-            .push(LogEntry::Mask(Mask { group, index }))
+            .append(LogEntry::Mask(Mask { group, index }))
             .await?;
         self.core.states.mask(group, index).await?;
         Ok(())
@@ -282,7 +282,7 @@ impl RaftLogStore {
     pub async fn put(&self, group: u64, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
         self.core
             .log
-            .push(LogEntry::Kv(Kv::Put {
+            .append(LogEntry::Kv(Kv::Put {
                 group,
                 key: key.clone(),
                 value: value.clone(),
@@ -295,7 +295,7 @@ impl RaftLogStore {
     pub async fn delete(&self, group: u64, key: Vec<u8>) -> Result<()> {
         self.core
             .log
-            .push(LogEntry::Kv(Kv::Delete {
+            .append(LogEntry::Kv(Kv::Delete {
                 group,
                 key: key.clone(),
             }))

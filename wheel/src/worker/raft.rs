@@ -171,7 +171,7 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
         //     }
         // }
 
-        const MIN_LOOP_DURATION: Duration = Duration::from_millis(1);
+        const MIN_LOOP_DURATION: Duration = Duration::from_millis(10);
         let mut remaining_timeout = RAFT_HEARTBEAT_TICK_DURATION;
         loop {
             let now = Instant::now();

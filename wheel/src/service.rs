@@ -160,6 +160,7 @@ impl Wheel {
 
     #[tracing::instrument(level = "trace", fields(request_id))]
     async fn txn_inner(&self, request: TxnRequest) -> Result<TxnResponse> {
+        let now = std::time::Instant::now();
         let span = tracing::Span::current();
         let span_id = span.id();
         // Pick raft leader of the request.
@@ -217,6 +218,7 @@ impl Wheel {
             .instrument(trace_span!("wait_apply"))
             .await
             .map_err(Error::err)?;
+        tracing::info!("txn inner takes: {:?}", now.elapsed());
         response
     }
 
