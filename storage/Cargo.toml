@@ -43,12 +43,19 @@ tokio = { version = "1", features = [
 tracing = "0.1"
 
 [dev-dependencies]
-criterion = "0.3"
+criterion = { version = "0.3", features = ["async", "async_tokio"] }
 env_logger = "*"
+rand_chacha = "0.3.1"
 test-log = "0.2.10"
 
 [[bench]]
 name = "bench_block_iter"
+harness = false
+# Uncomment this line if you are generating flame graph.
+# debug = true
+
+[[bench]]
+name = "bench_raft_log_store"
 harness = false
 # Uncomment this line if you are generating flame graph.
 # debug = true
