@@ -16,6 +16,7 @@ skip_core_tasks = true
 [tasks.clean-all]
 category = "Misc"
 description = "Clean all downloaded binaries by deleting .run folder."
+dependencies = ["prepare"]
 script = '''
 #!@duckscript
 rm -rf "${PREFIX}"
@@ -23,10 +24,12 @@ rm -rf "${PREFIX}"
 
 [tasks.clean-data]
 category = "Misc"
-description = "Clean data by deleting files in .run/data folder."
+description = "Clean data by deleting files in .run/data and ./run/log folder."
+dependencies = ["prepare"]
 script = '''
 #!@duckscript
-rm -rf "${PREFIX_DATA}/*"
+rm -rf "${PREFIX_DATA}"
+rm -rf "${PREFIX_LOG}"
 '''
 
 [tasks.d]
@@ -45,11 +48,12 @@ echo success
 category = "Develop"
 description = "Downloads necessary tools and build required components."
 dependencies = [
+    "clean-data",
     "download-minio",
     "download-mcli",
+    "download-jaeger",
     "download-prometheus",
     "download-grafana",
-    "clean-data",
 ]
 script = '''
 #!/bin/bash
@@ -59,6 +63,8 @@ tmux new -d -s runkv-minio ${PREFIX_BIN}/minio server --address 127.0.0.1:9000 -
 tmux new -d -s runkv-jaeger ${PREFIX_BIN}/jaeger
 # run prometheus
 tmux new -d -s runkv-prometheus ${PREFIX_BIN}/prometheus/prometheus --config.file=etc/prometheus.yml --web.listen-address=127.0.0.1:9091 --storage.tsdb.path=${PREFIX_DATA}/prometheus-data
+# run grafana
+tmux new -d -s runkv-grafana ${PREFIX_BIN}/grafana/bin/grafana-server -homepath .run/bin/grafana -config etc/grafana.ini
 # create test bucket
 tmux new -d -s runkv-mcli ' \
 ${PREFIX_BIN}/mcli alias set local http://127.0.0.1:9000 minioadmin minioadmin ; \
@@ -77,4 +83,5 @@ script = '''
 tmux send-keys -t runkv-minio C-c
 tmux send-keys -t runkv-jaeger C-c
 tmux send-keys -t runkv-prometheus C-c
+tmux send-keys -t runkv-grafana C-c
 '''

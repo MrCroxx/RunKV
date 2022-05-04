@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use lazy_static::lazy_static;
 use runkv_common::context::Context;
 use runkv_common::Worker;
 use runkv_storage::raft_log_store::entry::RaftLogBatchBuilder;
@@ -14,6 +15,49 @@ use crate::components::raft_network::RaftNetwork;
 use crate::error::{Error, Result};
 
 const RAFT_HEARTBEAT_TICK_DURATION: Duration = Duration::from_millis(100);
+
+lazy_static! {
+    static ref RAFT_APPEND_LOG_ENTRIES_HISTOGRAM_VEC: prometheus::HistogramVec =
+        prometheus::register_histogram_vec!(
+            "raft_append_log_entries_histogram_vec",
+            "raft append log entries histogram vec",
+            &["node", "group", "raft_node"]
+        )
+        .unwrap();
+    static ref RAFT_APPLY_LOG_ENTRIES_HISTOGRAM_VEC: prometheus::HistogramVec =
+        prometheus::register_histogram_vec!(
+            "raft_apply_log_entries_histogram_vec",
+            "raft apply log entries histogram vec",
+            &["node", "group", "raft_node"]
+        )
+        .unwrap();
+}
+
+struct RaftMetrics {
+    append_log_entries_histogram_vec: prometheus::Histogram,
+    apply_log_entries_histogram_vec: prometheus::Histogram,
+}
+
+impl RaftMetrics {
+    fn new(node: u64, group: u64, raft_node: u64) -> Self {
+        Self {
+            append_log_entries_histogram_vec: RAFT_APPEND_LOG_ENTRIES_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[
+                    &node.to_string(),
+                    &group.to_string(),
+                    &raft_node.to_string(),
+                ])
+                .unwrap(),
+            apply_log_entries_histogram_vec: RAFT_APPLY_LOG_ENTRIES_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[
+                    &node.to_string(),
+                    &group.to_string(),
+                    &raft_node.to_string(),
+                ])
+                .unwrap(),
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Proposal {
@@ -55,6 +99,8 @@ pub struct RaftWorker<RN: RaftNetwork, F: Fsm> {
     proposal_rx: mpsc::UnboundedReceiver<Proposal>,
 
     fsm: F,
+
+    metrics: RaftMetrics,
 }
 
 impl<RN: RaftNetwork, F: Fsm> std::fmt::Debug for RaftWorker<RN, F> {
@@ -140,6 +186,8 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
 
             proposal_rx: options.proposal_rx,
             message_rx,
+
+            metrics: RaftMetrics::new(options.node, options.group, options.raft_node),
         })
     }
 
@@ -326,16 +374,22 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
 
     #[tracing::instrument(level = "trace")]
     async fn apply_log_entries(&mut self, entries: Vec<raft::prelude::Entry>) -> Result<()> {
+        let start = Instant::now();
         let is_leader = match &self.raft_soft_state {
             None => false,
             Some(ss) => ss.raft_state == raft::StateRole::Leader,
         };
         self.fsm.apply(self.group, is_leader, entries).await?;
+        let elapsed = start.elapsed();
+        self.metrics
+            .apply_log_entries_histogram_vec
+            .observe(elapsed.as_secs_f64());
         Ok(())
     }
 
     #[tracing::instrument(level = "trace")]
     async fn append_log_entries(&mut self, entries: Vec<raft::prelude::Entry>) -> Result<()> {
+        let start = Instant::now();
         let mut builder = RaftLogBatchBuilder::default();
         for entry in entries {
             if cfg!(feature = "tracing") && let raft::prelude::EntryType::EntryNormal = entry.entry_type() && !entry.data.is_empty() {
@@ -362,6 +416,10 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
         for batch in batches {
             self.raft_log_store.append(batch).await?;
         }
+        let elapsed = start.elapsed();
+        self.metrics
+            .append_log_entries_histogram_vec
+            .observe(elapsed.as_secs_f64());
         Ok(())
     }
 
