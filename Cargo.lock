@@ -2294,6 +2294,7 @@ dependencies = [
  "aws-types",
  "bytes",
  "bytesize",
+ "clap 3.1.6",
  "crc32fast",
  "criterion",
  "env_logger",

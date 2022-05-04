@@ -17,6 +17,7 @@ aws-smithy-types = "0.38"
 aws-types = { version = "0.8", features = ["hardcoded-credentials"] }
 bytes = "1"
 bytesize = "1.1.0"
+clap = { version = "3.1.6", features = ["derive"] }
 crc32fast = "1.3.2"
 farmhash = "1.1.5"
 futures = "0.3"
@@ -27,6 +28,7 @@ lz4 = "1.23.1"
 moka = { version = "0.7", features = ["future"] }
 parking_lot = "0.12"
 rand = "0.8.5"
+rand_chacha = "0.3.1"
 runkv-common = { path = "../common" }
 runkv-proto = { path = "../proto" }
 serde = "1.0"
@@ -45,7 +47,6 @@ tracing = "0.1"
 [dev-dependencies]
 criterion = { version = "0.3", features = ["async", "async_tokio"] }
 env_logger = "*"
-rand_chacha = "0.3.1"
 test-log = "0.2.10"
 
 [[bench]]
@@ -54,8 +55,8 @@ harness = false
 # Uncomment this line if you are generating flame graph.
 # debug = true
 
-[[bench]]
+[[bin]]
 name = "bench_raft_log_store"
-harness = false
+path = "bench/bench_raft_log_store.rs"
 # Uncomment this line if you are generating flame graph.
 # debug = true
