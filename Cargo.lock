@@ -2367,6 +2367,7 @@ dependencies = [
  "env_logger",
  "futures",
  "itertools",
+ "lazy_static",
  "rand",
  "runkv-common",
  "runkv-exhauster",

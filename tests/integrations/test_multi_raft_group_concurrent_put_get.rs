@@ -29,6 +29,8 @@ use tonic::transport::Channel;
 use tonic::Request;
 use tracing::trace;
 
+use crate::concat_toml;
+
 const RUDDER_CONFIG_PATH: &str = "etc/rudder.toml";
 const WHEEL_CONFIG_PATH: &str = "etc/wheel.toml";
 const EXHAUSTER_CONFIG_PATH: &str = "etc/exhauster.toml";
@@ -70,8 +72,10 @@ async fn add_key_ranges(wheel_client: &mut WheelServiceClient<Channel>, node: u6
 }
 
 #[test(tokio::test)]
-async fn test_concurrent_put_get() {
+async fn test_multi_raft_group_concurrent_put_get() {
     init_runkv_logger("runkv_tests");
+
+    let mut port = crate::port("test_multi_raft_group_concurrent_put_get");
 
     let tempdir = tempfile::tempdir().unwrap();
     let raft_log_dir_path = Path::new(tempdir.path())
@@ -80,27 +84,42 @@ async fn test_concurrent_put_get() {
         .unwrap()
         .to_string();
 
+    let rudder_config: RudderConfig = {
+        let mut config: RudderConfig =
+            toml::from_str(&concat_toml(RUDDER_CONFIG_PATH, LSM_TREE_CONFIG_PATH)).unwrap();
+        port += 1;
+        config.port = port;
+        config
+    };
+    let wheel_config: WheelConfig = {
+        let mut config: WheelConfig =
+            toml::from_str(&concat_toml(WHEEL_CONFIG_PATH, LSM_TREE_CONFIG_PATH)).unwrap();
+        config.raft_log_store.log_dir_path = raft_log_dir_path;
+        port += 1;
+        config.port = port;
+        config.rudder.port = rudder_config.port;
+        config
+    };
+    let exhauster_config: ExhausterConfig = {
+        let mut config: ExhausterConfig =
+            toml::from_str(&read_to_string(EXHAUSTER_CONFIG_PATH).unwrap()).unwrap();
+        port += 1;
+        config.port = port;
+        config.rudder.port = rudder_config.port;
+        config
+    };
+
     let object_store = Arc::new(MemObjectStore::default());
 
-    let rudder_config: RudderConfig =
-        toml::from_str(&concat_toml(RUDDER_CONFIG_PATH, LSM_TREE_CONFIG_PATH)).unwrap();
     let (rudder, rudder_workers) =
         build_rudder_with_object_store(&rudder_config, object_store.clone())
             .await
             .unwrap();
 
-    let wheel_config: WheelConfig = {
-        let mut config: WheelConfig =
-            toml::from_str(&concat_toml(WHEEL_CONFIG_PATH, LSM_TREE_CONFIG_PATH)).unwrap();
-        config.raft_log_store.log_dir_path = raft_log_dir_path;
-        config
-    };
     let (wheel, wheel_workers) = build_wheel_with_object_store(&wheel_config, object_store.clone())
         .await
         .unwrap();
 
-    let exhauster_config: ExhausterConfig =
-        toml::from_str(&read_to_string(EXHAUSTER_CONFIG_PATH).unwrap()).unwrap();
     let (exhuaster, exhauster_workers) =
         build_exhauster_with_object_store(&exhauster_config, object_store)
             .await
@@ -244,12 +263,4 @@ fn key(i: u64) -> Vec<u8> {
 
 fn value(i: u64) -> Vec<u8> {
     format!("v{:03}{:61}", i, 0).as_bytes().to_vec()
-}
-
-fn concat_toml(path1: &str, path2: &str) -> String {
-    let mut s = String::default();
-    s.push_str(&read_to_string(path1).unwrap());
-    s.push('\n');
-    s.push_str(&read_to_string(path2).unwrap());
-    s
 }
