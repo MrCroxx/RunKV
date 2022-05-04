@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use lazy_static::lazy_static;
+use prost::Message;
 use runkv_common::context::Context;
 use runkv_common::Worker;
 use runkv_storage::raft_log_store::entry::RaftLogBatchBuilder;
@@ -17,38 +18,68 @@ use crate::error::{Error, Result};
 const RAFT_HEARTBEAT_TICK_DURATION: Duration = Duration::from_millis(100);
 
 lazy_static! {
-    static ref RAFT_APPEND_LOG_ENTRIES_HISTOGRAM_VEC: prometheus::HistogramVec =
+    static ref RAFT_APPEND_LOG_ENTRIES_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
         prometheus::register_histogram_vec!(
-            "raft_append_log_entries_histogram_vec",
-            "raft append log entries histogram vec",
+            "raft_append_log_entries_latency_histogram_vec",
+            "raft append log entries latency histogram vec",
             &["node", "group", "raft_node"]
         )
         .unwrap();
-    static ref RAFT_APPLY_LOG_ENTRIES_HISTOGRAM_VEC: prometheus::HistogramVec =
+    static ref RAFT_APPEND_LOG_ENTRIES_BYTES_GAUGE_VEC: prometheus::GaugeVec =
+        prometheus::register_gauge_vec!(
+            "raft_append_log_entries_bytes_gauge_vec",
+            "raft append log entries bytes gauge vec",
+            &["node", "group", "raft_node"]
+        )
+        .unwrap();
+    static ref RAFT_APPLY_LOG_ENTRIES_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
         prometheus::register_histogram_vec!(
-            "raft_apply_log_entries_histogram_vec",
-            "raft apply log entries histogram vec",
+            "raft_apply_log_entries_latency_histogram_vec",
+            "raft apply log entries latency histogram vec",
+            &["node", "group", "raft_node"]
+        )
+        .unwrap();
+    static ref RAFT_SEND_MESSAGES_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
+        prometheus::register_histogram_vec!(
+            "raft_send_messages_latency_histogram_vec",
+            "raft send messages latency histogram vec",
             &["node", "group", "raft_node"]
         )
         .unwrap();
 }
 
 struct RaftMetrics {
-    append_log_entries_histogram_vec: prometheus::Histogram,
-    apply_log_entries_histogram_vec: prometheus::Histogram,
+    append_log_entries_latency_histogram_vec: prometheus::Histogram,
+    append_log_entries_bytes_gauge_vec: prometheus::Gauge,
+    apply_log_entries_latency_histogram_vec: prometheus::Histogram,
+    send_messages_latency_histogram_vec: prometheus::Histogram,
 }
 
 impl RaftMetrics {
     fn new(node: u64, group: u64, raft_node: u64) -> Self {
         Self {
-            append_log_entries_histogram_vec: RAFT_APPEND_LOG_ENTRIES_HISTOGRAM_VEC
+            append_log_entries_latency_histogram_vec: RAFT_APPEND_LOG_ENTRIES_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&[
                     &node.to_string(),
                     &group.to_string(),
                     &raft_node.to_string(),
                 ])
                 .unwrap(),
-            apply_log_entries_histogram_vec: RAFT_APPLY_LOG_ENTRIES_HISTOGRAM_VEC
+            append_log_entries_bytes_gauge_vec: RAFT_APPEND_LOG_ENTRIES_BYTES_GAUGE_VEC
+                .get_metric_with_label_values(&[
+                    &node.to_string(),
+                    &group.to_string(),
+                    &raft_node.to_string(),
+                ])
+                .unwrap(),
+            apply_log_entries_latency_histogram_vec: RAFT_APPLY_LOG_ENTRIES_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[
+                    &node.to_string(),
+                    &group.to_string(),
+                    &raft_node.to_string(),
+                ])
+                .unwrap(),
+            send_messages_latency_histogram_vec: RAFT_SEND_MESSAGES_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&[
                     &node.to_string(),
                     &group.to_string(),
@@ -361,7 +392,13 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
                 }
             }
         }
-        self.raft_network.send(messages).await
+        let start = Instant::now();
+        self.raft_network.send(messages).await?;
+        let elapsed = start.elapsed();
+        self.metrics
+            .send_messages_latency_histogram_vec
+            .observe(elapsed.as_secs_f64());
+        Ok(())
     }
 
     #[tracing::instrument(level = "trace")]
@@ -382,7 +419,7 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
         self.fsm.apply(self.group, is_leader, entries).await?;
         let elapsed = start.elapsed();
         self.metrics
-            .apply_log_entries_histogram_vec
+            .apply_log_entries_latency_histogram_vec
             .observe(elapsed.as_secs_f64());
         Ok(())
     }
@@ -390,6 +427,7 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
     #[tracing::instrument(level = "trace")]
     async fn append_log_entries(&mut self, entries: Vec<raft::prelude::Entry>) -> Result<()> {
         let start = Instant::now();
+        let mut bytes = 0;
         let mut builder = RaftLogBatchBuilder::default();
         for entry in entries {
             if cfg!(feature = "tracing") && let raft::prelude::EntryType::EntryNormal = entry.entry_type() && !entry.data.is_empty() {
@@ -398,6 +436,7 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
                 span.follows_from(tracing::Id::from_u64(ctx.span_id));
             }
 
+            bytes += entry.encoded_len();
             let data = encode_entry_data(&entry);
             builder.add(
                 self.raft_node,
@@ -418,8 +457,11 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
         }
         let elapsed = start.elapsed();
         self.metrics
-            .append_log_entries_histogram_vec
+            .append_log_entries_latency_histogram_vec
             .observe(elapsed.as_secs_f64());
+        self.metrics
+            .append_log_entries_bytes_gauge_vec
+            .add(bytes as f64);
         Ok(())
     }
 
