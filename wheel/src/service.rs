@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use async_trait::async_trait;
 use itertools::Itertools;
+use lazy_static::lazy_static;
 use runkv_common::channel_pool::ChannelPool;
 use runkv_common::coding::BytesSerde;
 use runkv_common::config::Node;
@@ -34,6 +36,74 @@ use crate::error::{Error, KvError, Result};
 use crate::meta::MetaStoreRef;
 use crate::worker::raft::Proposal;
 
+lazy_static! {
+    static ref KV_SERVICE_GET_HISTOGRAM_VEC: prometheus::HistogramVec =
+        prometheus::register_histogram_vec!(
+            "kv_service_get_histogram_vec",
+            "kv service get histogram vec",
+            &["node"]
+        )
+        .unwrap();
+    static ref KV_SERVICE_PUT_HISTOGRAM_VEC: prometheus::HistogramVec =
+        prometheus::register_histogram_vec!(
+            "kv_service_put_histogram_vec",
+            "kv service put histogram vec",
+            &["node"]
+        )
+        .unwrap();
+    static ref KV_SERVICE_DELETE_HISTOGRAM_VEC: prometheus::HistogramVec =
+        prometheus::register_histogram_vec!(
+            "kv_service_delete_histogram_vec",
+            "kv service delete histogram vec",
+            &["node"]
+        )
+        .unwrap();
+    static ref KV_SERVICE_SNAPSHOT_HISTOGRAM_VEC: prometheus::HistogramVec =
+        prometheus::register_histogram_vec!(
+            "kv_service_snapshot_histogram_vec",
+            "kv service snapshot histogram vec",
+            &["node"]
+        )
+        .unwrap();
+    static ref KV_SERVICE_TXN_HISTOGRAM_VEC: prometheus::HistogramVec =
+        prometheus::register_histogram_vec!(
+            "kv_service_txn_histogram_vec",
+            "kv service txn histogram vec",
+            &["node"]
+        )
+        .unwrap();
+}
+
+struct WheelServiceMetrics {
+    kv_service_get_histogram_vec: prometheus::Histogram,
+    kv_service_put_histogram_vec: prometheus::Histogram,
+    kv_service_delete_histogram_vec: prometheus::Histogram,
+    kv_service_snapshot_histogram_vec: prometheus::Histogram,
+    kv_service_txn_histogram_vec: prometheus::Histogram,
+}
+
+impl WheelServiceMetrics {
+    fn new(node: u64) -> Self {
+        Self {
+            kv_service_get_histogram_vec: KV_SERVICE_GET_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[&node.to_string()])
+                .unwrap(),
+            kv_service_put_histogram_vec: KV_SERVICE_PUT_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[&node.to_string()])
+                .unwrap(),
+            kv_service_delete_histogram_vec: KV_SERVICE_DELETE_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[&node.to_string()])
+                .unwrap(),
+            kv_service_snapshot_histogram_vec: KV_SERVICE_SNAPSHOT_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[&node.to_string()])
+                .unwrap(),
+            kv_service_txn_histogram_vec: KV_SERVICE_TXN_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[&node.to_string()])
+                .unwrap(),
+        }
+    }
+}
+
 fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
     Status::internal(e.into().to_string())
 }
@@ -54,6 +124,8 @@ struct WheelInner {
     raft_manager: RaftManager,
     txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
     request_id: AtomicU64,
+
+    metrics: WheelServiceMetrics,
 }
 
 #[derive(Clone)]
@@ -73,6 +145,8 @@ impl Wheel {
                 raft_manager: options.raft_manager,
                 txn_notify_pool: options.txn_notify_pool,
                 request_id: AtomicU64::new(0),
+
+                metrics: WheelServiceMetrics::new(options.node),
             }),
         }
     }
@@ -83,8 +157,10 @@ impl Wheel {
         use prometheus::Encoder;
 
         let encoder = prometheus::TextEncoder::new();
-        let metric_families = prometheus::gather();
         let mut buffer = vec![];
+
+        let metric_families = prometheus::gather();
+
         encoder.encode(&metric_families, &mut buffer).unwrap();
         let response = hyper::Response::builder()
             .status(200)
@@ -369,8 +445,14 @@ impl KvService for Wheel {
         &self,
         request: Request<GetRequest>,
     ) -> core::result::Result<Response<GetResponse>, Status> {
+        let start = Instant::now();
         let req = request.into_inner();
         let rsp = self.get_inner(req).await.map_err(internal)?;
+        let elapsed = start.elapsed();
+        self.inner
+            .metrics
+            .kv_service_get_histogram_vec
+            .observe(elapsed.as_secs_f64());
         Ok(Response::new(rsp))
     }
 
@@ -379,8 +461,14 @@ impl KvService for Wheel {
         &self,
         request: Request<PutRequest>,
     ) -> core::result::Result<Response<PutResponse>, Status> {
+        let start = Instant::now();
         let req = request.into_inner();
         let rsp = self.put_inner(req).await.map_err(internal)?;
+        let elapsed = start.elapsed();
+        self.inner
+            .metrics
+            .kv_service_put_histogram_vec
+            .observe(elapsed.as_secs_f64());
         Ok(Response::new(rsp))
     }
 
@@ -389,8 +477,15 @@ impl KvService for Wheel {
         &self,
         request: Request<DeleteRequest>,
     ) -> core::result::Result<Response<DeleteResponse>, Status> {
+        let start = Instant::now();
         let req = request.into_inner();
         let rsp = self.delete_inner(req).await.map_err(internal)?;
+
+        let elapsed = start.elapsed();
+        self.inner
+            .metrics
+            .kv_service_delete_histogram_vec
+            .observe(elapsed.as_secs_f64());
         Ok(Response::new(rsp))
     }
 
@@ -399,8 +494,14 @@ impl KvService for Wheel {
         &self,
         request: Request<SnapshotRequest>,
     ) -> core::result::Result<Response<SnapshotResponse>, Status> {
+        let start = Instant::now();
         let req = request.into_inner();
         let rsp = self.snapshot_inner(req).await.map_err(internal)?;
+        let elapsed = start.elapsed();
+        self.inner
+            .metrics
+            .kv_service_snapshot_histogram_vec
+            .observe(elapsed.as_secs_f64());
         Ok(Response::new(rsp))
     }
 
@@ -409,8 +510,14 @@ impl KvService for Wheel {
         &self,
         request: Request<TxnRequest>,
     ) -> core::result::Result<Response<TxnResponse>, Status> {
+        let start = Instant::now();
         let req = request.into_inner();
         let rsp = self.txn_inner(req).await.map_err(internal)?;
+        let elapsed = start.elapsed();
+        self.inner
+            .metrics
+            .kv_service_txn_histogram_vec
+            .observe(elapsed.as_secs_f64());
         Ok(Response::new(rsp))
     }
 }

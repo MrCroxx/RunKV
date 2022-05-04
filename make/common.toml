@@ -22,4 +22,5 @@ mkdir "${PREFIX}"
 mkdir "${PREFIX_BIN}"
 mkdir "${PREFIX_TMP}"
 mkdir "${PREFIX_DATA}"
+mkdir "${PREFIX_LOG}"
 '''

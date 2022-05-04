@@ -1,0 +1,10 @@
+apiVersion: 1
+
+providers:
+- name: 'runkv-overview'
+  orgId: 1
+  folder: 'runkv'
+  folderUid: ''
+  type: file
+  options:
+    path: etc/grafana-dashboards/runkv-overview.json

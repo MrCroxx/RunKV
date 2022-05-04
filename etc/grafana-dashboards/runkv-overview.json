@@ -1,0 +1,901 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "target": {
+          "limit": 100,
+          "matchAny": false,
+          "tags": [],
+          "type": "dashboard"
+        },
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 6,
+      "panels": [],
+      "title": "KV Service",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PEDE6B306CC9C0CD0"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Latency",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "avg(histogram_quantile(0.5, rate(kv_service_get_histogram_vec_bucket[1m]))) by (instance)",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "p50-{{instance}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "avg(histogram_quantile(0.9, rate(kv_service_get_histogram_vec_bucket[1m]))) by (instance)",
+          "hide": false,
+          "legendFormat": "p90-{{instance}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "avg(histogram_quantile(0.99, rate(kv_service_get_histogram_vec_bucket[1m]))) by (instance)",
+          "hide": false,
+          "legendFormat": "p99-{{instance}}",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Get - Instance Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PEDE6B306CC9C0CD0"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Latency",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "avg(histogram_quantile(0.5, rate(kv_service_put_histogram_vec_bucket[1m]))) by (instance)",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "p50-{{instance}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "avg(histogram_quantile(0.9, rate(kv_service_put_histogram_vec_bucket[1m]))) by (instance)",
+          "hide": false,
+          "legendFormat": "p90-{{instance}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "avg(histogram_quantile(0.99, rate(kv_service_put_histogram_vec_bucket[1m]))) by (instance)",
+          "hide": false,
+          "legendFormat": "p99-{{instance}}",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Put - Instance Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PEDE6B306CC9C0CD0"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Latency",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "avg(histogram_quantile(0.5, rate(kv_service_delete_histogram_vec_bucket[1m]))) by (instance)",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "p50-{{instance}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "avg(histogram_quantile(0.9, rate(kv_service_delete_histogram_vec_bucket[1m]))) by (instance)",
+          "hide": false,
+          "legendFormat": "p90-{{instance}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "avg(histogram_quantile(0.99, rate(kv_service_delete_histogram_vec_bucket[1m]))) by (instance)",
+          "hide": false,
+          "legendFormat": "p99-{{instance}}",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Delete - Instance Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PEDE6B306CC9C0CD0"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Latency",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "avg(histogram_quantile(0.5, rate(kv_service_snapshot_histogram_vec_bucket[1m]))) by (instance)",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "p50-{{instance}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "avg(histogram_quantile(0.9, rate(kv_service_snapshot_histogram_vec_bucket[1m]))) by (instance)",
+          "hide": false,
+          "legendFormat": "p90-{{instance}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "avg(histogram_quantile(0.99, rate(kv_service_snapshot_histogram_vec_bucket[1m]))) by (instance)",
+          "hide": false,
+          "legendFormat": "p99-{{instance}}",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Snapshot - Instance Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PEDE6B306CC9C0CD0"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Latency",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 17
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "avg(histogram_quantile(0.5, rate(kv_service_txn_histogram_vec_bucket[1m]))) by (instance)",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "p50-{{instance}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "avg(histogram_quantile(0.9, rate(kv_service_txn_histogram_vec_bucket[1m]))) by (instance)",
+          "hide": false,
+          "legendFormat": "p90-{{instance}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "avg(histogram_quantile(0.99, rate(kv_service_txn_histogram_vec_bucket[1m]))) by (instance)",
+          "hide": false,
+          "legendFormat": "p99-{{instance}}",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Txn - Instance Latency",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 25
+      },
+      "id": 4,
+      "panels": [],
+      "title": "Raft",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PEDE6B306CC9C0CD0"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Latency",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 26
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "avg(histogram_quantile(0.5, rate(raft_append_log_entries_histogram_vec_bucket[1m]))) by (instance)",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "p50-{{instance}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "avg(histogram_quantile(0.9, rate(raft_append_log_entries_histogram_vec_bucket[1m]))) by (instance)",
+          "hide": false,
+          "legendFormat": "p90-{{instance}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "avg(histogram_quantile(0.99, rate(raft_append_log_entries_histogram_vec_bucket[1m]))) by (instance)",
+          "hide": false,
+          "legendFormat": "p99-{{instance}}",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Append Log Entries - Instance Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PEDE6B306CC9C0CD0"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Latency",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "avg(histogram_quantile(0.5, rate(raft_apply_log_entries_histogram_vec_bucket[1m]))) by (instance)",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "p50-{{instance}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "avg(histogram_quantile(0.9, rate(raft_apply_log_entries_histogram_vec_bucket[1m]))) by (instance)",
+          "hide": false,
+          "legendFormat": "p90-{{instance}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "avg(histogram_quantile(0.99, rate(raft_apply_log_entries_histogram_vec_bucket[1m]))) by (instance)",
+          "hide": false,
+          "legendFormat": "p99-{{instance}}",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Apply Log Entries - Instance Latency",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 36,
+  "style": "dark",
+  "tags": [],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "RunKV Overview",
+  "uid": "kJf6Tv_nk",
+  "version": 3,
+  "weekStart": ""
+}
