@@ -680,6 +680,7 @@ dependencies = [
  "clap 2.34.0",
  "criterion-plot",
  "csv",
+ "futures",
  "itertools",
  "lazy_static",
  "num-traits",
@@ -692,6 +693,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "tinytemplate",
+ "tokio",
  "walkdir",
 ]
 
@@ -2292,6 +2294,7 @@ dependencies = [
  "aws-types",
  "bytes",
  "bytesize",
+ "clap 3.1.6",
  "crc32fast",
  "criterion",
  "env_logger",
@@ -2304,6 +2307,7 @@ dependencies = [
  "moka",
  "parking_lot 0.12.0",
  "rand",
+ "rand_chacha",
  "runkv-common",
  "runkv-proto",
  "serde",
