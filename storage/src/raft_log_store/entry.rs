@@ -40,7 +40,8 @@ impl From<Kv> for Entry {
 }
 
 impl Entry {
-    pub fn encode(&self, buf: &mut Vec<u8>) {
+    pub fn encode(&self, buf: &mut Vec<u8>) -> usize {
+        let origin_len = buf.len();
         match self {
             Self::RaftLogBatch(batch) => {
                 buf.put_u8(0);
@@ -63,6 +64,7 @@ impl Entry {
                 kv.encode(buf);
             }
         }
+        buf.len() - origin_len
     }
 
     pub fn decode(buf: &mut &[u8]) -> Self {
@@ -221,7 +223,7 @@ impl RaftLogBatch {
             buf.put_length_prefixed_slice(ctx);
         }
         buf.put_u64_le(self.data_len as u64);
-        buf.put_slice(&self.data)
+        buf.put_slice(&self.data);
     }
 
     /// Decode meta only. [`RaftLogBatch.data`] will be left empty.
