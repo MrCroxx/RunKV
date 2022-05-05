@@ -49,40 +49,55 @@ lazy_static! {
             &["node", "group", "raft_node"]
         )
         .unwrap();
+    static ref RAFT_SEND_MESSAGES_BYTES_GAUGE_VEC: prometheus::GaugeVec =
+        prometheus::register_gauge_vec!(
+            "raft_send_messages_bytes_gauge_vec",
+            "raft send messages bytes gauge vec",
+            &["node", "group", "raft_node"]
+        )
+        .unwrap();
 }
 
 struct RaftMetrics {
-    append_log_entries_latency_histogram_vec: prometheus::Histogram,
-    append_log_entries_bytes_gauge_vec: prometheus::Gauge,
-    apply_log_entries_latency_histogram_vec: prometheus::Histogram,
-    send_messages_latency_histogram_vec: prometheus::Histogram,
+    append_log_entries_latency_histogram: prometheus::Histogram,
+    append_log_entries_bytes_gauge: prometheus::Gauge,
+    apply_log_entries_latency_histogram: prometheus::Histogram,
+    send_messages_latency_histogram: prometheus::Histogram,
+    send_messages_bytes_gauge: prometheus::Gauge,
 }
 
 impl RaftMetrics {
     fn new(node: u64, group: u64, raft_node: u64) -> Self {
         Self {
-            append_log_entries_latency_histogram_vec: RAFT_APPEND_LOG_ENTRIES_LATENCY_HISTOGRAM_VEC
+            append_log_entries_latency_histogram: RAFT_APPEND_LOG_ENTRIES_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&[
                     &node.to_string(),
                     &group.to_string(),
                     &raft_node.to_string(),
                 ])
                 .unwrap(),
-            append_log_entries_bytes_gauge_vec: RAFT_APPEND_LOG_ENTRIES_BYTES_GAUGE_VEC
+            append_log_entries_bytes_gauge: RAFT_APPEND_LOG_ENTRIES_BYTES_GAUGE_VEC
                 .get_metric_with_label_values(&[
                     &node.to_string(),
                     &group.to_string(),
                     &raft_node.to_string(),
                 ])
                 .unwrap(),
-            apply_log_entries_latency_histogram_vec: RAFT_APPLY_LOG_ENTRIES_LATENCY_HISTOGRAM_VEC
+            apply_log_entries_latency_histogram: RAFT_APPLY_LOG_ENTRIES_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&[
                     &node.to_string(),
                     &group.to_string(),
                     &raft_node.to_string(),
                 ])
                 .unwrap(),
-            send_messages_latency_histogram_vec: RAFT_SEND_MESSAGES_LATENCY_HISTOGRAM_VEC
+            send_messages_latency_histogram: RAFT_SEND_MESSAGES_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[
+                    &node.to_string(),
+                    &group.to_string(),
+                    &raft_node.to_string(),
+                ])
+                .unwrap(),
+            send_messages_bytes_gauge: RAFT_SEND_MESSAGES_BYTES_GAUGE_VEC
                 .get_metric_with_label_values(&[
                     &node.to_string(),
                     &group.to_string(),
@@ -406,7 +421,7 @@ where
         Ok(())
     }
 
-    // #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = "trace")]
     async fn send_messages(&mut self, messages: Vec<raft::prelude::Message>) -> Result<()> {
         if cfg!(feature = "tracing") {
             let span = tracing::Span::current();
@@ -427,8 +442,11 @@ where
 
         let start = Instant::now();
 
+        let mut bytes = 0;
+
         let mut raft_node_msgs = HashMap::new();
         for msg in messages {
+            bytes += msg.encoded_len();
             let to = msg.to;
             raft_node_msgs
                 .entry(to)
@@ -446,8 +464,9 @@ where
 
         let elapsed = start.elapsed();
         self.metrics
-            .send_messages_latency_histogram_vec
+            .send_messages_latency_histogram
             .observe(elapsed.as_secs_f64());
+        self.metrics.send_messages_bytes_gauge.add(bytes as f64);
         Ok(())
     }
 
@@ -469,7 +488,7 @@ where
         self.fsm.apply(self.group, is_leader, entries).await?;
         let elapsed = start.elapsed();
         self.metrics
-            .apply_log_entries_latency_histogram_vec
+            .apply_log_entries_latency_histogram
             .observe(elapsed.as_secs_f64());
         Ok(())
     }
@@ -507,10 +526,10 @@ where
         }
         let elapsed = start.elapsed();
         self.metrics
-            .append_log_entries_latency_histogram_vec
+            .append_log_entries_latency_histogram
             .observe(elapsed.as_secs_f64());
         self.metrics
-            .append_log_entries_bytes_gauge_vec
+            .append_log_entries_bytes_gauge
             .add(bytes as f64);
         Ok(())
     }
