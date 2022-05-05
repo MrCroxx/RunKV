@@ -304,5 +304,5 @@ fn build_raft_manager(
 }
 
 fn build_txn_notify_pool() -> NotifyPool<u64, Result<TxnResponse>> {
-    NotifyPool::default()
+    NotifyPool::new(65535)
 }

@@ -238,6 +238,7 @@ async fn test_concurrent_put_get() {
                             .value,
                         value(i)
                     );
+                    tokio::time::sleep(Duration::from_millis(rng.gen_range(0..100))).await;
                 }
             }
         })
