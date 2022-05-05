@@ -13,11 +13,11 @@ use bytesize::ByteSize;
 use components::raft_manager::{RaftManager, RaftManagerOptions};
 use components::raft_network::GrpcRaftNetwork;
 use error::{Error, Result};
-use hyper::service::{make_service_fn, service_fn};
 use meta::mem::MemoryMetaStore;
 use meta::MetaStoreRef;
 use runkv_common::channel_pool::ChannelPool;
 use runkv_common::notify_pool::NotifyPool;
+use runkv_common::prometheus::DefaultPrometheusExporter;
 use runkv_common::BoxedWorker;
 use runkv_proto::common::Endpoint as PbEndpoint;
 use runkv_proto::kv::kv_service_server::KvServiceServer;
@@ -53,7 +53,10 @@ pub async fn bootstrap_wheel(
     }
 
     if enable_metrics {
-        bootstrap_prometheus_service(config);
+        let addr = format!("{}:{}", config.prometheus.host, config.prometheus.port)
+            .parse()
+            .unwrap();
+        DefaultPrometheusExporter::init(addr);
     }
 
     Server::builder()
@@ -63,25 +66,6 @@ pub async fn bootstrap_wheel(
         .serve(addr_str.parse().map_err(Error::err)?)
         .await
         .map_err(Error::err)
-}
-
-pub fn bootstrap_prometheus_service(config: &WheelConfig) {
-    let listen_addr = format!("{}:{}", config.prometheus.host, config.prometheus.port);
-    let prometheus_service_addr = listen_addr.parse().unwrap();
-    tokio::spawn(async move {
-        info!(
-            "Prometheus listener for Prometheus is set up on http://{}",
-            listen_addr
-        );
-        if let Err(e) = hyper::Server::bind(&prometheus_service_addr)
-            .serve(make_service_fn(|_| async {
-                Ok::<_, hyper::Error>(service_fn(Wheel::prometheus_service))
-            }))
-            .await
-        {
-            tracing::error!("promethrus service error: {}", e);
-        }
-    });
 }
 
 pub async fn build_wheel(config: &WheelConfig) -> Result<(Wheel, Vec<BoxedWorker>)> {
@@ -225,6 +209,7 @@ fn build_channel_pool(config: &WheelConfig) -> ChannelPool {
 
 async fn build_raft_log_store(config: &WheelConfig) -> Result<RaftLogStore> {
     let raft_log_store_options = RaftLogStoreOptions {
+        node: config.id,
         log_dir_path: config.raft_log_store.log_dir_path.clone(),
         log_file_capacity: config
             .raft_log_store

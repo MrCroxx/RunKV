@@ -10,13 +10,16 @@ use tracing::trace;
 
 use super::entry::Entry;
 use super::error::RaftLogStoreError;
+use super::metrics::RaftLogStoreMetricsRef;
 use super::DEFAULT_LOG_BATCH_SIZE;
 use crate::error::Result;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct LogOptions {
     pub path: String,
     pub log_file_capacity: usize,
+
+    pub metrics: RaftLogStoreMetricsRef,
 }
 
 struct LogCore {
@@ -29,6 +32,8 @@ pub struct Log {
     path: String,
     log_file_capacity: usize,
     core: Mutex<LogCore>,
+
+    metrics: RaftLogStoreMetricsRef,
 }
 
 impl Log {
@@ -83,9 +88,11 @@ impl Log {
         };
 
         Ok(Self {
-            core: Mutex::new(core),
             path: options.path,
             log_file_capacity: options.log_file_capacity,
+            core: Mutex::new(core),
+
+            metrics: options.metrics,
         })
     }
 
@@ -103,7 +110,10 @@ impl Log {
         let mut buf = Vec::with_capacity(DEFAULT_LOG_BATCH_SIZE);
         entry.encode(&mut buf);
         guard.active_file.write_all(&buf).await?;
+
         guard.active_file.sync_data().await?;
+        self.metrics.sync_counter.inc();
+
         let end = guard.active_file.metadata().await?.len() as usize;
         if end >= self.log_file_capacity {
             drop(guard);
@@ -212,6 +222,7 @@ mod tests {
 
     use super::*;
     use crate::raft_log_store::entry::RaftLogBatchBuilder;
+    use crate::raft_log_store::metrics::RaftLogStoreMetrics;
 
     #[test(tokio::test)]
     async fn test_pipe_log_recovery() {
@@ -220,6 +231,7 @@ mod tests {
             path: tempdir.path().to_str().unwrap().to_string(),
             // Estimated size of each compressed entry is 111.
             log_file_capacity: 100,
+            metrics: Arc::new(RaftLogStoreMetrics::new(0)),
         };
         let log = Log::open(options.clone()).await.unwrap();
         let entries = generate_entries(4, 16, vec![b'x'; 64]);

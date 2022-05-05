@@ -5,6 +5,7 @@ use bytesize::ByteSize;
 use clap::Parser;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
+use runkv_common::prometheus::DefaultPrometheusExporter;
 use runkv_storage::raft_log_store::entry::RaftLogBatchBuilder;
 use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
 use runkv_storage::raft_log_store::RaftLogStore;
@@ -31,6 +32,13 @@ struct Args {
 
     #[clap(long, default_value = "0")]
     seed: u64,
+
+    #[clap(long)]
+    metrics: bool,
+    #[clap(long, default_value = "127.0.0.1")]
+    prometheus_host: String,
+    #[clap(long, default_value = "9898")]
+    prometheus_port: u16,
 }
 
 async fn build_raft_log_store(args: &Args) -> RaftLogStore {
@@ -40,6 +48,7 @@ async fn build_raft_log_store(args: &Args) -> RaftLogStore {
     tokio::fs::create_dir_all(&args.path).await.unwrap();
 
     let raft_log_store_options = RaftLogStoreOptions {
+        node: 0,
         log_dir_path: args.path.to_owned(),
         log_file_capacity: args.log_file_capacity,
         block_cache_capacity: args.block_cache_capacity,
@@ -92,6 +101,13 @@ async fn dir_size(path: &str) -> usize {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+
+    if args.metrics {
+        let addr = format!("{}:{}", args.prometheus_host, args.prometheus_port)
+            .parse()
+            .unwrap();
+        DefaultPrometheusExporter::init(addr);
+    }
 
     println!("Open raft log store...");
 
