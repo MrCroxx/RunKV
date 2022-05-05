@@ -2,25 +2,27 @@ use std::collections::btree_map::{BTreeMap, Entry};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future;
 use futures_util::stream;
 use itertools::Itertools;
 use runkv_common::channel_pool::ChannelPool;
 use runkv_proto::wheel::raft_service_client::RaftServiceClient;
 use runkv_proto::wheel::RaftRequest;
 use tokio::sync::{mpsc, RwLock};
+use tonic::transport::Channel;
 use tonic::Request;
 
 use crate::error::{Error, RaftManageError, Result};
 
 #[async_trait]
 pub trait RaftNetwork: Send + Sync + Clone + 'static {
+    type RaftClient: RaftClient;
+
     /// Register raft node info to raft network. `raft_nodes` maps raft node id to node id.
     ///
     /// Raft info must be registered first before building raft worker.
     async fn register(&self, group: u64, raft_nodes: BTreeMap<u64, u64>) -> Result<()>;
 
-    async fn send(&self, msgs: Vec<raft::prelude::Message>) -> Result<()>;
+    async fn client(&self, raft_node: u64) -> Result<Self::RaftClient>;
 
     async fn recv(&self, msgs: Vec<raft::prelude::Message>) -> Result<()>;
 
@@ -28,6 +30,35 @@ pub trait RaftNetwork: Send + Sync + Clone + 'static {
         &self,
         raft_node: u64,
     ) -> Result<mpsc::UnboundedReceiver<raft::prelude::Message>>;
+}
+
+#[async_trait]
+pub trait RaftClient: Send + Sync + Clone + 'static {
+    async fn send(&mut self, msgs: Vec<raft::prelude::Message>) -> Result<()>;
+}
+
+#[derive(Clone)]
+pub struct GrpcRaftClient {
+    client: RaftServiceClient<Channel>,
+}
+
+impl GrpcRaftClient {
+    pub fn new(client: RaftServiceClient<Channel>) -> Self {
+        Self { client }
+    }
+}
+
+#[async_trait]
+impl RaftClient for GrpcRaftClient {
+    async fn send(&mut self, msgs: Vec<raft::prelude::Message>) -> Result<()> {
+        let request = Request::new(stream::iter(msgs.into_iter().map(|msg| {
+            // TODO: Handle serde error.
+            let data = bincode::serialize(&msg).map_err(Error::serde_err).unwrap();
+            RaftRequest { data }
+        })));
+        self.client.raft(request).await.map_err(Error::RpcStatus)?;
+        Ok(())
+    }
 }
 
 type MessageChannelPair = (
@@ -77,6 +108,8 @@ impl GrpcRaftNetwork {
 
 #[async_trait]
 impl RaftNetwork for GrpcRaftNetwork {
+    type RaftClient = GrpcRaftClient;
+
     #[tracing::instrument(level = "trace", skip(self))]
     async fn register(&self, group: u64, raft_nodes: BTreeMap<u64, u64>) -> Result<()> {
         let mut guard = self.core.write().await;
@@ -104,46 +137,20 @@ impl RaftNetwork for GrpcRaftNetwork {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn send(&self, msgs: Vec<raft::prelude::Message>) -> Result<()> {
-        let mut node_msgs = BTreeMap::default();
+    // #[tracing::instrument(level = "trace", skip(self))]
+    async fn client(&self, raft_node: u64) -> Result<GrpcRaftClient> {
         let guard = self.core.read().await;
-        for msg in msgs {
-            let node =
-                *guard
-                    .raft_nodes
-                    .get(&msg.to)
-                    .ok_or(RaftManageError::RaftNodeNotExists {
-                        raft_node: msg.to,
-                        node: self.node,
-                    })?;
-            node_msgs
-                .entry(node)
-                .or_insert_with(|| Vec::with_capacity(10))
-                .push(msg);
-        }
-        drop(guard);
-
-        let futures = node_msgs
-            .into_iter()
-            .map(|(node, msgs)| {
-                let channel_pool = self.channel_pool.clone();
-                async move {
-                    let channel = channel_pool.get(node).await.map_err(Error::err)?;
-                    let mut client = RaftServiceClient::new(channel);
-                    let request = Request::new(stream::iter(msgs.into_iter().map(|msg| {
-                        // TODO: Handle serde error.
-                        let data = bincode::serialize(&msg).map_err(Error::serde_err).unwrap();
-                        RaftRequest { data }
-                    })));
-                    client.raft(request).await.map_err(Error::RpcStatus)?;
-                    Ok::<(), Error>(())
-                }
-            })
-            .collect_vec();
-        future::try_join_all(futures).await?;
-
-        Ok(())
+        let node = *guard
+            .raft_nodes
+            .get(&raft_node)
+            .ok_or(RaftManageError::RaftNodeNotExists {
+                raft_node,
+                node: self.node,
+            })?;
+        let channel = self.channel_pool.get(node).await.map_err(Error::err)?;
+        let client = RaftServiceClient::new(channel);
+        let client = GrpcRaftClient { client };
+        Ok(client)
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
@@ -190,6 +197,19 @@ pub mod tests {
     use super::*;
 
     #[derive(Clone)]
+    pub struct MockRaftClient(mpsc::UnboundedSender<raft::prelude::Message>);
+
+    #[async_trait]
+    impl RaftClient for MockRaftClient {
+        async fn send(&mut self, msgs: Vec<raft::prelude::Message>) -> Result<()> {
+            for msg in msgs {
+                self.0.send(msg).unwrap();
+            }
+            Ok(())
+        }
+    }
+
+    #[derive(Clone)]
     pub struct MockRaftNetwork(Arc<RwLock<BTreeMap<u64, MessageChannelPair>>>);
 
     impl Default for MockRaftNetwork {
@@ -200,7 +220,8 @@ pub mod tests {
 
     #[async_trait]
     impl RaftNetwork for MockRaftNetwork {
-        #[tracing::instrument(level = "trace", skip(self))]
+        type RaftClient = MockRaftClient;
+
         async fn register(&self, _group: u64, raft_nodes: BTreeMap<u64, u64>) -> Result<()> {
             let mut guard = self.0.write().await;
             for (raft_node, _) in raft_nodes {
@@ -212,27 +233,15 @@ pub mod tests {
             Ok(())
         }
 
-        #[tracing::instrument(level = "trace", skip(self))]
-        async fn send(&self, msgs: Vec<raft::prelude::Message>) -> Result<()> {
-            for msg in msgs {
-                self.0
-                    .read()
-                    .await
-                    .get(&msg.to)
-                    .unwrap()
-                    .0
-                    .send(msg)
-                    .unwrap();
-            }
-            Ok(())
+        async fn client(&self, raft_node: u64) -> Result<MockRaftClient> {
+            let tx = self.0.read().await.get(&raft_node).unwrap().0.clone();
+            Ok(MockRaftClient(tx))
         }
 
-        #[tracing::instrument(level = "trace", skip(self))]
         async fn recv(&self, _msgs: Vec<raft::prelude::Message>) -> Result<()> {
             unreachable!()
         }
 
-        #[tracing::instrument(level = "trace", skip(self))]
         async fn take_message_rx(
             &self,
             raft_node: u64,

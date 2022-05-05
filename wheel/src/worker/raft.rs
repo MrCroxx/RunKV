@@ -1,6 +1,9 @@
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use futures::future;
+use itertools::Itertools;
 use lazy_static::lazy_static;
 use prost::Message;
 use runkv_common::context::Context;
@@ -12,7 +15,7 @@ use tracing::{trace, trace_span, warn};
 
 use crate::components::fsm::Fsm;
 use crate::components::raft_log_store::{encode_entry_data, RaftGroupLogStore};
-use crate::components::raft_network::RaftNetwork;
+use crate::components::raft_network::{RaftClient, RaftNetwork};
 use crate::error::{Error, Result};
 
 const RAFT_HEARTBEAT_TICK_DURATION: Duration = Duration::from_millis(100);
@@ -98,7 +101,7 @@ pub struct Proposal {
 
 pub enum RaftStartMode {
     Initialize { peers: Vec<u64> },
-    Restart,
+    Restart { peers: Vec<u64> },
 }
 
 pub struct RaftWorkerOptions<RN: RaftNetwork, F: Fsm> {
@@ -116,15 +119,20 @@ pub struct RaftWorkerOptions<RN: RaftNetwork, F: Fsm> {
     pub fsm: F,
 }
 
-pub struct RaftWorker<RN: RaftNetwork, F: Fsm> {
+pub struct RaftWorker<RN, F>
+where
+    RN: RaftNetwork,
+    F: Fsm,
+{
     group: u64,
     node: u64,
     raft_node: u64,
 
     raft: raft::RawNode<RaftGroupLogStore>,
     raft_log_store: RaftGroupLogStore,
-    raft_network: RN,
+    _raft_network: RN,
     raft_soft_state: Option<raft::SoftState>,
+    raft_clients: HashMap<u64, RN::RaftClient>,
 
     message_rx: mpsc::UnboundedReceiver<raft::prelude::Message>,
     proposal_rx: mpsc::UnboundedReceiver<Proposal>,
@@ -134,7 +142,11 @@ pub struct RaftWorker<RN: RaftNetwork, F: Fsm> {
     metrics: RaftMetrics,
 }
 
-impl<RN: RaftNetwork, F: Fsm> std::fmt::Debug for RaftWorker<RN, F> {
+impl<RN, F> std::fmt::Debug for RaftWorker<RN, F>
+where
+    RN: RaftNetwork,
+    F: Fsm,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RaftWorker")
             .field("node", &self.node)
@@ -145,7 +157,11 @@ impl<RN: RaftNetwork, F: Fsm> std::fmt::Debug for RaftWorker<RN, F> {
 }
 
 #[async_trait]
-impl<RN: RaftNetwork, F: Fsm> Worker for RaftWorker<RN, F> {
+impl<RN, F> Worker for RaftWorker<RN, F>
+where
+    RN: RaftNetwork,
+    F: Fsm,
+{
     async fn run(&mut self) -> anyhow::Result<()> {
         // TODO: Gracefully kill.
         loop {
@@ -157,11 +173,15 @@ impl<RN: RaftNetwork, F: Fsm> Worker for RaftWorker<RN, F> {
     }
 }
 
-impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
+impl<RN, F> RaftWorker<RN, F>
+where
+    RN: RaftNetwork,
+    F: Fsm,
+{
     pub async fn build(options: RaftWorkerOptions<RN, F>) -> Result<Self> {
         let applied = match options.raft_start_mode {
             RaftStartMode::Initialize { .. } => 0,
-            RaftStartMode::Restart => options.fsm.raft_applied_index().await?,
+            RaftStartMode::Restart { .. } => options.fsm.raft_applied_index().await?,
         };
 
         let raft_config = raft::Config {
@@ -185,11 +205,16 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
         };
         raft_config.validate().map_err(Error::err)?;
 
+        let peers = match options.raft_start_mode {
+            RaftStartMode::Initialize { ref peers } => peers.clone(),
+            RaftStartMode::Restart { ref peers } => peers.clone(),
+        };
+
         let raft_log_store = options.raft_log_store.clone();
 
-        if let RaftStartMode::Initialize { peers } = options.raft_start_mode {
+        if let RaftStartMode::Initialize { .. } = options.raft_start_mode {
             let cs = raft::prelude::ConfState {
-                voters: peers,
+                voters: peers.clone(),
                 ..Default::default()
             };
             raft_log_store.put_conf_state(&cs).await.unwrap();
@@ -203,6 +228,12 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
             .take_message_rx(options.raft_node)
             .await?;
 
+        let mut raft_clients = HashMap::default();
+        for peer in peers {
+            let client = options.raft_network.client(peer).await?;
+            raft_clients.insert(peer, client);
+        }
+
         Ok(Self {
             group: options.group,
             node: options.node,
@@ -210,8 +241,9 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
 
             raft,
             raft_log_store,
-            raft_network: options.raft_network,
+            _raft_network: options.raft_network,
             raft_soft_state: None,
+            raft_clients,
 
             fsm: options.fsm,
 
@@ -374,7 +406,7 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace")]
+    // #[tracing::instrument(level = "trace")]
     async fn send_messages(&mut self, messages: Vec<raft::prelude::Message>) -> Result<()> {
         if cfg!(feature = "tracing") {
             let span = tracing::Span::current();
@@ -392,8 +424,26 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
                 }
             }
         }
+
         let start = Instant::now();
-        self.raft_network.send(messages).await?;
+
+        let mut raft_node_msgs = HashMap::new();
+        for msg in messages {
+            let to = msg.to;
+            raft_node_msgs
+                .entry(to)
+                .or_insert_with(|| Vec::with_capacity(16))
+                .push(msg);
+        }
+        let futures = raft_node_msgs
+            .into_iter()
+            .map(|(raft_node, msgs)| {
+                let mut client = self.raft_clients.get(&raft_node).unwrap().clone();
+                async move { client.send(msgs).await }
+            })
+            .collect_vec();
+        future::try_join_all(futures).await?;
+
         let elapsed = start.elapsed();
         self.metrics
             .send_messages_latency_histogram_vec
