@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -108,11 +109,15 @@ impl Log {
         let file_id = guard.first_log_file_id + guard.frozen_files.len() as u64;
         let start = guard.active_file.metadata().await?.len() as usize;
         let mut buf = Vec::with_capacity(DEFAULT_LOG_BATCH_SIZE);
-        entry.encode(&mut buf);
+        let bytes = entry.encode(&mut buf);
         guard.active_file.write_all(&buf).await?;
 
+        let sync_start = Instant::now();
         guard.active_file.sync_data().await?;
-        self.metrics.sync_counter.inc();
+        self.metrics
+            .sync_duration_histogram
+            .observe(sync_start.elapsed().as_secs_f64());
+        self.metrics.sync_bytes_guage.add(bytes as f64);
 
         let end = guard.active_file.metadata().await?.len() as usize;
         if end >= self.log_file_capacity {
