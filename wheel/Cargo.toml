@@ -19,7 +19,7 @@ humantime = "2.1.0"
 humantime-serde = "1.1.1"
 hyper = { version = "^0.14", features = ["server", "http1", "tcp"] }
 itertools = "0.10.3"
-lazy_static = "^1.4"
+lazy_static = "1.4.0"
 moka = { version = "0.7", features = ["future"] }
 parking_lot = "0.12"
 prometheus = "0.13.0"

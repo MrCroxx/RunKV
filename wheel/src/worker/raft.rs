@@ -632,6 +632,7 @@ mod tests {
 
     async fn build_raft_log_store(path: &str) -> RaftLogStore {
         let options = RaftLogStoreOptions {
+            node: 0,
             log_dir_path: path.to_string(),
             log_file_capacity: 64 << 20,
             block_cache_capacity: 64 << 20,

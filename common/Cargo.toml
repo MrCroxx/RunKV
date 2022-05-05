@@ -12,8 +12,10 @@ bytes = "1"
 bytesize = { version = "1.1.0", features = ["serde"] }
 chrono = "0.4"
 clap = { version = "3.1.6", features = ["derive"] }
+http = "0.2.6"
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
+hyper = { version = "^0.14", features = ["server", "http1", "tcp"] }
 isahc = "1" # isahc is the http client used for tracing. Always set it as the same version as opentelemetry-jaeger's.
 itertools = "0.10.3"
 lazy_static = "1.4.0"
@@ -25,6 +27,7 @@ opentelemetry-jaeger = { version = "0.16", features = [
     "isahc_collector_client",
 ] }
 parking_lot = "0.12"
+prometheus = "0.13.0"
 serde = "1.0"
 serde_derive = "1.0"
 slog = "2.7"

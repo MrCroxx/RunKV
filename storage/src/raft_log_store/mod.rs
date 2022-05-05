@@ -3,6 +3,7 @@ pub mod entry;
 pub mod error;
 pub mod log;
 pub mod mem;
+pub mod metrics;
 pub mod store;
 
 const DEFAULT_LOG_BATCH_SIZE: usize = 8 << 10;

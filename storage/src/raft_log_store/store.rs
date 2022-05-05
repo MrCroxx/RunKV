@@ -7,6 +7,7 @@ use super::block_cache::BlockCache;
 use super::entry::{Compact, Entry as LogEntry, Kv, Mask, RaftLogBatch, Truncate};
 use super::log::{Log, LogOptions, LogRef};
 use super::mem::{EntryIndex, MemStates};
+use super::metrics::{RaftLogStoreMetrics, RaftLogStoreMetricsRef};
 use crate::error::Result;
 
 #[derive(Clone, Debug)]
@@ -20,6 +21,7 @@ pub struct Entry {
 
 #[derive(Clone, Debug)]
 pub struct RaftLogStoreOptions {
+    pub node: u64,
     pub log_dir_path: String,
     pub log_file_capacity: usize,
     pub block_cache_capacity: usize,
@@ -29,6 +31,8 @@ struct RaftLogStoreCore {
     log: LogRef,
     states: MemStates,
     block_cache: BlockCache,
+
+    _metrics: RaftLogStoreMetricsRef,
 }
 
 /// [`RaftLogStore`] is designed for storing raft log entries and some small kv pairs from multiple
@@ -47,9 +51,13 @@ impl RaftLogStore {
     pub async fn open(options: RaftLogStoreOptions) -> Result<Self> {
         let states = MemStates::default();
 
+        let metrics = Arc::new(RaftLogStoreMetrics::new(options.node));
+
         let log_options = LogOptions {
             path: options.log_dir_path,
             log_file_capacity: options.log_file_capacity,
+
+            metrics: metrics.clone(),
         };
 
         let log = Log::open(log_options).await?;
@@ -112,6 +120,8 @@ impl RaftLogStore {
                 log,
                 states,
                 block_cache: BlockCache::new(options.block_cache_capacity),
+
+                _metrics: metrics,
             }),
         })
     }
@@ -366,6 +376,7 @@ mod tests {
 
         let tempdir = tempfile::tempdir().unwrap();
         let options = RaftLogStoreOptions {
+            node: 0,
             log_dir_path: tempdir.path().to_str().unwrap().to_string(),
             // Estimated size of each compressed entry is 111.
             log_file_capacity: 100,
@@ -472,6 +483,7 @@ mod tests {
     async fn test_kv() {
         let tempdir = tempfile::tempdir().unwrap();
         let options = RaftLogStoreOptions {
+            node: 0,
             log_dir_path: tempdir.path().to_str().unwrap().to_string(),
             // Estimated size of each compressed entry is 111.
             log_file_capacity: 100,

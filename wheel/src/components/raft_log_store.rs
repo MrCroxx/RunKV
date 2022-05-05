@@ -268,6 +268,7 @@ mod tests {
         let path = tempdir.path().to_str().unwrap();
 
         let options = RaftLogStoreOptions {
+            node: 0,
             log_dir_path: path.to_string(),
             log_file_capacity: 64 << 20,
             block_cache_capacity: 64 << 20,
