@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future;
+use futures_util::stream;
 use itertools::Itertools;
 use runkv_common::channel_pool::ChannelPool;
 use runkv_proto::wheel::raft_service_client::RaftServiceClient;
@@ -130,13 +131,12 @@ impl RaftNetwork for GrpcRaftNetwork {
                 async move {
                     let channel = channel_pool.get(node).await.map_err(Error::err)?;
                     let mut client = RaftServiceClient::new(channel);
-                    for msg in msgs {
-                        let data = bincode::serialize(&msg).map_err(Error::serde_err)?;
-                        client
-                            .raft(Request::new(RaftRequest { data }))
-                            .await
-                            .map_err(Error::RpcStatus)?;
-                    }
+                    let request = Request::new(stream::iter(msgs.into_iter().map(|msg| {
+                        // TODO: Handle serde error.
+                        let data = bincode::serialize(&msg).map_err(Error::serde_err).unwrap();
+                        RaftRequest { data }
+                    })));
+                    client.raft(request).await.map_err(Error::RpcStatus)?;
                     Ok::<(), Error>(())
                 }
             })

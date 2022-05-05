@@ -2171,6 +2171,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "runkv-client"
+version = "0.1.0"
+dependencies = [
+ "runkv-common",
+ "runkv-proto",
+ "tonic",
+]
+
+[[package]]
 name = "runkv-common"
 version = "0.1.0"
 dependencies = [
@@ -2320,6 +2329,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "runkv-tests"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "bytesize",
+ "env_logger",
+ "futures",
+ "itertools",
+ "lazy_static",
+ "rand",
+ "runkv-common",
+ "runkv-exhauster",
+ "runkv-proto",
+ "runkv-rudder",
+ "runkv-storage",
+ "runkv-wheel",
+ "tempfile",
+ "test-log",
+ "tokio",
+ "toml",
+ "tonic",
+ "tracing",
+]
+
+[[package]]
 name = "runkv-wheel"
 version = "0.1.0"
 dependencies = [
@@ -2333,6 +2368,7 @@ dependencies = [
  "clap 3.1.6",
  "env_logger",
  "futures",
+ "futures-util",
  "http",
  "humantime",
  "humantime-serde",
@@ -2359,32 +2395,6 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "runkv_tests"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "bytesize",
- "env_logger",
- "futures",
- "itertools",
- "lazy_static",
- "rand",
- "runkv-common",
- "runkv-exhauster",
- "runkv-proto",
- "runkv-rudder",
- "runkv-storage",
- "runkv-wheel",
- "tempfile",
- "test-log",
- "tokio",
- "toml",
- "tonic",
- "tracing",
 ]
 
 [[package]]
