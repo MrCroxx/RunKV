@@ -1,41 +1,83 @@
-use std::collections::hash_map::{Entry, HashMap};
+use std::collections::hash_map::{DefaultHasher, Entry, HashMap};
 use std::fmt::Display;
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
 use tokio::sync::oneshot;
 
-struct NotifyPoolCore<I: Eq + Hash + Copy + Clone + Display, R> {
-    notifiers: HashMap<I, oneshot::Sender<R>>,
+pub struct NotifyPoolCore<I, R>
+where
+    I: Eq + Hash + Copy + Clone + Display,
+{
+    inner: Arc<Mutex<HashMap<I, oneshot::Sender<R>>>>,
 }
 
-pub struct NotifyPool<I: Eq + Hash + Copy + Clone + Display, R> {
-    core: Arc<Mutex<NotifyPoolCore<I, R>>>,
-}
-
-impl<I: Eq + Hash + Copy + Clone + Display, R> Clone for NotifyPool<I, R> {
+impl<I, R> Clone for NotifyPoolCore<I, R>
+where
+    I: Eq + Hash + Copy + Clone + Display,
+{
     fn clone(&self) -> Self {
         Self {
-            core: self.core.clone(),
+            inner: Arc::clone(&self.inner),
         }
     }
 }
 
-impl<I: Eq + Hash + Copy + Clone + Display, R> Default for NotifyPool<I, R> {
+impl<I, R> Default for NotifyPoolCore<I, R>
+where
+    I: Eq + Hash + Copy + Clone + Display,
+{
     fn default() -> Self {
         Self {
-            core: Arc::new(Mutex::new(NotifyPoolCore {
-                notifiers: HashMap::default(),
-            })),
+            inner: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
 
-impl<I: Eq + Hash + Copy + Clone + Display, R> NotifyPool<I, R> {
+pub struct NotifyPool<I, R>
+where
+    I: Eq + Hash + Copy + Clone + Display,
+{
+    shards: u16,
+    buckets: HashMap<u16, NotifyPoolCore<I, R>>,
+}
+
+impl<I, R> Clone for NotifyPool<I, R>
+where
+    I: Eq + Hash + Copy + Clone + Display,
+{
+    fn clone(&self) -> Self {
+        Self {
+            shards: self.shards,
+            buckets: self.buckets.clone(),
+        }
+    }
+}
+
+impl<I, R> NotifyPool<I, R>
+where
+    I: Eq + Hash + Copy + Clone + Display,
+{
+    pub fn new(shards: u16) -> Self {
+        let mut buckets = HashMap::default();
+        for i in 0..shards {
+            buckets.insert(i, NotifyPoolCore::default());
+        }
+        Self { shards, buckets }
+    }
+
     pub fn register(&self, id: I) -> anyhow::Result<oneshot::Receiver<R>> {
+        let mut hasher = DefaultHasher::new();
+        id.hash(&mut hasher);
+        let hash = hasher.finish();
+        let shard = (hash % self.shards as u64) as u16;
+
         let (tx, rx) = oneshot::channel();
-        match self.core.lock().notifiers.entry(id) {
+
+        let bucket = self.buckets.get(&shard).unwrap();
+
+        match bucket.inner.lock().entry(id) {
             Entry::Occupied(_) => return Err(anyhow::anyhow!("id {} already exists", id)),
             Entry::Vacant(v) => {
                 v.insert(tx);
@@ -45,10 +87,16 @@ impl<I: Eq + Hash + Copy + Clone + Display, R> NotifyPool<I, R> {
     }
 
     pub fn notify(&self, id: I, result: R) -> anyhow::Result<()> {
-        let tx = self
-            .core
+        let mut hasher = DefaultHasher::new();
+        id.hash(&mut hasher);
+        let hash = hasher.finish();
+        let shard = (hash % self.shards as u64) as u16;
+
+        let bucket = self.buckets.get(&shard).unwrap();
+
+        let tx = bucket
+            .inner
             .lock()
-            .notifiers
             .remove(&id)
             .ok_or_else(|| anyhow::anyhow!("id {} does not exists", id))?;
         tx.send(result)
@@ -62,10 +110,10 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    fn is_send_sync<T: Send + Sync + 'static>() {}
+    fn is_send_sync_clone<T: Send + Sync + Clone + 'static>() {}
 
     #[test]
-    fn ensure_send_sync() {
-        is_send_sync::<NotifyPool<u64, ()>>();
+    fn ensure_send_sync_clone() {
+        is_send_sync_clone::<NotifyPool<u64, ()>>();
     }
 }
