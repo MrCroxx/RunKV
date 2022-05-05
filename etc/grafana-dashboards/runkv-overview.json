@@ -766,13 +766,14 @@
         "type": "prometheus",
         "uid": "PEDE6B306CC9C0CD0"
       },
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
-            "axisLabel": "Bandwidth",
+            "axisLabel": "Latency",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -813,7 +814,7 @@
               }
             ]
           },
-          "unit": "binBps"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -823,7 +824,7 @@
         "x": 12,
         "y": 26
       },
-      "id": 16,
+      "id": 14,
       "options": {
         "legend": {
           "calcs": [],
@@ -842,14 +843,41 @@
             "uid": "PEDE6B306CC9C0CD0"
           },
           "editorMode": "code",
-          "expr": "irate(raft_append_log_entries_bytes_gauge_vec[1m])",
+          "exemplar": false,
+          "expr": "avg(histogram_quantile(0.5, irate(raft_send_messages_latency_histogram_vec_bucket[1m]))) by (instance)",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "p50-{{instance}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "avg(histogram_quantile(0.9, irate(raft_send_messages_latency_histogram_vec_bucket[1m]))) by (instance)",
           "hide": false,
-          "legendFormat": "bandwitdh-{{instance}}",
+          "legendFormat": "p90-{{instance}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "avg(histogram_quantile(0.99, irate(raft_send_messages_latency_histogram_vec_bucket[1m]))) by (instance)",
+          "hide": false,
+          "legendFormat": "p99-{{instance}}",
           "range": true,
           "refId": "C"
         }
       ],
-      "title": "Append Log Entries - Instance Bytes",
+      "title": "Send Messages - Instance Latency",
       "type": "timeseries"
     },
     {
@@ -954,7 +982,7 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisLabel": "Latency",
+            "axisLabel": "Bandwidth",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -995,7 +1023,7 @@
               }
             ]
           },
-          "unit": "s"
+          "unit": "ops"
         },
         "overrides": []
       },
@@ -1005,7 +1033,7 @@
         "x": 12,
         "y": 34
       },
-      "id": 15,
+      "id": 18,
       "options": {
         "legend": {
           "calcs": [],
@@ -1024,41 +1052,14 @@
             "uid": "PEDE6B306CC9C0CD0"
           },
           "editorMode": "code",
-          "exemplar": false,
-          "expr": "avg(histogram_quantile(0.5, irate(raft_apply_log_entries_latency_histogram_vec_bucket[1m]))) by (instance)",
-          "format": "time_series",
-          "instant": false,
-          "interval": "",
-          "legendFormat": "p50-{{instance}}",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "PEDE6B306CC9C0CD0"
-          },
-          "editorMode": "code",
-          "expr": "avg(histogram_quantile(0.9, irate(raft_apply_log_entries_latency_histogram_vec_bucket[1m]))) by (instance)",
+          "expr": "irate(raft_send_messages_latency_histogram_vec_count[1m])",
           "hide": false,
-          "legendFormat": "p90-{{instance}}",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "PEDE6B306CC9C0CD0"
-          },
-          "editorMode": "code",
-          "expr": "avg(histogram_quantile(0.99, irate(raft_apply_log_entries_latency_histogram_vec_bucket[1m]))) by (instance)",
-          "hide": false,
-          "legendFormat": "p99-{{instance}}",
+          "legendFormat": "bandwitdh-{{instance}}",
           "range": true,
           "refId": "C"
         }
       ],
-      "title": "Apply Log Entries - Instance Latency",
+      "title": "Send Messages - Instance Frequency",
       "type": "timeseries"
     },
     {
@@ -1066,7 +1067,188 @@
         "type": "prometheus",
         "uid": "PEDE6B306CC9C0CD0"
       },
-      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Bandwidth",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "binBps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "id": 16,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "irate(raft_append_log_entries_bytes_gauge_vec[1m])",
+          "hide": false,
+          "legendFormat": "bandwitdh-{{instance}}",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Append Log Entries - Instance Bytes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PEDE6B306CC9C0CD0"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Bandwidth",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "binBps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
+      "id": 19,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "irate(raft_send_messages_bytes_gauge_vec[1m])",
+          "hide": false,
+          "legendFormat": "bandwitdh-{{instance}}",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Send Messages - Instance Bytes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PEDE6B306CC9C0CD0"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1122,9 +1304,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 42
+        "y": 50
       },
-      "id": 14,
+      "id": 15,
       "options": {
         "legend": {
           "calcs": [],
@@ -1144,7 +1326,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "avg(histogram_quantile(0.5, irate(raft_send_messages_latency_histogram_vec_bucket[1m]))) by (instance)",
+          "expr": "avg(histogram_quantile(0.5, irate(raft_apply_log_entries_latency_histogram_vec_bucket[1m]))) by (instance)",
           "format": "time_series",
           "instant": false,
           "interval": "",
@@ -1158,7 +1340,7 @@
             "uid": "PEDE6B306CC9C0CD0"
           },
           "editorMode": "code",
-          "expr": "avg(histogram_quantile(0.9, irate(raft_send_messages_latency_histogram_vec_bucket[1m]))) by (instance)",
+          "expr": "avg(histogram_quantile(0.9, irate(raft_apply_log_entries_latency_histogram_vec_bucket[1m]))) by (instance)",
           "hide": false,
           "legendFormat": "p90-{{instance}}",
           "range": true,
@@ -1170,14 +1352,14 @@
             "uid": "PEDE6B306CC9C0CD0"
           },
           "editorMode": "code",
-          "expr": "avg(histogram_quantile(0.99, irate(raft_send_messages_latency_histogram_vec_bucket[1m]))) by (instance)",
+          "expr": "avg(histogram_quantile(0.99, irate(raft_apply_log_entries_latency_histogram_vec_bucket[1m]))) by (instance)",
           "hide": false,
           "legendFormat": "p99-{{instance}}",
           "range": true,
           "refId": "C"
         }
       ],
-      "title": "Send Messages - Instance Latency",
+      "title": "Apply Log Entries - Instance Latency",
       "type": "timeseries"
     }
   ],

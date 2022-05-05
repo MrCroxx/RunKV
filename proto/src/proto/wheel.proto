@@ -23,50 +23,12 @@ message AddKeyRangeRequest {
 
 message AddKeyRangeResponse {}
 
-message InitializeRaftGroupRequest {
-  uint64 leader = 1;
-  repeated uint64 raft_nodes = 2;
-}
-
-message InitializeRaftGroupResponse {}
-
 service WheelService {
   rpc AddKeyRange(AddKeyRangeRequest) returns (AddKeyRangeResponse);
   rpc AddEndpoints(AddEndpointsRequest) returns (AddEndpointsResponse);
-  rpc InitializeRaftGroup(InitializeRaftGroupRequest) returns (InitializeRaftGroupResponse);
 }
 
 // ***** raft service *****
-
-message AppendEntriesRequest {
-  uint64 id = 1;
-  bytes data = 2;
-}
-
-message AppendEntriesResponse {
-  uint64 id = 1;
-  bytes data = 2;
-}
-
-message InstallSnapshotRequest {
-  uint64 id = 1;
-  bytes data = 2;
-}
-
-message InstallSnapshotResponse {
-  uint64 id = 1;
-  bytes data = 2;
-}
-
-message VoteRequest {
-  uint64 id = 1;
-  bytes data = 2;
-}
-
-message VoteResponse {
-  uint64 id = 1;
-  bytes data = 2;
-}
 
 message RaftRequest {
   bytes data = 1;
@@ -75,8 +37,5 @@ message RaftRequest {
 message RaftResponse {}
 
 service RaftService {
-  rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse);
-  rpc InstallSnapshot(InstallSnapshotRequest) returns (InstallSnapshotResponse);
-  rpc Vote(VoteRequest) returns (VoteResponse);
-  rpc Raft(RaftRequest) returns (RaftResponse);
+  rpc Raft(stream RaftRequest) returns (RaftResponse);
 }

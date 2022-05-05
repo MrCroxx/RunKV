@@ -1,6 +1,9 @@
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use futures::future;
+use itertools::Itertools;
 use lazy_static::lazy_static;
 use prost::Message;
 use runkv_common::context::Context;
@@ -12,7 +15,7 @@ use tracing::{trace, trace_span, warn};
 
 use crate::components::fsm::Fsm;
 use crate::components::raft_log_store::{encode_entry_data, RaftGroupLogStore};
-use crate::components::raft_network::RaftNetwork;
+use crate::components::raft_network::{RaftClient, RaftNetwork};
 use crate::error::{Error, Result};
 
 const RAFT_HEARTBEAT_TICK_DURATION: Duration = Duration::from_millis(100);
@@ -46,40 +49,55 @@ lazy_static! {
             &["node", "group", "raft_node"]
         )
         .unwrap();
+    static ref RAFT_SEND_MESSAGES_BYTES_GAUGE_VEC: prometheus::GaugeVec =
+        prometheus::register_gauge_vec!(
+            "raft_send_messages_bytes_gauge_vec",
+            "raft send messages bytes gauge vec",
+            &["node", "group", "raft_node"]
+        )
+        .unwrap();
 }
 
 struct RaftMetrics {
-    append_log_entries_latency_histogram_vec: prometheus::Histogram,
-    append_log_entries_bytes_gauge_vec: prometheus::Gauge,
-    apply_log_entries_latency_histogram_vec: prometheus::Histogram,
-    send_messages_latency_histogram_vec: prometheus::Histogram,
+    append_log_entries_latency_histogram: prometheus::Histogram,
+    append_log_entries_bytes_gauge: prometheus::Gauge,
+    apply_log_entries_latency_histogram: prometheus::Histogram,
+    send_messages_latency_histogram: prometheus::Histogram,
+    send_messages_bytes_gauge: prometheus::Gauge,
 }
 
 impl RaftMetrics {
     fn new(node: u64, group: u64, raft_node: u64) -> Self {
         Self {
-            append_log_entries_latency_histogram_vec: RAFT_APPEND_LOG_ENTRIES_LATENCY_HISTOGRAM_VEC
+            append_log_entries_latency_histogram: RAFT_APPEND_LOG_ENTRIES_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&[
                     &node.to_string(),
                     &group.to_string(),
                     &raft_node.to_string(),
                 ])
                 .unwrap(),
-            append_log_entries_bytes_gauge_vec: RAFT_APPEND_LOG_ENTRIES_BYTES_GAUGE_VEC
+            append_log_entries_bytes_gauge: RAFT_APPEND_LOG_ENTRIES_BYTES_GAUGE_VEC
                 .get_metric_with_label_values(&[
                     &node.to_string(),
                     &group.to_string(),
                     &raft_node.to_string(),
                 ])
                 .unwrap(),
-            apply_log_entries_latency_histogram_vec: RAFT_APPLY_LOG_ENTRIES_LATENCY_HISTOGRAM_VEC
+            apply_log_entries_latency_histogram: RAFT_APPLY_LOG_ENTRIES_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&[
                     &node.to_string(),
                     &group.to_string(),
                     &raft_node.to_string(),
                 ])
                 .unwrap(),
-            send_messages_latency_histogram_vec: RAFT_SEND_MESSAGES_LATENCY_HISTOGRAM_VEC
+            send_messages_latency_histogram: RAFT_SEND_MESSAGES_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[
+                    &node.to_string(),
+                    &group.to_string(),
+                    &raft_node.to_string(),
+                ])
+                .unwrap(),
+            send_messages_bytes_gauge: RAFT_SEND_MESSAGES_BYTES_GAUGE_VEC
                 .get_metric_with_label_values(&[
                     &node.to_string(),
                     &group.to_string(),
@@ -98,7 +116,7 @@ pub struct Proposal {
 
 pub enum RaftStartMode {
     Initialize { peers: Vec<u64> },
-    Restart,
+    Restart { peers: Vec<u64> },
 }
 
 pub struct RaftWorkerOptions<RN: RaftNetwork, F: Fsm> {
@@ -116,15 +134,20 @@ pub struct RaftWorkerOptions<RN: RaftNetwork, F: Fsm> {
     pub fsm: F,
 }
 
-pub struct RaftWorker<RN: RaftNetwork, F: Fsm> {
+pub struct RaftWorker<RN, F>
+where
+    RN: RaftNetwork,
+    F: Fsm,
+{
     group: u64,
     node: u64,
     raft_node: u64,
 
     raft: raft::RawNode<RaftGroupLogStore>,
     raft_log_store: RaftGroupLogStore,
-    raft_network: RN,
+    _raft_network: RN,
     raft_soft_state: Option<raft::SoftState>,
+    raft_clients: HashMap<u64, RN::RaftClient>,
 
     message_rx: mpsc::UnboundedReceiver<raft::prelude::Message>,
     proposal_rx: mpsc::UnboundedReceiver<Proposal>,
@@ -134,7 +157,11 @@ pub struct RaftWorker<RN: RaftNetwork, F: Fsm> {
     metrics: RaftMetrics,
 }
 
-impl<RN: RaftNetwork, F: Fsm> std::fmt::Debug for RaftWorker<RN, F> {
+impl<RN, F> std::fmt::Debug for RaftWorker<RN, F>
+where
+    RN: RaftNetwork,
+    F: Fsm,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RaftWorker")
             .field("node", &self.node)
@@ -145,7 +172,11 @@ impl<RN: RaftNetwork, F: Fsm> std::fmt::Debug for RaftWorker<RN, F> {
 }
 
 #[async_trait]
-impl<RN: RaftNetwork, F: Fsm> Worker for RaftWorker<RN, F> {
+impl<RN, F> Worker for RaftWorker<RN, F>
+where
+    RN: RaftNetwork,
+    F: Fsm,
+{
     async fn run(&mut self) -> anyhow::Result<()> {
         // TODO: Gracefully kill.
         loop {
@@ -157,11 +188,15 @@ impl<RN: RaftNetwork, F: Fsm> Worker for RaftWorker<RN, F> {
     }
 }
 
-impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
+impl<RN, F> RaftWorker<RN, F>
+where
+    RN: RaftNetwork,
+    F: Fsm,
+{
     pub async fn build(options: RaftWorkerOptions<RN, F>) -> Result<Self> {
         let applied = match options.raft_start_mode {
             RaftStartMode::Initialize { .. } => 0,
-            RaftStartMode::Restart => options.fsm.raft_applied_index().await?,
+            RaftStartMode::Restart { .. } => options.fsm.raft_applied_index().await?,
         };
 
         let raft_config = raft::Config {
@@ -185,11 +220,16 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
         };
         raft_config.validate().map_err(Error::err)?;
 
+        let peers = match options.raft_start_mode {
+            RaftStartMode::Initialize { ref peers } => peers.clone(),
+            RaftStartMode::Restart { ref peers } => peers.clone(),
+        };
+
         let raft_log_store = options.raft_log_store.clone();
 
-        if let RaftStartMode::Initialize { peers } = options.raft_start_mode {
+        if let RaftStartMode::Initialize { .. } = options.raft_start_mode {
             let cs = raft::prelude::ConfState {
-                voters: peers,
+                voters: peers.clone(),
                 ..Default::default()
             };
             raft_log_store.put_conf_state(&cs).await.unwrap();
@@ -203,6 +243,12 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
             .take_message_rx(options.raft_node)
             .await?;
 
+        let mut raft_clients = HashMap::default();
+        for peer in peers {
+            let client = options.raft_network.client(peer).await?;
+            raft_clients.insert(peer, client);
+        }
+
         Ok(Self {
             group: options.group,
             node: options.node,
@@ -210,8 +256,9 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
 
             raft,
             raft_log_store,
-            raft_network: options.raft_network,
+            _raft_network: options.raft_network,
             raft_soft_state: None,
+            raft_clients,
 
             fsm: options.fsm,
 
@@ -392,12 +439,34 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
                 }
             }
         }
+
         let start = Instant::now();
-        self.raft_network.send(messages).await?;
+
+        let mut bytes = 0;
+
+        let mut raft_node_msgs = HashMap::new();
+        for msg in messages {
+            bytes += msg.encoded_len();
+            let to = msg.to;
+            raft_node_msgs
+                .entry(to)
+                .or_insert_with(|| Vec::with_capacity(16))
+                .push(msg);
+        }
+        let futures = raft_node_msgs
+            .into_iter()
+            .map(|(raft_node, msgs)| {
+                let mut client = self.raft_clients.get(&raft_node).unwrap().clone();
+                async move { client.send(msgs).await }
+            })
+            .collect_vec();
+        future::try_join_all(futures).await?;
+
         let elapsed = start.elapsed();
         self.metrics
-            .send_messages_latency_histogram_vec
+            .send_messages_latency_histogram
             .observe(elapsed.as_secs_f64());
+        self.metrics.send_messages_bytes_gauge.add(bytes as f64);
         Ok(())
     }
 
@@ -419,7 +488,7 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
         self.fsm.apply(self.group, is_leader, entries).await?;
         let elapsed = start.elapsed();
         self.metrics
-            .apply_log_entries_latency_histogram_vec
+            .apply_log_entries_latency_histogram
             .observe(elapsed.as_secs_f64());
         Ok(())
     }
@@ -457,10 +526,10 @@ impl<RN: RaftNetwork, F: Fsm> RaftWorker<RN, F> {
         }
         let elapsed = start.elapsed();
         self.metrics
-            .append_log_entries_latency_histogram_vec
+            .append_log_entries_latency_histogram
             .observe(elapsed.as_secs_f64());
         self.metrics
-            .append_log_entries_bytes_gauge_vec
+            .append_log_entries_bytes_gauge
             .add(bytes as f64);
         Ok(())
     }

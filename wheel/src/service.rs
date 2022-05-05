@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use runkv_common::channel_pool::ChannelPool;
@@ -22,11 +23,9 @@ use runkv_proto::wheel::raft_service_server::RaftService;
 use runkv_proto::wheel::wheel_service_server::WheelService;
 use runkv_proto::wheel::{
     AddEndpointsRequest, AddEndpointsResponse, AddKeyRangeRequest, AddKeyRangeResponse,
-    AppendEntriesRequest, AppendEntriesResponse, InitializeRaftGroupRequest,
-    InitializeRaftGroupResponse, InstallSnapshotRequest, InstallSnapshotResponse, RaftRequest,
-    RaftResponse, VoteRequest, VoteResponse,
+    RaftRequest, RaftResponse,
 };
-use tonic::{Request, Response, Status};
+use tonic::{Request, Response, Status, Streaming};
 use tracing::{trace_span, Instrument};
 
 use crate::components::command::Command;
@@ -383,58 +382,29 @@ impl WheelService for Wheel {
         let rsp = AddKeyRangeResponse::default();
         Ok(Response::new(rsp))
     }
-
-    #[tracing::instrument(level = "trace")]
-    async fn initialize_raft_group(
-        &self,
-        _request: Request<InitializeRaftGroupRequest>,
-    ) -> core::result::Result<Response<InitializeRaftGroupResponse>, Status> {
-        unreachable!()
-    }
 }
 
 #[async_trait]
 impl RaftService for Wheel {
-    #[tracing::instrument(level = "trace")]
-    async fn append_entries(
-        &self,
-        _request: Request<AppendEntriesRequest>,
-    ) -> core::result::Result<Response<AppendEntriesResponse>, Status> {
-        unreachable!()
-    }
-
-    #[tracing::instrument(level = "trace")]
-    async fn install_snapshot(
-        &self,
-        _request: Request<InstallSnapshotRequest>,
-    ) -> core::result::Result<Response<InstallSnapshotResponse>, Status> {
-        unreachable!()
-    }
-
-    #[tracing::instrument(level = "trace")]
-    async fn vote(
-        &self,
-        _request: Request<VoteRequest>,
-    ) -> core::result::Result<Response<VoteResponse>, Status> {
-        unreachable!()
-    }
-
-    #[tracing::instrument(level = "trace")]
     async fn raft(
         &self,
-        request: Request<RaftRequest>,
+        request: Request<Streaming<RaftRequest>>,
     ) -> core::result::Result<Response<RaftResponse>, Status> {
-        let req = request.into_inner();
-        let msg = bincode::deserialize(&req.data)
-            .map_err(Error::serde_err)
-            .map_err(internal)?;
-        self.inner
-            .raft_network
-            .recv(vec![msg])
-            .await
-            .map_err(internal)?;
-        let rsp = RaftResponse::default();
-        Ok(Response::new(rsp))
+        let mut stream = request.into_inner();
+
+        while let Some(request) = stream.next().await {
+            let req = request?;
+            let msg = bincode::deserialize(&req.data)
+                .map_err(Error::serde_err)
+                .map_err(internal)?;
+            self.inner
+                .raft_network
+                .recv(vec![msg])
+                .await
+                .map_err(internal)?;
+        }
+
+        Ok(Response::new(RaftResponse::default()))
     }
 }
 
