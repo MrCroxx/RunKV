@@ -21,6 +21,10 @@ pub enum Error {
 }
 
 impl Error {
+    pub fn err(e: impl Into<Box<dyn std::error::Error>>) -> Self {
+        Self::Other(e.into().to_string())
+    }
+
     pub fn encode_error(e: impl Into<Box<dyn std::error::Error>>) -> Self {
         Self::EncodeError(e.into().to_string())
     }
