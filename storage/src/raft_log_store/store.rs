@@ -5,7 +5,7 @@ use tracing::trace;
 
 use super::block_cache::BlockCache;
 use super::entry::{Compact, Entry as LogEntry, Kv, Mask, RaftLogBatch, Truncate};
-use super::log_v2::{Log, LogOptions, WriteHandle};
+use super::log::{Log, LogOptions, WriteHandle};
 use super::mem::{EntryIndex, MemStates};
 use super::metrics::{RaftLogStoreMetrics, RaftLogStoreMetricsRef};
 use crate::error::Result;
