@@ -160,7 +160,6 @@ impl RaftLogStore {
 
         let raw = batch.take_raw();
         let entry = LogEntry::RaftLogBatch(batch);
-        // let (file_id, write_offset, _write_len) =
         let WriteHandle {
             file_id,
             offset: write_offset,
