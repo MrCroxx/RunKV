@@ -23,7 +23,7 @@ struct Args {
 
     #[clap(long, default_value = "100")]
     groups: usize,
-    #[clap(long, default_value = "100000")]
+    #[clap(long, default_value = "10000")]
     entries: usize,
     #[clap(long, default_value = "10")]
     batch_size: usize,
