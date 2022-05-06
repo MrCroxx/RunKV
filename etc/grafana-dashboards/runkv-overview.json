@@ -891,7 +891,7 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisLabel": "Bandwidth",
+            "axisLabel": "Frequency",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -982,7 +982,7 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisLabel": "Bandwidth",
+            "axisLabel": "Frequency",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",

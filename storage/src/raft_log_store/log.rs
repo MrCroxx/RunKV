@@ -191,6 +191,7 @@ impl Log {
                 }
                 file.write_all(&buf).await?;
                 let len = buf.len();
+                sync_size += len;
                 self.core
                     .active_file_len
                     .store(offset + len, Ordering::Release);
