@@ -11,7 +11,7 @@ use runkv_storage::iterator::{Iterator, MergeIterator, Seek, SstableIterator, Us
 use runkv_storage::manifest::VersionManager;
 use runkv_storage::utils::value;
 use runkv_storage::Result;
-use tracing::trace;
+use tracing::{debug, trace};
 
 #[derive(Clone)]
 pub struct ObjectStoreLsmTreeOptions {
@@ -185,25 +185,25 @@ impl ObjectStoreLsmTreeCore {
         let mut guard = self.memtables.write();
         // Rotate memtable if needed.
         if guard.memtable.table.mem_remain() < approximate_size {
-            trace!("rotate memtable");
+            debug!("rotate memtable");
             let mut imm = MemtableWithCtx::new(self.options.write_buffer_capacity);
             std::mem::swap(&mut imm, &mut guard.memtable);
             guard.immutable_memtables.push_front(imm);
         }
         guard.memtable.table.put(key, value, sequence);
-        trace!(
+        assert!(
+            apply_index >= guard.memtable.max_applied_index,
             "apply index: {}, max applied index: {}",
             apply_index,
             guard.memtable.max_applied_index,
         );
-        assert!(apply_index >= guard.memtable.max_applied_index);
         guard.memtable.max_applied_index = apply_index;
-        trace!(
+        assert!(
+            sequence >= guard.memtable.max_sequence,
             "sequence: {}, max sequence: {}",
             sequence,
             guard.memtable.max_sequence,
         );
-        assert!(sequence >= guard.memtable.max_sequence);
         guard.memtable.max_sequence = sequence;
         drop(guard);
 

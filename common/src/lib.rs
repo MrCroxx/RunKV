@@ -6,6 +6,7 @@ pub mod context;
 pub mod log;
 pub mod notify_pool;
 pub mod prometheus;
+pub mod sync;
 pub mod time;
 pub mod tracing_slog_drain;
 

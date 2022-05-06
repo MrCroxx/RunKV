@@ -3,6 +3,8 @@ use std::time::Instant;
 
 use bytesize::ByteSize;
 use clap::Parser;
+use futures::future;
+use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use runkv_common::prometheus::DefaultPrometheusExporter;
@@ -19,9 +21,9 @@ struct Args {
     #[clap(long, default_value = "67108864")] // 64 MiB
     block_cache_capacity: usize,
 
-    #[clap(long, default_value = "10")]
+    #[clap(long, default_value = "100")]
     groups: usize,
-    #[clap(long, default_value = "1048576")] // 1 << 20, 1_048_576
+    #[clap(long, default_value = "100000")]
     entries: usize,
     #[clap(long, default_value = "10")]
     batch_size: usize,
@@ -58,32 +60,41 @@ async fn build_raft_log_store(args: &Args) -> RaftLogStore {
 
 /// ```plain
 /// [
+///   // batches for group
 ///   [
-///     (group, term, index, ctx, data),
+///     [
+///       (group, term, index, ctx, data),
+///       ...
+///     ],
 ///     ...
 ///   ],
 ///   ...
 /// ]
 /// ```
 #[allow(clippy::type_complexity)]
-fn build_dataset(args: &Args) -> Vec<Vec<(u64, u64, u64, Vec<u8>, Vec<u8>)>> {
+fn build_dataset(args: &Args) -> Vec<Vec<Vec<(u64, u64, u64, Vec<u8>, Vec<u8>)>>> {
     const TERM: u64 = 1;
     let mut rng = ChaCha8Rng::seed_from_u64(args.seed);
 
-    let mut dataset = Vec::with_capacity(args.entries / args.batch_size + 1);
+    let mut dataset = Vec::with_capacity(args.groups);
 
     for group in 1..=args.groups {
+        let mut group_dataset = Vec::with_capacity(args.entries / args.batch_size + 1);
         for start in (1..=args.entries).step_by(args.batch_size) {
-            let mut batch = Vec::with_capacity(args.groups * args.batch_size);
-            for index in start..=start + args.batch_size {
+            let mut batch = Vec::with_capacity(args.batch_size);
+            for index in start..start + args.batch_size {
+                if index > args.entries {
+                    break;
+                }
                 let mut context: Vec<u8> = vec![0; args.context_size];
                 let mut data: Vec<u8> = vec![0; args.data_size];
                 rng.fill(&mut context[..]);
                 rng.fill(&mut data[..]);
                 batch.push((group as u64, TERM, index as u64, context, data));
             }
-            dataset.push(batch);
+            group_dataset.push(batch);
         }
+        dataset.push(group_dataset);
     }
     dataset
 }
@@ -101,6 +112,8 @@ async fn dir_size(path: &str) -> usize {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+
+    println!("{:#?}", args);
 
     if args.metrics {
         let addr = format!("{}:{}", args.prometheus_host, args.prometheus_port)
@@ -120,20 +133,30 @@ async fn main() {
 
     let dataset = build_dataset(&args);
 
+    let futures = dataset
+        .into_iter()
+        .map(|batches| {
+            let raft_log_store_clone = raft_log_store.clone();
+            async move {
+                for batch in batches {
+                    let mut builder = RaftLogBatchBuilder::default();
+                    for (group, term, index, ctx, data) in batch {
+                        builder.add(group, term, index, &ctx, &data);
+                    }
+                    let log_batches = builder.build();
+                    for log_batch in log_batches {
+                        raft_log_store_clone.append(log_batch).await.unwrap();
+                    }
+                }
+            }
+        })
+        .collect_vec();
+
     println!("Start benching...");
 
     let start = Instant::now();
 
-    for data in dataset {
-        let mut builder = RaftLogBatchBuilder::default();
-        for (group, term, index, ctx, data) in data {
-            builder.add(group, term, index, &ctx, &data);
-        }
-        let batches = builder.build();
-        for batch in batches {
-            raft_log_store.append(batch).await.unwrap();
-        }
-    }
+    future::join_all(futures).await;
 
     let elapsed = start.elapsed();
 
