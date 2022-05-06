@@ -7,9 +7,10 @@ use futures::channel::oneshot;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use parking_lot::RwLock;
+use runkv_common::sync::TicketLock;
 use tokio::fs::{create_dir_all, read_dir, File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::{Mutex as AsyncMutex, RwLock as AsyncRwLock};
+use tokio::sync::RwLock as AsyncRwLock;
 use tracing::trace;
 
 use super::entry::Entry;
@@ -63,10 +64,12 @@ pub struct LogOptions {
 
 struct LogCore {
     active_file: Arc<AsyncRwLock<File>>,
-    frozen_files: Arc<RwLock<Vec<File>>>,
+    frozen_files: Arc<AsyncRwLock<Vec<File>>>,
     first_log_file_id: AtomicU64,
 
     queue: Arc<RwLock<Vec<Writer>>>,
+
+    write: TicketLock,
 }
 
 #[derive(Clone)]
@@ -129,13 +132,20 @@ impl Log {
             log_file_capacity: options.log_file_capacity,
             core: Arc::new(LogCore {
                 active_file: Arc::new(AsyncRwLock::new(active_file)),
-                frozen_files: Arc::new(RwLock::new(frozen_files)),
+                frozen_files: Arc::new(AsyncRwLock::new(frozen_files)),
                 first_log_file_id: AtomicU64::new(first_log_file_id),
+
                 queue: Arc::new(RwLock::new(vec![])),
+
+                write: TicketLock::default(),
             }),
 
             metrics: options.metrics,
         })
+    }
+
+    pub async fn frozen_file_count(&self) -> usize {
+        self.core.frozen_files.read().await.len()
     }
 
     /// Append [`entries`] to log file.
@@ -150,12 +160,17 @@ impl Log {
             is_leader
         };
 
+        self.core.write.async_acquire().await;
+
         if is_leader {
             // Take writer batch.
             let writers = {
                 let mut queue = self.core.queue.write();
                 std::mem::take(&mut (*queue))
             };
+            self.metrics
+                .batch_writers_histogram
+                .observe(writers.len() as f64);
 
             let mut sync_size = 0;
             let mut txs = Vec::with_capacity(writers.len());
@@ -165,16 +180,15 @@ impl Log {
                 let mut file = self.core.active_file.write().await;
 
                 let file_id = self.core.first_log_file_id.load(Ordering::Acquire)
-                    + self.core.frozen_files.read().len() as u64;
+                    + self.core.frozen_files.read().await.len() as u64;
                 let offset = file.metadata().await?.len() as usize;
                 let mut buf = Vec::with_capacity(DEFAULT_BUFFER_SIZE);
 
-                let mut len = 0;
                 for entry in writer.entries {
-                    len += entry.encode(&mut buf);
+                    entry.encode(&mut buf);
                 }
                 file.write_all(&buf).await?;
-                sync_size += len;
+                let len = file.metadata().await?.len() as usize - offset;
 
                 if offset + len >= self.log_file_capacity {
                     // Sync old active file.
@@ -208,7 +222,7 @@ impl Log {
                     // Add old active file to frozen file list.
                     let frozen_file =
                         File::open(Path::new(&self.path).join(filename(file_id))).await?;
-                    self.core.frozen_files.write().push(frozen_file);
+                    self.core.frozen_files.write().await.push(frozen_file);
                 }
 
                 txs.push(writer.tx);
@@ -237,12 +251,30 @@ impl Log {
 
         let handle = rx.await.map_err(Error::err)?;
 
+        self.core.write.release();
+
         Ok(handle)
     }
 
-    pub async fn close(&self) -> Result<()> {
-        self.core.active_file.read().await.sync_all().await?;
-        Ok(())
+    pub async fn read(&self, log_file_id: u64, offset: u64, len: usize) -> Result<Vec<u8>> {
+        let mut frozen_files = self.core.frozen_files.write().await;
+        let first_log_file_id = self.core.first_log_file_id.load(Ordering::Acquire);
+        let log_file_index = (log_file_id - first_log_file_id) as usize;
+        let buf = if log_file_index < frozen_files.len() {
+            frozen_files[log_file_index]
+                .seek(std::io::SeekFrom::Start(offset))
+                .await?;
+            let mut buf = vec![0; len];
+            frozen_files[log_file_index].read_exact(&mut buf).await?;
+            buf
+        } else {
+            let mut active_file = self.core.active_file.write().await;
+            active_file.seek(std::io::SeekFrom::Start(offset)).await?;
+            let mut buf = vec![0; len];
+            active_file.read_exact(&mut buf).await?;
+            buf
+        };
+        Ok(buf)
     }
 
     /// Yield [`(file id, offset, Entry)`] of all frozen logs in order.
@@ -251,7 +283,7 @@ impl Log {
     #[allow(clippy::needless_lifetimes)]
     #[try_stream(ok = (u64,usize, Entry), error = RaftLogStoreError)]
     pub async fn replay(&self) {
-        let mut frozen_files = self.core.frozen_files.write();
+        let mut frozen_files = self.core.frozen_files.write().await;
 
         let begin_log_file_id = self.core.first_log_file_id.load(Ordering::Acquire);
         let end_log_file_id = begin_log_file_id + frozen_files.len() as u64;
@@ -271,8 +303,9 @@ impl Log {
         }
     }
 
-    pub fn frozen_file_count(&self) -> usize {
-        self.core.frozen_files.read().len()
+    pub async fn close(&self) -> Result<()> {
+        self.core.active_file.read().await.sync_all().await?;
+        Ok(())
     }
 }
 
@@ -307,10 +340,10 @@ mod tests {
         for entry in entries.iter().cloned() {
             log.append(vec![entry]).await.unwrap();
         }
-        assert_eq!(log.frozen_file_count(), 4);
+        assert_eq!(log.frozen_file_count().await, 4);
         let mut buf = vec![];
         for i in 0..4 {
-            log.core.frozen_files.write()[i]
+            log.core.frozen_files.write().await[i]
                 .read_to_end(&mut buf)
                 .await
                 .unwrap();
@@ -326,10 +359,10 @@ mod tests {
         // Recover pipe log.
         drop(log);
         let log = Log::open(options).await.unwrap();
-        assert_eq!(log.frozen_file_count(), 5);
+        assert_eq!(log.frozen_file_count().await, 5);
         let mut buf = vec![];
         for i in 0..4 {
-            log.core.frozen_files.write()[i]
+            log.core.frozen_files.write().await[i]
                 .read_to_end(&mut buf)
                 .await
                 .unwrap();

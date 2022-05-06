@@ -12,6 +12,7 @@ use runkv_common::coding::BytesSerde;
 use runkv_common::config::Node;
 use runkv_common::context::Context;
 use runkv_common::notify_pool::NotifyPool;
+use runkv_common::sync::TicketLock;
 use runkv_proto::common::Endpoint;
 use runkv_proto::kv::kv_service_server::KvService;
 use runkv_proto::kv::{
@@ -124,6 +125,8 @@ struct WheelInner {
     txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
     request_id: AtomicU64,
 
+    sequence_lock: TicketLock,
+
     metrics: WheelServiceMetrics,
 }
 
@@ -144,6 +147,8 @@ impl Wheel {
                 raft_manager: options.raft_manager,
                 txn_notify_pool: options.txn_notify_pool,
                 request_id: AtomicU64::new(0),
+
+                sequence_lock: TicketLock::default(),
 
                 metrics: WheelServiceMetrics::new(options.node),
             }),
@@ -230,7 +235,11 @@ impl Wheel {
                 Some(kv_op_request::Request::Snapshot(_)) | Some(kv_op_request::Request::Get(_))
             )
         });
+
         let sequence = self.inner.raft_manager.get_sequence(raft_node).await?;
+
+        self.inner.sequence_lock.async_acquire().await;
+
         let sequence = if read_only {
             sequence.load(Ordering::Acquire)
         } else {
@@ -268,6 +277,8 @@ impl Wheel {
         proposal_tx
             .send(Proposal { data, context })
             .map_err(Error::err)?;
+
+        self.inner.sequence_lock.release();
 
         // Wait for resposne.
         let response = rx

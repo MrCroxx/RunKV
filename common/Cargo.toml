@@ -12,6 +12,7 @@ bytes = "1"
 bytesize = { version = "1.1.0", features = ["serde"] }
 chrono = "0.4"
 clap = { version = "3.1.6", features = ["derive"] }
+futures = "0.3"
 http = "0.2.6"
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
@@ -28,10 +29,11 @@ opentelemetry-jaeger = { version = "0.16", features = [
 ] }
 parking_lot = "0.12"
 prometheus = "0.13.0"
+rand = "0.8.5"
 serde = "1.0"
 serde_derive = "1.0"
 slog = "2.7"
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 toml = "0.4.2"
 tonic = "0.6.2"
 tracing = "0.1"

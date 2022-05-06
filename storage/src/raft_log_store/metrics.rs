@@ -17,11 +17,19 @@ lazy_static! {
             &["node"]
         )
         .unwrap();
+    static ref RAFT_LOG_STORE_BATCH_WRITERS_HISTOGRAM_VEC: prometheus::HistogramVec =
+        prometheus::register_histogram_vec!(
+            "raft_log_store_batch_writers_histogram_vec",
+            "raft log store batch writers histogram vec",
+            &["node"]
+        )
+        .unwrap();
 }
 
 pub struct RaftLogStoreMetrics {
     pub sync_duration_histogram: prometheus::Histogram,
     pub sync_bytes_guage: prometheus::Gauge,
+    pub batch_writers_histogram: prometheus::Histogram,
 }
 
 pub type RaftLogStoreMetricsRef = Arc<RaftLogStoreMetrics>;
@@ -33,6 +41,9 @@ impl RaftLogStoreMetrics {
                 .get_metric_with_label_values(&[&node.to_string()])
                 .unwrap(),
             sync_bytes_guage: RAFT_LOG_STORE_SYNC_BYTES_GAUGE_VEC
+                .get_metric_with_label_values(&[&node.to_string()])
+                .unwrap(),
+            batch_writers_histogram: RAFT_LOG_STORE_BATCH_WRITERS_HISTOGRAM_VEC
                 .get_metric_with_label_values(&[&node.to_string()])
                 .unwrap(),
         }

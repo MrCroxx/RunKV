@@ -5,7 +5,7 @@ use tracing::trace;
 
 use super::block_cache::BlockCache;
 use super::entry::{Compact, Entry as LogEntry, Kv, Mask, RaftLogBatch, Truncate};
-use super::log::{Log, LogOptions, LogRef};
+use super::log_v2::{Log, LogOptions, WriteHandle};
 use super::mem::{EntryIndex, MemStates};
 use super::metrics::{RaftLogStoreMetrics, RaftLogStoreMetricsRef};
 use crate::error::Result;
@@ -28,7 +28,7 @@ pub struct RaftLogStoreOptions {
 }
 
 struct RaftLogStoreCore {
-    log: LogRef,
+    log: Log,
     states: MemStates,
     block_cache: BlockCache,
 
@@ -113,8 +113,6 @@ impl RaftLogStore {
             }
         }
 
-        let log = Arc::new(log);
-
         Ok(Self {
             core: Arc::new(RaftLogStoreCore {
                 log,
@@ -162,7 +160,12 @@ impl RaftLogStore {
 
         let raw = batch.take_raw();
         let entry = LogEntry::RaftLogBatch(batch);
-        let (file_id, write_offset, _write_len) = self.core.log.append(entry).await?;
+        // let (file_id, write_offset, _write_len) =
+        let WriteHandle {
+            file_id,
+            offset: write_offset,
+            len: _,
+        } = self.core.log.append(vec![entry]).await?;
 
         let block_offset = write_offset + data_segment_offset + 1;
         let block_len = data_segment_len;
@@ -186,7 +189,7 @@ impl RaftLogStore {
     pub async fn truncate(&self, group: u64, index: u64) -> Result<()> {
         self.core
             .log
-            .append(LogEntry::Truncate(Truncate { group, index }))
+            .append(vec![LogEntry::Truncate(Truncate { group, index })])
             .await?;
         self.core.states.truncate(group, index).await?;
         Ok(())
@@ -196,7 +199,7 @@ impl RaftLogStore {
     pub async fn compact(&self, group: u64, index: u64) -> Result<()> {
         self.core
             .log
-            .append(LogEntry::Compact(Compact { group, index }))
+            .append(vec![LogEntry::Compact(Compact { group, index })])
             .await?;
         self.core.states.compact(group, index).await?;
         Ok(())
@@ -209,7 +212,7 @@ impl RaftLogStore {
     pub async fn mask(&self, group: u64, index: u64) -> Result<()> {
         self.core
             .log
-            .append(LogEntry::Mask(Mask { group, index }))
+            .append(vec![LogEntry::Mask(Mask { group, index })])
             .await?;
         self.core.states.mask(group, index).await?;
         Ok(())
@@ -292,11 +295,11 @@ impl RaftLogStore {
     pub async fn put(&self, group: u64, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
         self.core
             .log
-            .append(LogEntry::Kv(Kv::Put {
+            .append(vec![LogEntry::Kv(Kv::Put {
                 group,
                 key: key.clone(),
                 value: value.clone(),
-            }))
+            })])
             .await?;
         self.core.states.put(group, key, value).await?;
         Ok(())
@@ -305,10 +308,10 @@ impl RaftLogStore {
     pub async fn delete(&self, group: u64, key: Vec<u8>) -> Result<()> {
         self.core
             .log
-            .append(LogEntry::Kv(Kv::Delete {
+            .append(vec![LogEntry::Kv(Kv::Delete {
                 group,
                 key: key.clone(),
-            }))
+            })])
             .await?;
         self.core.states.delete(group, key).await?;
         Ok(())
