@@ -7,7 +7,6 @@ use futures::channel::oneshot;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use parking_lot::RwLock;
-use runkv_common::sync::TicketLock;
 use tokio::fs::{create_dir_all, read_dir, File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::RwLock as AsyncRwLock;
@@ -69,8 +68,6 @@ struct LogCore {
     active_file_len: AtomicUsize,
 
     queue: Arc<RwLock<Vec<Writer>>>,
-
-    write: TicketLock,
 }
 
 #[derive(Clone)]
@@ -138,8 +135,6 @@ impl Log {
                 active_file_len: AtomicUsize::new(0),
 
                 queue: Arc::new(RwLock::new(vec![])),
-
-                write: TicketLock::default(),
             }),
 
             metrics: options.metrics,
@@ -165,9 +160,10 @@ impl Log {
             is_leader
         };
 
-        self.core.write.async_acquire().await;
-
         if is_leader {
+            let mut file = self.core.active_file.write().await;
+            let mut buf = Vec::with_capacity(DEFAULT_BUFFER_SIZE);
+
             // Take writer batch.
             let writers = {
                 let mut queue = self.core.queue.write();
@@ -182,9 +178,6 @@ impl Log {
             let mut handles = Vec::with_capacity(writers.len());
 
             for writer in writers {
-                let mut file = self.core.active_file.write().await;
-                let mut buf = Vec::with_capacity(DEFAULT_BUFFER_SIZE);
-
                 let mut entry_handles = Vec::with_capacity(writer.entries.len());
 
                 let file_id = self.core.first_log_file_id.load(Ordering::Acquire)
@@ -201,7 +194,7 @@ impl Log {
                         len: entry_len,
                     });
                 }
-                file.write_all(&buf).await?;
+
                 let len = buf.len();
                 total_size += len;
                 sync_size += len;
@@ -210,13 +203,17 @@ impl Log {
                     .store(offset + len, Ordering::Release);
 
                 if offset + len >= self.log_file_capacity {
+                    // Force write buffer.
+                    file.write_all(&buf).await?;
+                    buf.clear();
+
                     // Sync old active file.
                     let now = Instant::now();
                     file.sync_all().await?;
                     self.metrics
                         .sync_latency_histogram
                         .observe(now.elapsed().as_secs_f64());
-                    self.metrics.sync_throughput_guage.add(sync_size as f64);
+                    self.metrics.sync_size_histogram.observe(sync_size as f64);
                     sync_size = 0;
 
                     // Rotate active file.
@@ -248,12 +245,13 @@ impl Log {
             }
 
             if sync_size > 0 {
-                let now = Instant::now();
-                self.core.active_file.write().await.sync_data().await?;
+                file.write_all(&buf).await?;
+                let start_sync = Instant::now();
+                file.sync_data().await?;
                 self.metrics
                     .sync_latency_histogram
-                    .observe(now.elapsed().as_secs_f64());
-                self.metrics.sync_throughput_guage.add(sync_size as f64);
+                    .observe(start_sync.elapsed().as_secs_f64());
+                self.metrics.sync_size_histogram.observe(sync_size as f64);
             }
 
             for (tx, handle) in txs.into_iter().zip(handles.into_iter()) {
@@ -264,8 +262,6 @@ impl Log {
         }
 
         let handle = rx.await.map_err(Error::err)?;
-
-        self.core.write.release();
 
         self.metrics
             .append_log_latency_histogram
