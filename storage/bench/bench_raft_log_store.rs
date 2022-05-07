@@ -144,9 +144,7 @@ async fn main() {
                         builder.add(group, term, index, &ctx, &data);
                     }
                     let log_batches = builder.build();
-                    for log_batch in log_batches {
-                        raft_log_store_clone.append(log_batch).await.unwrap();
-                    }
+                    raft_log_store_clone.append(log_batches).await.unwrap();
                 }
             }
         })

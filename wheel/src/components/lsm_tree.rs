@@ -15,6 +15,7 @@ use tracing::{debug, trace};
 
 #[derive(Clone)]
 pub struct ObjectStoreLsmTreeOptions {
+    pub raft_node: u64,
     /// Reference of sstable store.
     pub sstable_store: SstableStoreRef,
     /// Memtable capacity.
@@ -192,14 +193,14 @@ impl ObjectStoreLsmTreeCore {
         }
         guard.memtable.table.put(key, value, sequence);
         assert!(
-            apply_index >= guard.memtable.max_applied_index,
+            apply_index > guard.memtable.max_applied_index,
             "apply index: {}, max applied index: {}",
             apply_index,
             guard.memtable.max_applied_index,
         );
         guard.memtable.max_applied_index = apply_index;
         assert!(
-            sequence >= guard.memtable.max_sequence,
+            sequence > guard.memtable.max_sequence,
             "sequence: {}, max sequence: {}",
             sequence,
             guard.memtable.max_sequence,
@@ -234,13 +235,25 @@ unsafe impl Sync for ObjectStoreLsmTreeCore {}
 
 #[derive(Clone)]
 pub struct ObjectStoreLsmTree {
-    inner: Arc<ObjectStoreLsmTreeCore>,
+    raft_node: u64,
+
+    core: Arc<ObjectStoreLsmTreeCore>,
+}
+
+impl std::fmt::Debug for ObjectStoreLsmTree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ObjectStoreLsmTree")
+            .field("raft_node", &self.raft_node)
+            .finish()
+    }
 }
 
 impl ObjectStoreLsmTree {
     pub fn new(options: ObjectStoreLsmTreeOptions) -> Self {
         Self {
-            inner: Arc::new(ObjectStoreLsmTreeCore::new(options)),
+            raft_node: options.raft_node,
+
+            core: Arc::new(ObjectStoreLsmTreeCore::new(options)),
         }
     }
 
@@ -251,6 +264,7 @@ impl ObjectStoreLsmTree {
     /// The interface exposes `sequence` to user for the compatibility with upper system. It's
     /// caller's responsibility to ensure that the new sequence is higher than the old one on the
     /// same key. Otherwise there will be consistency problems.
+    #[tracing::instrument(level = "trace")]
     pub async fn put(
         &self,
         key: &Bytes,
@@ -258,7 +272,7 @@ impl ObjectStoreLsmTree {
         sequence: u64,
         apply_index: u64,
     ) -> Result<()> {
-        self.inner
+        self.core
             .write(key, Some(value), sequence, apply_index)
             .await
     }
@@ -270,8 +284,9 @@ impl ObjectStoreLsmTree {
     /// The interface exposes `sequence` to user for the compatibility with upper system. It's
     /// caller's responsibility to ensure that the new sequence is higher than the old one on the
     /// same key. Otherwise there will be consistency problems.
+    #[tracing::instrument(level = "trace")]
     pub async fn delete(&self, key: &Bytes, sequence: u64, apply_index: u64) -> Result<()> {
-        self.inner.write(key, None, sequence, apply_index).await
+        self.core.write(key, None, sequence, apply_index).await
     }
 
     /// Get the value of the given `key` in LSM-Tree with given `sequence`.
@@ -281,15 +296,18 @@ impl ObjectStoreLsmTree {
     /// The interface exposes `sequence` to user for the compatibility with upper system. It's
     /// caller's responsibility to ensure that the new sequence is higher than the old one on the
     /// same key. Otherwise there will be consistency problems.
+    #[tracing::instrument(level = "trace")]
     pub async fn get(&self, key: &Bytes, sequence: u64) -> Result<Option<Bytes>> {
-        self.inner.get(key, sequence).await
+        self.core.get(key, sequence).await
     }
 
+    #[tracing::instrument(level = "trace")]
     pub fn get_oldest_immutable_memtable(&self) -> Option<Memtable> {
-        self.inner.get_oldest_immutable_memtable()
+        self.core.get_oldest_immutable_memtable()
     }
 
+    #[tracing::instrument(level = "trace")]
     pub fn drop_oldest_immutable_memtable(&self) -> MemtableWithCtx {
-        self.inner.drop_oldest_immutable_memtable()
+        self.core.drop_oldest_immutable_memtable()
     }
 }
