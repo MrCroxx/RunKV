@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use futures_util::StreamExt;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use runkv_common::channel_pool::ChannelPool;
@@ -26,7 +25,7 @@ use runkv_proto::wheel::{
     AddEndpointsRequest, AddEndpointsResponse, AddKeyRangeRequest, AddKeyRangeResponse,
     RaftRequest, RaftResponse,
 };
-use tonic::{Request, Response, Status, Streaming};
+use tonic::{Request, Response, Status};
 use tracing::{trace_span, Instrument};
 
 use crate::components::command::Command;
@@ -380,23 +379,15 @@ impl WheelService for Wheel {
 impl RaftService for Wheel {
     async fn raft(
         &self,
-        request: Request<Streaming<RaftRequest>>,
+        request: Request<RaftRequest>,
     ) -> core::result::Result<Response<RaftResponse>, Status> {
-        let mut stream = request.into_inner();
-
-        while let Some(request) = stream.next().await {
-            let req = request?;
-            let msg = bincode::deserialize(&req.data)
-                .map_err(Error::serde_err)
-                .map_err(internal)?;
-            self.inner
-                .raft_network
-                .recv(vec![msg])
-                .await
-                .map_err(internal)?;
-        }
-
-        Ok(Response::new(RaftResponse::default()))
+        let req = request.into_inner();
+        let msgs = bincode::deserialize(&req.data)
+            .map_err(Error::serde_err)
+            .map_err(internal)?;
+        self.inner.raft_network.recv(msgs).await.map_err(internal)?;
+        let rsp = RaftResponse::default();
+        Ok(Response::new(rsp))
     }
 }
 
