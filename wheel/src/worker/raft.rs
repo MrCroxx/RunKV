@@ -21,84 +21,67 @@ use crate::error::{Error, Result};
 const RAFT_HEARTBEAT_TICK_DURATION: Duration = Duration::from_millis(100);
 
 lazy_static! {
-    static ref RAFT_APPEND_LOG_ENTRIES_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
+    static ref RAFT_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
         prometheus::register_histogram_vec!(
-            "raft_append_log_entries_latency_histogram_vec",
-            "raft append log entries latency histogram vec",
-            &["node", "group", "raft_node"]
+            "raft_latency_histogram_vec",
+            "raft latency histogram vec",
+            &["op", "node", "group", "raft_node"]
         )
         .unwrap();
-    static ref RAFT_APPEND_LOG_ENTRIES_BYTES_GAUGE_VEC: prometheus::GaugeVec =
-        prometheus::register_gauge_vec!(
-            "raft_append_log_entries_bytes_gauge_vec",
-            "raft append log entries bytes gauge vec",
-            &["node", "group", "raft_node"]
-        )
-        .unwrap();
-    static ref RAFT_APPLY_LOG_ENTRIES_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
-        prometheus::register_histogram_vec!(
-            "raft_apply_log_entries_latency_histogram_vec",
-            "raft apply log entries latency histogram vec",
-            &["node", "group", "raft_node"]
-        )
-        .unwrap();
-    static ref RAFT_SEND_MESSAGES_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
-        prometheus::register_histogram_vec!(
-            "raft_send_messages_latency_histogram_vec",
-            "raft send messages latency histogram vec",
-            &["node", "group", "raft_node"]
-        )
-        .unwrap();
-    static ref RAFT_SEND_MESSAGES_BYTES_GAUGE_VEC: prometheus::GaugeVec =
-        prometheus::register_gauge_vec!(
-            "raft_send_messages_bytes_gauge_vec",
-            "raft send messages bytes gauge vec",
-            &["node", "group", "raft_node"]
-        )
-        .unwrap();
+    static ref RAFT_THROUGHPUT_GAUGE_VEC: prometheus::GaugeVec = prometheus::register_gauge_vec!(
+        "raft_throughput_gauge_vec",
+        "raft throughput gauge vec",
+        &["op", "node", "group", "raft_node"]
+    )
+    .unwrap();
 }
 
 struct RaftMetrics {
     append_log_entries_latency_histogram: prometheus::Histogram,
-    append_log_entries_bytes_gauge: prometheus::Gauge,
+    append_log_entries_throughput_gauge: prometheus::Gauge,
     apply_log_entries_latency_histogram: prometheus::Histogram,
     send_messages_latency_histogram: prometheus::Histogram,
-    send_messages_bytes_gauge: prometheus::Gauge,
+    send_messages_throughput_gauge: prometheus::Gauge,
 }
 
 impl RaftMetrics {
     fn new(node: u64, group: u64, raft_node: u64) -> Self {
         Self {
-            append_log_entries_latency_histogram: RAFT_APPEND_LOG_ENTRIES_LATENCY_HISTOGRAM_VEC
+            append_log_entries_latency_histogram: RAFT_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&[
+                    "append_log_entries",
                     &node.to_string(),
                     &group.to_string(),
                     &raft_node.to_string(),
                 ])
                 .unwrap(),
-            append_log_entries_bytes_gauge: RAFT_APPEND_LOG_ENTRIES_BYTES_GAUGE_VEC
+            append_log_entries_throughput_gauge: RAFT_THROUGHPUT_GAUGE_VEC
                 .get_metric_with_label_values(&[
+                    "append_log_entries",
                     &node.to_string(),
                     &group.to_string(),
                     &raft_node.to_string(),
                 ])
                 .unwrap(),
-            apply_log_entries_latency_histogram: RAFT_APPLY_LOG_ENTRIES_LATENCY_HISTOGRAM_VEC
+            apply_log_entries_latency_histogram: RAFT_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&[
+                    "apply_log_entries",
                     &node.to_string(),
                     &group.to_string(),
                     &raft_node.to_string(),
                 ])
                 .unwrap(),
-            send_messages_latency_histogram: RAFT_SEND_MESSAGES_LATENCY_HISTOGRAM_VEC
+            send_messages_latency_histogram: RAFT_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&[
+                    "send_messages",
                     &node.to_string(),
                     &group.to_string(),
                     &raft_node.to_string(),
                 ])
                 .unwrap(),
-            send_messages_bytes_gauge: RAFT_SEND_MESSAGES_BYTES_GAUGE_VEC
+            send_messages_throughput_gauge: RAFT_THROUGHPUT_GAUGE_VEC
                 .get_metric_with_label_values(&[
+                    "send_messages",
                     &node.to_string(),
                     &group.to_string(),
                     &raft_node.to_string(),
@@ -466,7 +449,9 @@ where
         self.metrics
             .send_messages_latency_histogram
             .observe(elapsed.as_secs_f64());
-        self.metrics.send_messages_bytes_gauge.add(bytes as f64);
+        self.metrics
+            .send_messages_throughput_gauge
+            .add(bytes as f64);
         Ok(())
     }
 
@@ -529,7 +514,7 @@ where
             .append_log_entries_latency_histogram
             .observe(elapsed.as_secs_f64());
         self.metrics
-            .append_log_entries_bytes_gauge
+            .append_log_entries_throughput_gauge
             .add(bytes as f64);
         Ok(())
     }

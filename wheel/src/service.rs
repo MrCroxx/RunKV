@@ -36,39 +36,11 @@ use crate::meta::MetaStoreRef;
 use crate::worker::raft::Proposal;
 
 lazy_static! {
-    static ref KV_SERVICE_GET_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
+    static ref KV_SERVICE_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
         prometheus::register_histogram_vec!(
-            "kv_service_get_latency_histogram_vec",
-            "kv service get latency histogram vec",
-            &["node"]
-        )
-        .unwrap();
-    static ref KV_SERVICE_PUT_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
-        prometheus::register_histogram_vec!(
-            "kv_service_put_latency_histogram_vec",
-            "kv service put latency histogram vec",
-            &["node"]
-        )
-        .unwrap();
-    static ref KV_SERVICE_DELETE_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
-        prometheus::register_histogram_vec!(
-            "kv_service_delete_latency_histogram_vec",
-            "kv service delete latency histogram vec",
-            &["node"]
-        )
-        .unwrap();
-    static ref KV_SERVICE_SNAPSHOT_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
-        prometheus::register_histogram_vec!(
-            "kv_service_snapshot_latency_histogram_vec",
-            "kv service snapshot latency histogram vec",
-            &["node"]
-        )
-        .unwrap();
-    static ref KV_SERVICE_TXN_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
-        prometheus::register_histogram_vec!(
-            "kv_service_txn_latency_histogram_vec",
-            "kv service txn latency histogram vec",
-            &["node"]
+            "kv_service_latency_histogram_vec",
+            "kv service latency histogram vec",
+            &["service", "node"]
         )
         .unwrap();
 }
@@ -84,20 +56,20 @@ struct WheelServiceMetrics {
 impl WheelServiceMetrics {
     fn new(node: u64) -> Self {
         Self {
-            kv_service_get_latency_histogram_vec: KV_SERVICE_GET_LATENCY_HISTOGRAM_VEC
-                .get_metric_with_label_values(&[&node.to_string()])
+            kv_service_get_latency_histogram_vec: KV_SERVICE_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&["get", &node.to_string()])
                 .unwrap(),
-            kv_service_put_latency_histogram_vec: KV_SERVICE_PUT_LATENCY_HISTOGRAM_VEC
-                .get_metric_with_label_values(&[&node.to_string()])
+            kv_service_put_latency_histogram_vec: KV_SERVICE_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&["put", &node.to_string()])
                 .unwrap(),
-            kv_service_delete_latency_histogram_vec: KV_SERVICE_DELETE_LATENCY_HISTOGRAM_VEC
-                .get_metric_with_label_values(&[&node.to_string()])
+            kv_service_delete_latency_histogram_vec: KV_SERVICE_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&["delete", &node.to_string()])
                 .unwrap(),
-            kv_service_snapshot_latency_histogram_vec: KV_SERVICE_SNAPSHOT_LATENCY_HISTOGRAM_VEC
-                .get_metric_with_label_values(&[&node.to_string()])
+            kv_service_snapshot_latency_histogram_vec: KV_SERVICE_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&["snapshot", &node.to_string()])
                 .unwrap(),
-            kv_service_txn_latency_histogram_vec: KV_SERVICE_TXN_LATENCY_HISTOGRAM_VEC
-                .get_metric_with_label_values(&[&node.to_string()])
+            kv_service_txn_latency_histogram_vec: KV_SERVICE_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&["txn", &node.to_string()])
                 .unwrap(),
         }
     }
