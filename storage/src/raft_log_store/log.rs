@@ -45,11 +45,11 @@ pub struct WriteHandle {
 
 struct Writer {
     entries: Vec<Entry>,
-    tx: oneshot::Sender<WriteHandle>,
+    tx: oneshot::Sender<Vec<WriteHandle>>,
 }
 
 impl Writer {
-    fn new(entries: Vec<Entry>, tx: oneshot::Sender<WriteHandle>) -> Self {
+    fn new(entries: Vec<Entry>, tx: oneshot::Sender<Vec<WriteHandle>>) -> Self {
         Self { entries, tx }
     }
 }
@@ -151,7 +151,10 @@ impl Log {
     }
 
     /// Append [`entries`] to log file.
-    pub async fn append(&self, entries: Vec<Entry>) -> Result<WriteHandle> {
+    pub async fn append(&self, entries: Vec<Entry>) -> Result<Vec<WriteHandle>> {
+        let start = Instant::now();
+        let mut total_size = 0;
+
         let (tx, rx) = oneshot::channel();
         let writer = Writer::new(entries, tx);
         // Append entries to queue.
@@ -180,17 +183,27 @@ impl Log {
 
             for writer in writers {
                 let mut file = self.core.active_file.write().await;
+                let mut buf = Vec::with_capacity(DEFAULT_BUFFER_SIZE);
+
+                let mut entry_handles = Vec::with_capacity(writer.entries.len());
 
                 let file_id = self.core.first_log_file_id.load(Ordering::Acquire)
                     + self.core.frozen_files.read().await.len() as u64;
-                let offset = self.core.active_file_len.load(Ordering::Acquire);
-                let mut buf = Vec::with_capacity(DEFAULT_BUFFER_SIZE);
 
+                let offset = self.core.active_file_len.load(Ordering::Acquire);
                 for entry in writer.entries {
+                    let entry_offset = offset + buf.len();
                     entry.encode(&mut buf);
+                    let entry_len = offset + buf.len() - entry_offset;
+                    entry_handles.push(WriteHandle {
+                        file_id,
+                        offset: entry_offset,
+                        len: entry_len,
+                    });
                 }
                 file.write_all(&buf).await?;
                 let len = buf.len();
+                total_size += len;
                 sync_size += len;
                 self.core
                     .active_file_len
@@ -201,9 +214,9 @@ impl Log {
                     let now = Instant::now();
                     file.sync_all().await?;
                     self.metrics
-                        .sync_duration_histogram
+                        .sync_latency_histogram
                         .observe(now.elapsed().as_secs_f64());
-                    self.metrics.sync_bytes_guage.add(sync_size as f64);
+                    self.metrics.sync_throughput_guage.add(sync_size as f64);
                     sync_size = 0;
 
                     // Rotate active file.
@@ -212,11 +225,11 @@ impl Log {
                     self.core.active_file_len.store(0, Ordering::Release);
 
                     // Sync dir.
-                    let now = Instant::now();
+                    let start_sync = Instant::now();
                     File::open(&self.path).await?.sync_all().await?;
                     self.metrics
-                        .sync_duration_histogram
-                        .observe(now.elapsed().as_secs_f64());
+                        .sync_latency_histogram
+                        .observe(start_sync.elapsed().as_secs_f64());
 
                     trace!(
                         "rotate log from {} to {}",
@@ -231,20 +244,16 @@ impl Log {
                 }
 
                 txs.push(writer.tx);
-                handles.push(WriteHandle {
-                    file_id,
-                    offset,
-                    len,
-                });
+                handles.push(entry_handles);
             }
 
             if sync_size > 0 {
                 let now = Instant::now();
                 self.core.active_file.write().await.sync_data().await?;
                 self.metrics
-                    .sync_duration_histogram
+                    .sync_latency_histogram
                     .observe(now.elapsed().as_secs_f64());
-                self.metrics.sync_bytes_guage.add(sync_size as f64);
+                self.metrics.sync_throughput_guage.add(sync_size as f64);
             }
 
             for (tx, handle) in txs.into_iter().zip(handles.into_iter()) {
@@ -257,6 +266,13 @@ impl Log {
         let handle = rx.await.map_err(Error::err)?;
 
         self.core.write.release();
+
+        self.metrics
+            .append_log_latency_histogram
+            .observe(start.elapsed().as_secs_f64());
+        self.metrics
+            .append_log_throughput_guage
+            .add(total_size as f64);
 
         Ok(handle)
     }

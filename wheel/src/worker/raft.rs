@@ -332,7 +332,7 @@ where
         }
     }
 
-    #[tracing::instrument(level = "trace")]
+    // #[tracing::instrument(level = "trace")]
     async fn tick(&mut self) {
         self.raft.tick().await;
     }
@@ -506,9 +506,7 @@ where
             batches.len(),
             batches
         );
-        for batch in batches {
-            self.raft_log_store.append(batch).await?;
-        }
+        self.raft_log_store.append(batches).await?;
         let elapsed = start.elapsed();
         self.metrics
             .append_log_entries_latency_histogram

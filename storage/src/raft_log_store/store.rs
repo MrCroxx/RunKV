@@ -1,11 +1,12 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use futures_async_stream::for_await;
 use tracing::trace;
 
 use super::block_cache::BlockCache;
 use super::entry::{Compact, Entry as LogEntry, Kv, Mask, RaftLogBatch, Truncate};
-use super::log::{Log, LogOptions, WriteHandle};
+use super::log::{Log, LogOptions};
 use super::mem::{EntryIndex, MemStates};
 use super::metrics::{RaftLogStoreMetrics, RaftLogStoreMetricsRef};
 use crate::error::Result;
@@ -27,12 +28,21 @@ pub struct RaftLogStoreOptions {
     pub block_cache_capacity: usize,
 }
 
+struct AppendContext {
+    group: u64,
+    first_index: u64,
+    raw: Vec<u8>,
+    data_segment_offset: usize,
+    data_segment_len: usize,
+    indices: Vec<EntryIndex>,
+}
+
 struct RaftLogStoreCore {
     log: Log,
     states: MemStates,
     block_cache: BlockCache,
 
-    _metrics: RaftLogStoreMetricsRef,
+    metrics: RaftLogStoreMetricsRef,
 }
 
 /// [`RaftLogStore`] is designed for storing raft log entries and some small kv pairs from multiple
@@ -117,9 +127,9 @@ impl RaftLogStore {
             core: Arc::new(RaftLogStoreCore {
                 log,
                 states,
-                block_cache: BlockCache::new(options.block_cache_capacity),
+                block_cache: BlockCache::new(options.block_cache_capacity, metrics.clone()),
 
-                _metrics: metrics,
+                metrics,
             }),
         })
     }
@@ -137,49 +147,78 @@ impl RaftLogStore {
     }
 
     /// Append raft log batch to [`RaftLogStore`].
-    pub async fn append(&self, mut batch: RaftLogBatch) -> Result<()> {
-        let (data_segment_offset, data_segment_len) = batch.data_segment_location();
-        let group = batch.group();
-        let term = batch.term();
-        let first_index = batch.first_index();
+    pub async fn append(&self, batches: Vec<RaftLogBatch>) -> Result<()> {
+        let start = Instant::now();
 
-        let mut indices = Vec::with_capacity(batch.len());
-        for i in 0..batch.len() {
-            let (offset, len) = batch.location(i);
-            let index = EntryIndex {
-                term,
-                ctx: batch.ctx(i).to_vec(),
-                file_id: 0,
-                block_offset: 0,
-                block_len: 0,
-                offset,
-                len,
-            };
-            indices.push(index);
+        let mut ctxs = Vec::with_capacity(batches.len());
+        let mut entries = Vec::with_capacity(batches.len());
+
+        for mut batch in batches {
+            // Initialize entry indices before write log.
+            let mut indices = Vec::with_capacity(batch.len());
+            let (data_segment_offset, data_segment_len) = batch.data_segment_location();
+            let group = batch.group();
+            let term = batch.term();
+            let first_index = batch.first_index();
+            for i in 0..batch.len() {
+                let (offset, len) = batch.location(i);
+                let index = EntryIndex {
+                    term,
+                    ctx: batch.ctx(i).to_vec(),
+                    file_id: 0,
+                    block_offset: 0,
+                    block_len: 0,
+                    offset,
+                    len,
+                };
+                indices.push(index);
+            }
+
+            // Collect write entries.
+            let raw = batch.take_raw();
+            let entry = LogEntry::RaftLogBatch(batch);
+
+            entries.push(entry);
+            ctxs.push(AppendContext {
+                group,
+                first_index,
+                raw,
+                data_segment_offset,
+                data_segment_len,
+                indices,
+            });
         }
 
-        let raw = batch.take_raw();
-        let entry = LogEntry::RaftLogBatch(batch);
-        let WriteHandle {
-            file_id,
-            offset: write_offset,
-            len: _,
-        } = self.core.log.append(vec![entry]).await?;
+        // Append log.
+        let handles = self.core.log.append(entries).await?;
 
-        let block_offset = write_offset + data_segment_offset + 1;
-        let block_len = data_segment_len;
-        for index in indices.iter_mut() {
-            index.file_id = file_id;
-            index.block_offset = block_offset;
-            index.block_len = block_len;
+        for (mut ctx, handle) in ctxs.into_iter().zip(handles.into_iter()) {
+            let file_id = handle.file_id;
+            let block_offset = handle.offset + ctx.data_segment_offset + 1;
+            let block_len = ctx.data_segment_len;
+            for index in ctx.indices.iter_mut() {
+                index.file_id = file_id;
+                index.block_offset = block_offset;
+                index.block_len = block_len;
+            }
+
+            // Fill block cache.
+            self.core
+                .block_cache
+                .insert(file_id, block_offset, Arc::new(ctx.raw))
+                .await;
+
+            // Update memory states.
+            self.core
+                .states
+                .append(ctx.group, ctx.first_index, ctx.indices)
+                .await?;
         }
 
         self.core
-            .block_cache
-            .insert(file_id, block_offset, Arc::new(raw))
-            .await;
-
-        self.core.states.append(group, first_index, indices).await?;
+            .metrics
+            .append_latency_histogram
+            .observe(start.elapsed().as_secs_f64());
 
         Ok(())
     }
@@ -391,7 +430,9 @@ mod tests {
         store.add_group(3).await.unwrap();
         store.add_group(4).await.unwrap();
         for batch in batches {
-            store.append(batch).await.unwrap();
+            // FIXME: Currently one log writer cannot rotate log file internally, so we need to
+            // append batch one by one.
+            store.append(vec![batch]).await.unwrap();
         }
         assert_eq!(store.core.log.frozen_file_count().await, 4);
         for group in 1..=4 {

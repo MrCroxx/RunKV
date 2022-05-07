@@ -106,6 +106,7 @@ impl RaftManager {
     pub async fn create_raft_node(&self, group: u64, raft_node: u64) -> Result<()> {
         // Build Lsm-tree.
         let lsm_tree_options = ObjectStoreLsmTreeOptions {
+            raft_node,
             sstable_store: self.sstable_store.clone(),
             write_buffer_capacity: self.lsm_tree_options.write_buffer_capacity,
             version_manager: self.version_manager.clone(),

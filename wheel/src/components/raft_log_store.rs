@@ -52,8 +52,8 @@ impl RaftGroupLogStore {
         Self { group, core }
     }
 
-    pub async fn append(&self, batch: RaftLogBatch) -> Result<()> {
-        self.core.append(batch).await.map_err(Error::StorageError)
+    pub async fn append(&self, batches: Vec<RaftLogBatch>) -> Result<()> {
+        self.core.append(batches).await.map_err(Error::StorageError)
     }
 
     pub async fn put(&self, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
@@ -282,10 +282,9 @@ mod tests {
 
         let mut builder = RaftLogBatchBuilder::default();
         builder.add(1, 1, 1, &[b'c'; 16], &[b'd'; 16]);
-        let mut batches = builder.build();
-        let batch = batches.remove(0);
+        let batches = builder.build();
 
-        raft_node.append(batch).await.unwrap();
+        raft_node.append(batches).await.unwrap();
 
         let l1 = raft_node.last_index().await;
         let l2 = raft_node_clone.last_index().await;
