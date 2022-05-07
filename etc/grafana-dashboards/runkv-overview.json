@@ -1756,38 +1756,11 @@
             "uid": "PEDE6B306CC9C0CD0"
           },
           "editorMode": "code",
-          "exemplar": false,
-          "expr": "histogram_quantile(0.5, sum(irate(raft_log_store_batch_writers_histogram_vec_bucket[1m])) by (le, instance))",
-          "format": "time_series",
-          "instant": false,
-          "interval": "",
-          "legendFormat": "p50-{{instance}}",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "PEDE6B306CC9C0CD0"
-          },
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.9, sum(irate(raft_log_store_batch_writers_histogram_vec_bucket[1m])) by (le, instance))",
+          "expr": "irate(raft_log_store_batch_writers_histogram_vec_sum[1m]) / irate(raft_log_store_batch_writers_histogram_vec_count[1m])",
           "hide": false,
-          "legendFormat": "p90-{{instance}}",
+          "legendFormat": "avg-{{instance}}-{{node}}",
           "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "PEDE6B306CC9C0CD0"
-          },
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum(irate(raft_log_store_batch_writers_histogram_vec_bucket[1m])) by (le, instance))",
-          "hide": false,
-          "legendFormat": "p99-{{instance}}",
-          "range": true,
-          "refId": "C"
+          "refId": "D"
         }
       ],
       "title": "Batch Writers - Instance Count",

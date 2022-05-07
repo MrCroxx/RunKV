@@ -2,7 +2,6 @@ use std::collections::btree_map::{BTreeMap, Entry};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_util::stream;
 use itertools::Itertools;
 use runkv_common::channel_pool::ChannelPool;
 use runkv_proto::wheel::raft_service_client::RaftServiceClient;
@@ -51,12 +50,12 @@ impl GrpcRaftClient {
 #[async_trait]
 impl RaftClient for GrpcRaftClient {
     async fn send(&mut self, msgs: Vec<raft::prelude::Message>) -> Result<()> {
-        let request = Request::new(stream::iter(msgs.into_iter().map(|msg| {
-            // TODO: Handle serde error.
-            let data = bincode::serialize(&msg).map_err(Error::serde_err).unwrap();
-            RaftRequest { data }
-        })));
-        self.client.raft(request).await.map_err(Error::RpcStatus)?;
+        let data = bincode::serialize(&msgs).map_err(Error::serde_err)?;
+        let req = RaftRequest { data };
+        self.client
+            .raft(Request::new(req))
+            .await
+            .map_err(Error::RpcStatus)?;
         Ok(())
     }
 }
