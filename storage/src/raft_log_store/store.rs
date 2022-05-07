@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use futures_async_stream::for_await;
 use tracing::trace;
@@ -41,7 +42,7 @@ struct RaftLogStoreCore {
     states: MemStates,
     block_cache: BlockCache,
 
-    _metrics: RaftLogStoreMetricsRef,
+    metrics: RaftLogStoreMetricsRef,
 }
 
 /// [`RaftLogStore`] is designed for storing raft log entries and some small kv pairs from multiple
@@ -126,9 +127,9 @@ impl RaftLogStore {
             core: Arc::new(RaftLogStoreCore {
                 log,
                 states,
-                block_cache: BlockCache::new(options.block_cache_capacity),
+                block_cache: BlockCache::new(options.block_cache_capacity, metrics.clone()),
 
-                _metrics: metrics,
+                metrics,
             }),
         })
     }
@@ -147,6 +148,8 @@ impl RaftLogStore {
 
     /// Append raft log batch to [`RaftLogStore`].
     pub async fn append(&self, batches: Vec<RaftLogBatch>) -> Result<()> {
+        let start = Instant::now();
+
         let mut ctxs = Vec::with_capacity(batches.len());
         let mut entries = Vec::with_capacity(batches.len());
 
@@ -211,6 +214,11 @@ impl RaftLogStore {
                 .append(ctx.group, ctx.first_index, ctx.indices)
                 .await?;
         }
+
+        self.core
+            .metrics
+            .append_latency_histogram
+            .observe(start.elapsed().as_secs_f64());
 
         Ok(())
     }
