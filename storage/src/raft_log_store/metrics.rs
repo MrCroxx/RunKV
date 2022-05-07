@@ -31,11 +31,18 @@ lazy_static! {
             &["node"]
         )
         .unwrap();
+    static ref RAFT_LOG_STORE_SYNC_SIZE_HISTOGRAM_VEC: prometheus::HistogramVec =
+        prometheus::register_histogram_vec!(
+            "raft_log_store_sync_size_histogram_vec",
+            "raft log store sync size histogram vec",
+            &["node"]
+        )
+        .unwrap();
 }
 
 pub struct RaftLogStoreMetrics {
     pub sync_latency_histogram: prometheus::Histogram,
-    pub sync_throughput_guage: prometheus::Gauge,
+    pub sync_size_histogram: prometheus::Histogram,
 
     pub append_latency_histogram: prometheus::Histogram,
 
@@ -57,8 +64,8 @@ impl RaftLogStoreMetrics {
             sync_latency_histogram: RAFT_LOG_STORE_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&["sync", &node.to_string()])
                 .unwrap(),
-            sync_throughput_guage: RAFT_LOG_STORE_THROUGHPUT_GAUGE_VEC
-                .get_metric_with_label_values(&["sync", &node.to_string()])
+            sync_size_histogram: RAFT_LOG_STORE_SYNC_SIZE_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[&node.to_string()])
                 .unwrap(),
 
             append_latency_histogram: RAFT_LOG_STORE_LATENCY_HISTOGRAM_VEC

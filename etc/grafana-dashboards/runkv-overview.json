@@ -2663,7 +2663,7 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisLabel": "Throughput",
+            "axisLabel": "Size",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -2703,7 +2703,7 @@
               }
             ]
           },
-          "unit": "binBps"
+          "unit": "bytes"
         },
         "overrides": []
       },
@@ -2732,14 +2732,14 @@
             "uid": "PEDE6B306CC9C0CD0"
           },
           "editorMode": "code",
-          "expr": "sum(irate(raft_log_store_throughput_gauge_vec{ op=\"sync\" }[1m])) by (instance)",
+          "expr": "irate(raft_log_store_sync_size_histogram_vec_sum[1m]) / irate(raft_log_store_sync_size_histogram_vec_count[1m])",
           "hide": false,
           "legendFormat": "bandwitdh-{{instance}}",
           "range": true,
           "refId": "C"
         }
       ],
-      "title": "Sync - Instance Throughput",
+      "title": "Sync Size - Instance",
       "type": "timeseries"
     },
     {
@@ -3710,7 +3710,7 @@
     "list": []
   },
   "time": {
-    "from": "now-30m",
+    "from": "now-15m",
     "to": "now"
   },
   "timepicker": {},
