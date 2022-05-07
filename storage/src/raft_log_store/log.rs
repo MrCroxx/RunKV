@@ -162,6 +162,7 @@ impl Log {
 
         if is_leader {
             let mut file = self.core.active_file.write().await;
+            let mut offset = self.core.active_file_len.load(Ordering::Acquire);
             let mut buf = Vec::with_capacity(DEFAULT_BUFFER_SIZE);
 
             // Take writer batch.
@@ -173,7 +174,6 @@ impl Log {
                 .batch_writers_histogram
                 .observe(writers.len() as f64);
 
-            let mut sync_size = 0;
             let mut txs = Vec::with_capacity(writers.len());
             let mut handles = Vec::with_capacity(writers.len());
 
@@ -183,11 +183,11 @@ impl Log {
                 let file_id = self.core.first_log_file_id.load(Ordering::Acquire)
                     + self.core.frozen_files.read().await.len() as u64;
 
-                let offset = self.core.active_file_len.load(Ordering::Acquire);
                 for entry in writer.entries {
                     let entry_offset = offset + buf.len();
                     entry.encode(&mut buf);
                     let entry_len = offset + buf.len() - entry_offset;
+                    total_size += entry_len;
                     entry_handles.push(WriteHandle {
                         file_id,
                         offset: entry_offset,
@@ -195,16 +195,10 @@ impl Log {
                     });
                 }
 
-                let len = buf.len();
-                total_size += len;
-                sync_size += len;
-                self.core
-                    .active_file_len
-                    .store(offset + len, Ordering::Release);
-
-                if offset + len >= self.log_file_capacity {
+                if offset + buf.len() >= self.log_file_capacity {
                     // Force write buffer.
                     file.write_all(&buf).await?;
+                    self.metrics.sync_size_histogram.observe(buf.len() as f64);
                     buf.clear();
 
                     // Sync old active file.
@@ -213,13 +207,12 @@ impl Log {
                     self.metrics
                         .sync_latency_histogram
                         .observe(now.elapsed().as_secs_f64());
-                    self.metrics.sync_size_histogram.observe(sync_size as f64);
-                    sync_size = 0;
 
                     // Rotate active file.
                     let new_active_file_id = file_id + 1;
                     *file = new_active_file(&self.path, new_active_file_id).await?;
                     self.core.active_file_len.store(0, Ordering::Release);
+                    offset = 0;
 
                     // Sync dir.
                     let start_sync = Instant::now();
@@ -244,14 +237,19 @@ impl Log {
                 handles.push(entry_handles);
             }
 
-            if sync_size > 0 {
+            if !buf.is_empty() {
+                self.core
+                    .active_file_len
+                    .store(offset + buf.len(), Ordering::Release);
                 file.write_all(&buf).await?;
+                self.metrics.sync_size_histogram.observe(buf.len() as f64);
+                buf.clear();
+
                 let start_sync = Instant::now();
                 file.sync_data().await?;
                 self.metrics
                     .sync_latency_histogram
                     .observe(start_sync.elapsed().as_secs_f64());
-                self.metrics.sync_size_histogram.observe(sync_size as f64);
             }
 
             for (tx, handle) in txs.into_iter().zip(handles.into_iter()) {
@@ -259,6 +257,7 @@ impl Log {
                     Error::Other(format!("failed to send write handle: {:?}", handle))
                 })?;
             }
+            drop(file);
         }
 
         let handle = rx.await.map_err(Error::err)?;
