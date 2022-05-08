@@ -64,6 +64,7 @@ impl RaftLogStore {
         let metrics = Arc::new(RaftLogStoreMetrics::new(options.node));
 
         let log_options = LogOptions {
+            node: options.node,
             path: options.log_dir_path,
             log_file_capacity: options.log_file_capacity,
 

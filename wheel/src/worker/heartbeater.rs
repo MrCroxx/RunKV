@@ -70,6 +70,7 @@ impl Heartbeater {
                 },
             )),
         });
+
         let mut client = RudderServiceClient::new(
             self.channel_pool
                 .get(self.rudder_node_id)

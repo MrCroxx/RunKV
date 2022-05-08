@@ -11,7 +11,8 @@ use std::time::Duration;
 use futures::future;
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
-use runkv_common::log::{init_runkv_logger, shutdown_runkv_logger};
+use runkv_common::log::init_runkv_logger;
+use runkv_common::time::timestamp;
 use runkv_exhauster::config::ExhausterConfig;
 use runkv_exhauster::{bootstrap_exhauster, build_exhauster_with_object_store};
 use runkv_proto::common::Endpoint;
@@ -63,9 +64,13 @@ async fn add_key_ranges(wheel_client: &mut WheelServiceClient<Channel>, node: u6
     add_key_range(wheel_client, b"k0", b"kz", 10, &[11, 12, 13], node).await;
 }
 
-#[test(tokio::test)]
+#[tokio::test]
 async fn test_concurrent_put_get() {
-    init_runkv_logger("runkv_tests");
+    let _log = init_runkv_logger(
+        "tests",
+        0,
+        &format!("../.run/tmp/test_concurrent_put_get_log/{}/", timestamp()),
+    );
 
     let mut port = crate::port("test_concurrent_put_get");
 

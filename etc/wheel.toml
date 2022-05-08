@@ -1,6 +1,7 @@
 id = 101
 host = "127.0.0.1"
 port = 12401
+log = ".run/log/"
 data_path = "data"
 meta_path = "meta"
 poll_interval = "100ms"
