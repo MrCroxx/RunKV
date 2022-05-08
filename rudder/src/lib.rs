@@ -93,7 +93,7 @@ fn build_sstable_store(
     config: &RudderConfig,
     object_store: ObjectStoreRef,
 ) -> Result<SstableStoreRef> {
-    let block_cache = BlockCache::new(0);
+    let block_cache = BlockCache::new(0, config.id);
     let sstable_store_options = SstableStoreOptions {
         path: config.data_path.clone(),
         object_store,

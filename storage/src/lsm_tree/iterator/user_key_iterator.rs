@@ -177,7 +177,7 @@ mod tests {
 
     async fn build_iterator_for_test(sequence: u64) -> UserKeyIterator {
         let object_store = Arc::new(MemObjectStore::default());
-        let block_cache = BlockCache::new(65536);
+        let block_cache = BlockCache::new(65536, 0);
         let options = SstableStoreOptions {
             path: "path".to_string(),
             object_store,

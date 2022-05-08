@@ -255,7 +255,7 @@ mod tests {
 
     async fn build_iterator_for_test() -> SstableIterator {
         let object_store = Arc::new(MemObjectStore::default());
-        let block_cache = BlockCache::new(65536);
+        let block_cache = BlockCache::new(65536, 0);
         let options = SstableStoreOptions {
             path: "test".to_string(),
             object_store,

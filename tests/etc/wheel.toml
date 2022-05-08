@@ -18,7 +18,7 @@ port = 0
 # bucket = "runkv"
 
 [buffer]
-write_buffer_capacity = "64 KiB"
+write_buffer_capacity = "4 KiB"
 
 [cache]
 block_cache_capacity = "64 KiB"

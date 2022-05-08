@@ -144,6 +144,7 @@ fn build_sstable_store(
             .parse::<ByteSize>()
             .map_err(Error::config_err)?
             .0 as usize,
+        config.id,
     );
     let sstable_store_options = SstableStoreOptions {
         path: config.data_path.clone(),

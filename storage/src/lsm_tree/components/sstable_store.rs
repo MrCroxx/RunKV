@@ -169,7 +169,7 @@ mod tests {
     #[test(tokio::test)]
     async fn test_sstable_store() {
         let object_store = Arc::new(MemObjectStore::default());
-        let block_cache = BlockCache::new(65536);
+        let block_cache = BlockCache::new(65536, 0);
         let options = SstableStoreOptions {
             path: "test".to_string(),
             object_store,
