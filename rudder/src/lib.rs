@@ -51,7 +51,7 @@ pub async fn build_rudder_with_object_store(
 ) -> Result<(Rudder, Vec<BoxedWorker>)> {
     let sstable_store = build_sstable_store(config, object_store)?;
 
-    let version_manager = build_version_manager(config, sstable_store.clone())?;
+    let version_manager = build_version_manager(config, sstable_store.clone()).await?;
 
     let meta_store = build_meta_store(config)?;
 
@@ -109,7 +109,7 @@ fn build_sstable_store(
     Ok(Arc::new(sstable_store))
 }
 
-fn build_version_manager(
+async fn build_version_manager(
     config: &RudderConfig,
     sstable_store: SstableStoreRef,
 ) -> Result<VersionManager> {
@@ -119,7 +119,17 @@ fn build_version_manager(
         levels: vec![vec![]; config.lsm_tree.levels_options.len()],
         sstable_store,
     };
-    Ok(VersionManager::new(version_manager_options))
+    let version_manager = VersionManager::new(version_manager_options);
+    version_manager
+        .update(
+            runkv_proto::manifest::VersionDiff {
+                id: 0,
+                sstable_diffs: vec![],
+            },
+            false,
+        )
+        .await?;
+    Ok(version_manager)
 }
 
 fn build_meta_store(config: &RudderConfig) -> Result<MetaStoreRef> {

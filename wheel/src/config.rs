@@ -8,6 +8,7 @@ pub struct WheelConfig {
     pub id: u64,
     pub host: String,
     pub port: u16,
+    pub log: String,
     pub data_path: String,
     pub meta_path: String,
     pub poll_interval: String,

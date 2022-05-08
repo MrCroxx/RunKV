@@ -37,8 +37,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 toml = "0.4.2"
 tonic = "0.6.2"
 tracing = "0.1"
+tracing-appender = "0.2"
 tracing-opentelemetry = "0.17"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 env_logger = "*"

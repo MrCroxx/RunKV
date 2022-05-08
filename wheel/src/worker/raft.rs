@@ -39,9 +39,14 @@ lazy_static! {
 struct RaftMetrics {
     append_log_entries_latency_histogram: prometheus::Histogram,
     append_log_entries_throughput_gauge: prometheus::Gauge,
+
     apply_log_entries_latency_histogram: prometheus::Histogram,
+
     send_messages_latency_histogram: prometheus::Histogram,
     send_messages_throughput_gauge: prometheus::Gauge,
+
+    handle_ready_latency_histogram: prometheus::Histogram,
+    poll_channel_latency_histogram: prometheus::Histogram,
 }
 
 impl RaftMetrics {
@@ -63,6 +68,7 @@ impl RaftMetrics {
                     &raft_node.to_string(),
                 ])
                 .unwrap(),
+
             apply_log_entries_latency_histogram: RAFT_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&[
                     "apply_log_entries",
@@ -71,6 +77,7 @@ impl RaftMetrics {
                     &raft_node.to_string(),
                 ])
                 .unwrap(),
+
             send_messages_latency_histogram: RAFT_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&[
                     "send_messages",
@@ -82,6 +89,23 @@ impl RaftMetrics {
             send_messages_throughput_gauge: RAFT_THROUGHPUT_GAUGE_VEC
                 .get_metric_with_label_values(&[
                     "send_messages",
+                    &node.to_string(),
+                    &group.to_string(),
+                    &raft_node.to_string(),
+                ])
+                .unwrap(),
+
+            handle_ready_latency_histogram: RAFT_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[
+                    "handle_ready",
+                    &node.to_string(),
+                    &group.to_string(),
+                    &raft_node.to_string(),
+                ])
+                .unwrap(),
+            poll_channel_latency_histogram: RAFT_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[
+                    "poll_channel",
                     &node.to_string(),
                     &group.to_string(),
                     &raft_node.to_string(),
@@ -289,8 +313,10 @@ where
             let mut msgs = Vec::with_capacity(BATCH_SIZE);
             let mut proposals = Vec::with_capacity(BATCH_SIZE);
 
-            let recv_span = trace_span!("recv_span");
-            let recv_span_guard = recv_span.enter();
+            let pool_channel_span = trace_span!("pool_channel_span");
+            let pool_channel_span_guard = pool_channel_span.enter();
+            let start_poll_channel = Instant::now();
+
             for _ in 0..BATCH_SIZE {
                 match self.message_rx.try_recv() {
                     Ok(msg) => msgs.push(msg),
@@ -304,7 +330,11 @@ where
                     Err(e) => return Err(Error::err(e)),
                 }
             }
-            drop(recv_span_guard);
+
+            self.metrics
+                .poll_channel_latency_histogram
+                .observe(start_poll_channel.elapsed().as_secs_f64());
+            drop(pool_channel_span_guard);
 
             for proposal in proposals {
                 self.propose(proposal).await?;
@@ -358,6 +388,8 @@ where
 
     #[tracing::instrument(level = "trace")]
     async fn handle_ready(&mut self) -> Result<()> {
+        let start = Instant::now();
+
         let mut ready = self.raft.ready().await;
 
         // 0. Update soft state.
@@ -400,6 +432,10 @@ where
         // 9. Apply committed logs of light ready.
         self.apply_log_entries(ready.take_committed_entries())
             .await?;
+
+        self.metrics
+            .handle_ready_latency_histogram
+            .observe(start.elapsed().as_secs_f64());
 
         Ok(())
     }
