@@ -38,6 +38,9 @@ const WHEEL_CONFIG_PATH: &str = "etc/wheel.toml";
 const EXHAUSTER_CONFIG_PATH: &str = "etc/exhauster.toml";
 const LSM_TREE_CONFIG_PATH: &str = "etc/lsm_tree.toml";
 
+const CONCURRENCY: u64 = 1000;
+const LOOP: u64 = 3;
+
 async fn add_key_range(
     wheel_client: &mut WheelServiceClient<Channel>,
     start: &[u8],
@@ -168,12 +171,11 @@ async fn test_concurrent_put_get() {
     .await
     .unwrap();
 
-    let futures = (0..1000)
-        .map(|c| {
+    let futures = (0..CONCURRENCY)
+        .map(|i| {
             let channel_clone = channel.clone();
             async move {
-                for t in 0..1 {
-                    let i = t + c;
+                for _ in 0..LOOP {
                     let mut rng = thread_rng();
                     let channel_clone_clone = channel_clone.clone();
                     let mut client = KvServiceClient::new(channel_clone_clone);
