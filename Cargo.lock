@@ -2229,6 +2229,7 @@ dependencies = [
  "bytesize",
  "chrono",
  "clap 3.1.6",
+ "criterion",
  "env_logger",
  "futures",
  "http",

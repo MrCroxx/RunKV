@@ -42,5 +42,12 @@ tracing-opentelemetry = "0.17"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
+criterion = { version = "0.3", features = ["async", "async_tokio"] }
 env_logger = "*"
 test-log = "0.2.10"
+
+[[bench]]
+name = "bench_sharded_hash_map"
+harness = false
+# Uncomment this line if you are generating flame graph.
+# debug = true
