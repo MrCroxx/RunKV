@@ -257,6 +257,7 @@ impl raft::Storage for RaftGroupLogStore {
 mod tests {
     use raft::Storage;
     use runkv_storage::raft_log_store::entry::RaftLogBatchBuilder;
+    use runkv_storage::raft_log_store::log::Persist;
     use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
     use test_log::test;
 
@@ -272,6 +273,7 @@ mod tests {
             log_dir_path: path.to_string(),
             log_file_capacity: 64 << 20,
             block_cache_capacity: 64 << 20,
+            persist: Persist::Sync,
         };
         let raft_log_store = RaftLogStore::open(options).await.unwrap();
 

@@ -29,6 +29,7 @@ meta_cache_capacity = "256 MiB"
 log_dir_path = "/path/to/log/dir"
 log_file_capacity = "64 MiB"
 block_cache_capacity = "256 MiB"
+persist = "sync"
 
 [lsm_tree]
 l1_capacity = "1 MiB"
