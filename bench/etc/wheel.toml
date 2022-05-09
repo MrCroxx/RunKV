@@ -1,0 +1,35 @@
+id = 101
+host = "127.0.0.1"
+port = 12301
+log = ".run/log/"
+data_path = "data"
+meta_path = "meta"
+poll_interval = "100ms"
+heartbeat_interval = "100ms"
+
+[rudder]
+id = 1
+host = "127.0.0.1"
+port = 0
+
+# [minio]
+# url = 'minio://minioadmin:minioadmin@127.0.0.1:9000/runkv'
+
+# [s3]
+# bucket = "runkv"
+
+[buffer]
+write_buffer_capacity = "64 KiB"
+
+[cache]
+block_cache_capacity = "64 KiB"
+meta_cache_capacity = "1 KiB"
+
+[raft_log_store]
+log_dir_path = "/path/to/log/dir"
+log_file_capacity = "64 MiB"
+block_cache_capacity = "256 MiB"
+
+[prometheus]
+host = "127.0.0.1"
+port = 9898

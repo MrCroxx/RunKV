@@ -1,0 +1,31 @@
+[lsm_tree]
+l1_capacity = "32 MiB"
+level_multiplier = 2
+
+trigger_l0_compaction_ssts = 4
+trigger_l0_compaction_interval = "500 ms"
+trigger_lmax_compaction_interval = "5 s"
+trigger_compaction_interval = "2 s"
+
+sstable_capacity = "4 MiB"
+block_capacity = "8 KiB"
+restart_interval = 2
+bloom_false_positive = 0.1
+
+compaction_pin_ttl = "15 s"
+
+[[lsm_tree.levels_options]]
+compaction_strategy = "Overlap"
+compression_algorithm = "None"
+
+[[lsm_tree.levels_options]]
+compaction_strategy = "NonOverlap"
+compression_algorithm = "None"
+
+[[lsm_tree.levels_options]]
+compaction_strategy = "NonOverlap"
+compression_algorithm = "None"
+
+[[lsm_tree.levels_options]]
+compaction_strategy = "NonOverlap"
+compression_algorithm = "Lz4"
