@@ -442,6 +442,10 @@ where
 
     #[tracing::instrument(level = "trace")]
     async fn send_messages(&mut self, messages: Vec<raft::prelude::Message>) -> Result<()> {
+        if messages.is_empty() {
+            return Ok(());
+        }
+
         if cfg!(feature = "tracing") {
             let span = tracing::Span::current();
             for msg in messages.iter() {
@@ -501,13 +505,17 @@ where
 
     #[tracing::instrument(level = "trace")]
     async fn apply_log_entries(&mut self, entries: Vec<raft::prelude::Entry>) -> Result<()> {
-        let start = Instant::now();
         let is_leader = match &self.raft_soft_state {
             None => false,
             Some(ss) => ss.raft_state == raft::StateRole::Leader,
         };
+
+        let start = Instant::now();
+
         self.fsm.apply(self.group, is_leader, entries).await?;
+
         let elapsed = start.elapsed();
+
         self.metrics
             .apply_log_entries_latency_histogram
             .observe(elapsed.as_secs_f64());
@@ -516,6 +524,10 @@ where
 
     #[tracing::instrument(level = "trace")]
     async fn append_log_entries(&mut self, entries: Vec<raft::prelude::Entry>) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+
         let start = Instant::now();
         let mut bytes = 0;
         let mut builder = RaftLogBatchBuilder::default();
@@ -568,6 +580,7 @@ mod tests {
     use assert_matches::assert_matches;
     use runkv_common::tracing_slog_drain::TracingSlogDrain;
     use runkv_common::Worker;
+    use runkv_storage::raft_log_store::log::Persist;
     use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
     use runkv_storage::raft_log_store::RaftLogStore;
     use test_log::test;
@@ -655,6 +668,7 @@ mod tests {
             log_dir_path: path.to_string(),
             log_file_capacity: 64 << 20,
             block_cache_capacity: 64 << 20,
+            persist: Persist::Sync,
         };
         RaftLogStore::open(options).await.unwrap()
     }

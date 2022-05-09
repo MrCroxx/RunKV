@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -19,6 +20,24 @@ use super::DEFAULT_LOG_BATCH_SIZE;
 use crate::error::{Error, Result};
 
 const DEFAULT_BUFFER_SIZE: usize = 64 << 10;
+
+#[derive(Clone, Copy, Debug)]
+pub enum Persist {
+    Flush,
+    Sync,
+}
+
+impl FromStr for Persist {
+    type Err = Error;
+
+    fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+        match s {
+            "sync" => Ok(Self::Sync),
+            "flush" => Ok(Self::Flush),
+            _ => Err(Error::Other(format!("fail to parse {} to Persist", s))),
+        }
+    }
+}
 
 fn filename(id: u64) -> String {
     format!("{:08}", id)
@@ -58,6 +77,7 @@ pub struct LogOptions {
     pub node: u64,
     pub path: String,
     pub log_file_capacity: usize,
+    pub persist: Persist,
 
     pub metrics: RaftLogStoreMetricsRef,
 }
@@ -76,6 +96,7 @@ pub struct Log {
     node: u64,
     path: String,
     log_file_capacity: usize,
+    persist: Persist,
 
     core: Arc<LogCore>,
 
@@ -138,6 +159,7 @@ impl Log {
             node: options.node,
             path: options.path,
             log_file_capacity: options.log_file_capacity,
+            persist: options.persist,
             core: Arc::new(LogCore {
                 active_file: Arc::new(AsyncRwLock::new(active_file)),
                 frozen_files: Arc::new(AsyncRwLock::new(frozen_files)),
@@ -270,7 +292,14 @@ impl Log {
                 buf.clear();
 
                 let start_sync = Instant::now();
-                file.sync_data().await?;
+                match self.persist {
+                    Persist::Flush => {
+                        file.flush().await?;
+                    }
+                    Persist::Sync => {
+                        file.sync_data().await?;
+                    }
+                }
                 self.metrics
                     .sync_latency_histogram
                     .observe(start_sync.elapsed().as_secs_f64());
@@ -373,6 +402,7 @@ mod tests {
             path: tempdir.path().to_str().unwrap().to_string(),
             // Estimated size of each compressed entry is 111.
             log_file_capacity: 100,
+            persist: Persist::Sync,
             metrics: Arc::new(RaftLogStoreMetrics::new(0)),
         };
         let log = Log::open(options.clone()).await.unwrap();

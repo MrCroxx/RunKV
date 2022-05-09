@@ -33,4 +33,5 @@ pub struct RaftLogStoreConfig {
     pub log_dir_path: String,
     pub log_file_capacity: String,
     pub block_cache_capacity: String,
+    pub persist: String,
 }
