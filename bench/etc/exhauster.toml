@@ -1,0 +1,24 @@
+id = 201
+host = "127.0.0.1"
+port = 12302
+data_path = "data"
+meta_path = "meta"
+heartbeat_interval = "1 s"
+
+[rudder]
+id = 1
+host = "127.0.0.1"
+port = 0
+
+[minio]
+url = 'minio://minioadmin:minioadmin@127.0.0.1:9000/runkv'
+
+[s3]
+bucket = "runkv"
+
+[buffer]
+write_buffer_capacity = "64 MiB"
+
+[cache]
+block_cache_capacity = "512 MiB"
+meta_cache_capacity = "256 MiB"

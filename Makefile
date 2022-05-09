@@ -24,3 +24,6 @@ proto_check:
 
 update_ci:
 	cd .github/template && ./generate.sh
+
+bench_kv:
+	RUNKV_METRICS=true RUST_BACKTRACE=1 cargo run --release --package runkv-bench --bin bench_kv

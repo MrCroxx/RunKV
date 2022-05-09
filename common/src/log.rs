@@ -31,8 +31,6 @@ pub fn init_runkv_logger(service: &str, id: u64, log_path: &str) -> LogGuard {
         jaeger_enabled,
     };
 
-    let logger = tracing_subscriber::registry().with(EnvFilter::from_default_env());
-
     let fmt_layer = {
         // Configure RunKV's own crates to log at TRACE level, and ignore all third-party crates.
         let filter = Targets::new()
@@ -48,13 +46,10 @@ pub fn init_runkv_logger(service: &str, id: u64, log_path: &str) -> LogGuard {
             .with_target("events", tracing::Level::WARN);
 
         tracing_subscriber::fmt::layer()
-            .with_test_writer()
             .with_writer(file_appender)
             .with_ansi(false)
             .with_filter(filter)
     };
-
-    let logger = logger.with(fmt_layer);
 
     if jaeger_enabled {
         opentelemetry::global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
@@ -86,9 +81,14 @@ pub fn init_runkv_logger(service: &str, id: u64, log_path: &str) -> LogGuard {
             .with_tracer(tracer)
             .with_filter(filter);
 
-        logger.with(opentelemetry_layer).init();
+        tracing_subscriber::registry()
+            .with(opentelemetry_layer)
+            .init();
     } else {
-        logger.init();
+        tracing_subscriber::registry()
+            .with(EnvFilter::from_default_env())
+            .with(fmt_layer)
+            .init();
     }
 
     guard

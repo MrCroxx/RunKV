@@ -2183,6 +2183,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "runkv-bench"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "bytesize",
+ "clap 3.1.6",
+ "env_logger",
+ "futures",
+ "itertools",
+ "lazy_static",
+ "rand",
+ "runkv-common",
+ "runkv-exhauster",
+ "runkv-proto",
+ "runkv-rudder",
+ "runkv-storage",
+ "runkv-wheel",
+ "tempfile",
+ "test-log",
+ "tokio",
+ "toml",
+ "tonic",
+ "tracing",
+]
+
+[[package]]
 name = "runkv-client"
 version = "0.1.0"
 dependencies = [
