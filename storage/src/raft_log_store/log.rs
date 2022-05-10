@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -10,7 +11,7 @@ use parking_lot::RwLock;
 use tokio::fs::{create_dir_all, read_dir, File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::RwLock as AsyncRwLock;
-use tracing::trace;
+use tracing::{trace, trace_span, Instrument};
 
 use super::entry::Entry;
 use super::error::RaftLogStoreError;
@@ -19,6 +20,24 @@ use super::DEFAULT_LOG_BATCH_SIZE;
 use crate::error::{Error, Result};
 
 const DEFAULT_BUFFER_SIZE: usize = 64 << 10;
+
+#[derive(Clone, Copy, Debug)]
+pub enum Persist {
+    Flush,
+    Sync,
+}
+
+impl FromStr for Persist {
+    type Err = Error;
+
+    fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+        match s {
+            "sync" => Ok(Self::Sync),
+            "flush" => Ok(Self::Flush),
+            _ => Err(Error::Other(format!("fail to parse {} to Persist", s))),
+        }
+    }
+}
 
 fn filename(id: u64) -> String {
     format!("{:08}", id)
@@ -55,8 +74,10 @@ impl Writer {
 
 #[derive(Clone)]
 pub struct LogOptions {
+    pub node: u64,
     pub path: String,
     pub log_file_capacity: usize,
+    pub persist: Persist,
 
     pub metrics: RaftLogStoreMetricsRef,
 }
@@ -72,15 +93,24 @@ struct LogCore {
 
 #[derive(Clone)]
 pub struct Log {
+    node: u64,
     path: String,
     log_file_capacity: usize,
+    persist: Persist,
 
     core: Arc<LogCore>,
 
     metrics: RaftLogStoreMetricsRef,
 }
 
+impl std::fmt::Debug for Log {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Log").field("node", &self.node).finish()
+    }
+}
+
 impl Log {
+    #[tracing::instrument(level = "trace", skip(options))]
     pub async fn open(options: LogOptions) -> Result<Self> {
         create_dir_all(&options.path).await?;
         let (frozen_files, first_log_file_id) = {
@@ -126,8 +156,10 @@ impl Log {
         let active_file = new_active_file(&options.path, active_file_id).await?;
 
         Ok(Self {
+            node: options.node,
             path: options.path,
             log_file_capacity: options.log_file_capacity,
+            persist: options.persist,
             core: Arc::new(LogCore {
                 active_file: Arc::new(AsyncRwLock::new(active_file)),
                 frozen_files: Arc::new(AsyncRwLock::new(frozen_files)),
@@ -146,6 +178,7 @@ impl Log {
     }
 
     /// Append [`entries`] to log file.
+    #[tracing::instrument(level = "trace")]
     pub async fn append(&self, entries: Vec<Entry>) -> Result<Vec<WriteHandle>> {
         let start = Instant::now();
         let mut total_size = 0;
@@ -161,7 +194,12 @@ impl Log {
         };
 
         if is_leader {
-            let mut file = self.core.active_file.write().await;
+            let mut file = self
+                .core
+                .active_file
+                .write()
+                .instrument(trace_span!("wait_queue"))
+                .await;
             let mut offset = self.core.active_file_len.load(Ordering::Acquire);
             let mut buf = Vec::with_capacity(DEFAULT_BUFFER_SIZE);
 
@@ -197,13 +235,15 @@ impl Log {
 
                 if offset + buf.len() >= self.log_file_capacity {
                     // Force write buffer.
-                    file.write_all(&buf).await?;
+                    file.write_all(&buf)
+                        .instrument(trace_span!("write_all"))
+                        .await?;
                     self.metrics.sync_size_histogram.observe(buf.len() as f64);
                     buf.clear();
 
                     // Sync old active file.
                     let now = Instant::now();
-                    file.sync_all().await?;
+                    file.sync_all().instrument(trace_span!("sync_all")).await?;
                     self.metrics
                         .sync_latency_histogram
                         .observe(now.elapsed().as_secs_f64());
@@ -216,7 +256,11 @@ impl Log {
 
                     // Sync dir.
                     let start_sync = Instant::now();
-                    File::open(&self.path).await?.sync_all().await?;
+                    File::open(&self.path)
+                        .await?
+                        .sync_all()
+                        .instrument(trace_span!("sync_all"))
+                        .await?;
                     self.metrics
                         .sync_latency_histogram
                         .observe(start_sync.elapsed().as_secs_f64());
@@ -241,12 +285,21 @@ impl Log {
                 self.core
                     .active_file_len
                     .store(offset + buf.len(), Ordering::Release);
-                file.write_all(&buf).await?;
+                file.write_all(&buf)
+                    .instrument(trace_span!("write_all"))
+                    .await?;
                 self.metrics.sync_size_histogram.observe(buf.len() as f64);
                 buf.clear();
 
                 let start_sync = Instant::now();
-                file.sync_data().await?;
+                match self.persist {
+                    Persist::Flush => {
+                        file.flush().await?;
+                    }
+                    Persist::Sync => {
+                        file.sync_data().await?;
+                    }
+                }
                 self.metrics
                     .sync_latency_histogram
                     .observe(start_sync.elapsed().as_secs_f64());
@@ -272,6 +325,7 @@ impl Log {
         Ok(handle)
     }
 
+    #[tracing::instrument(level = "trace")]
     pub async fn read(&self, log_file_id: u64, offset: u64, len: usize) -> Result<Vec<u8>> {
         let mut frozen_files = self.core.frozen_files.write().await;
         let first_log_file_id = self.core.first_log_file_id.load(Ordering::Acquire);
@@ -344,9 +398,11 @@ mod tests {
     async fn test_pipe_log_recovery() {
         let tempdir = tempfile::tempdir().unwrap();
         let options = LogOptions {
+            node: 1,
             path: tempdir.path().to_str().unwrap().to_string(),
             // Estimated size of each compressed entry is 111.
             log_file_capacity: 100,
+            persist: Persist::Sync,
             metrics: Arc::new(RaftLogStoreMetrics::new(0)),
         };
         let log = Log::open(options.clone()).await.unwrap();

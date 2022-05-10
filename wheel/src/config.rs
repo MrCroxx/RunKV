@@ -8,6 +8,7 @@ pub struct WheelConfig {
     pub id: u64,
     pub host: String,
     pub port: u16,
+    pub log: String,
     pub data_path: String,
     pub meta_path: String,
     pub poll_interval: String,
@@ -32,4 +33,5 @@ pub struct RaftLogStoreConfig {
     pub log_dir_path: String,
     pub log_file_capacity: String,
     pub block_cache_capacity: String,
+    pub persist: String,
 }

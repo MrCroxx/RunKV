@@ -6,7 +6,7 @@ use tracing::trace;
 
 use super::block_cache::BlockCache;
 use super::entry::{Compact, Entry as LogEntry, Kv, Mask, RaftLogBatch, Truncate};
-use super::log::{Log, LogOptions};
+use super::log::{Log, LogOptions, Persist};
 use super::mem::{EntryIndex, MemStates};
 use super::metrics::{RaftLogStoreMetrics, RaftLogStoreMetricsRef};
 use crate::error::Result;
@@ -26,6 +26,7 @@ pub struct RaftLogStoreOptions {
     pub log_dir_path: String,
     pub log_file_capacity: usize,
     pub block_cache_capacity: usize,
+    pub persist: Persist,
 }
 
 struct AppendContext {
@@ -64,8 +65,10 @@ impl RaftLogStore {
         let metrics = Arc::new(RaftLogStoreMetrics::new(options.node));
 
         let log_options = LogOptions {
+            node: options.node,
             path: options.log_dir_path,
             log_file_capacity: options.log_file_capacity,
+            persist: options.persist,
 
             metrics: metrics.clone(),
         };
@@ -422,6 +425,7 @@ mod tests {
             // Estimated size of each compressed entry is 111.
             log_file_capacity: 100,
             block_cache_capacity: 1024,
+            persist: Persist::Sync,
         };
 
         let store = RaftLogStore::open(options.clone()).await.unwrap();
@@ -531,6 +535,7 @@ mod tests {
             // Estimated size of each compressed entry is 111.
             log_file_capacity: 100,
             block_cache_capacity: 1024,
+            persist: Persist::Sync,
         };
 
         let store = RaftLogStore::open(options.clone()).await.unwrap();

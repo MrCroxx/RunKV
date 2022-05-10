@@ -1,9 +1,5 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
-
 use std::collections::HashMap;
 use std::fs::read_to_string;
-use std::ops::Add;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,7 +7,6 @@ use std::time::Duration;
 use futures::future;
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
-use runkv_common::log::{init_runkv_logger, shutdown_runkv_logger};
 use runkv_exhauster::config::ExhausterConfig;
 use runkv_exhauster::{bootstrap_exhauster, build_exhauster_with_object_store};
 use runkv_proto::common::Endpoint;
@@ -36,6 +31,9 @@ const RUDDER_CONFIG_PATH: &str = "etc/rudder.toml";
 const WHEEL_CONFIG_PATH: &str = "etc/wheel.toml";
 const EXHAUSTER_CONFIG_PATH: &str = "etc/exhauster.toml";
 const LSM_TREE_CONFIG_PATH: &str = "etc/lsm_tree.toml";
+
+const CONCURRENCY: u64 = 1000;
+const LOOP: u64 = 3;
 
 async fn add_key_range(
     wheel_client: &mut WheelServiceClient<Channel>,
@@ -65,8 +63,6 @@ async fn add_key_ranges(wheel_client: &mut WheelServiceClient<Channel>, node: u6
 
 #[test(tokio::test)]
 async fn test_concurrent_put_get() {
-    init_runkv_logger("runkv_tests");
-
     let mut port = crate::port("test_concurrent_put_get");
 
     let tempdir = tempfile::tempdir().unwrap();
@@ -163,12 +159,11 @@ async fn test_concurrent_put_get() {
     .await
     .unwrap();
 
-    let futures = (0..1000)
-        .map(|c| {
+    let futures = (0..CONCURRENCY)
+        .map(|i| {
             let channel_clone = channel.clone();
             async move {
-                for t in 0..1 {
-                    let i = t + c;
+                for _ in 0..LOOP {
                     let mut rng = thread_rng();
                     let channel_clone_clone = channel_clone.clone();
                     let mut client = KvServiceClient::new(channel_clone_clone);
@@ -243,11 +238,8 @@ async fn test_concurrent_put_get() {
             }
         })
         .collect_vec();
+
     future::join_all(futures).await;
-
-    drop(tempdir);
-
-    // shutdown_runkv_logger();
 }
 
 fn key(i: u64) -> Vec<u8> {

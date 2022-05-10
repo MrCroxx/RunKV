@@ -224,6 +224,11 @@ async fn build_raft_log_store(config: &WheelConfig) -> Result<RaftLogStore> {
             .parse::<ByteSize>()
             .map_err(Error::config_err)?
             .0 as usize,
+        persist: config
+            .raft_log_store
+            .persist
+            .parse()
+            .map_err(Error::config_err)?,
     };
     RaftLogStore::open(raft_log_store_options)
         .await

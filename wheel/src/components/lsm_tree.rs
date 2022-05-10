@@ -140,7 +140,14 @@ impl ObjectStoreLsmTreeCore {
                     UserKeyIterator::new(Box::new(MergeIterator::new(iters)), sequence)
                 }
                 LevelCompactionStrategy::NonOverlap => {
-                    assert_eq!(level.len(), 1);
+                    assert_eq!(
+                        level.len(),
+                        1,
+                        "look up key {:?} in level idx: {}, result: {:?}",
+                        key,
+                        level_idx,
+                        level
+                    );
                     let sst = self.sstable_store.sstable(level[0]).await?;
                     UserKeyIterator::new(
                         Box::new(SstableIterator::new(

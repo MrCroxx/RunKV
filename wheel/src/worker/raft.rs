@@ -39,9 +39,14 @@ lazy_static! {
 struct RaftMetrics {
     append_log_entries_latency_histogram: prometheus::Histogram,
     append_log_entries_throughput_gauge: prometheus::Gauge,
+
     apply_log_entries_latency_histogram: prometheus::Histogram,
+
     send_messages_latency_histogram: prometheus::Histogram,
     send_messages_throughput_gauge: prometheus::Gauge,
+
+    handle_ready_latency_histogram: prometheus::Histogram,
+    poll_channel_latency_histogram: prometheus::Histogram,
 }
 
 impl RaftMetrics {
@@ -63,6 +68,7 @@ impl RaftMetrics {
                     &raft_node.to_string(),
                 ])
                 .unwrap(),
+
             apply_log_entries_latency_histogram: RAFT_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&[
                     "apply_log_entries",
@@ -71,6 +77,7 @@ impl RaftMetrics {
                     &raft_node.to_string(),
                 ])
                 .unwrap(),
+
             send_messages_latency_histogram: RAFT_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&[
                     "send_messages",
@@ -82,6 +89,23 @@ impl RaftMetrics {
             send_messages_throughput_gauge: RAFT_THROUGHPUT_GAUGE_VEC
                 .get_metric_with_label_values(&[
                     "send_messages",
+                    &node.to_string(),
+                    &group.to_string(),
+                    &raft_node.to_string(),
+                ])
+                .unwrap(),
+
+            handle_ready_latency_histogram: RAFT_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[
+                    "handle_ready",
+                    &node.to_string(),
+                    &group.to_string(),
+                    &raft_node.to_string(),
+                ])
+                .unwrap(),
+            poll_channel_latency_histogram: RAFT_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[
+                    "poll_channel",
                     &node.to_string(),
                     &group.to_string(),
                     &raft_node.to_string(),
@@ -289,8 +313,10 @@ where
             let mut msgs = Vec::with_capacity(BATCH_SIZE);
             let mut proposals = Vec::with_capacity(BATCH_SIZE);
 
-            let recv_span = trace_span!("recv_span");
-            let recv_span_guard = recv_span.enter();
+            let pool_channel_span = trace_span!("pool_channel_span");
+            let pool_channel_span_guard = pool_channel_span.enter();
+            let start_poll_channel = Instant::now();
+
             for _ in 0..BATCH_SIZE {
                 match self.message_rx.try_recv() {
                     Ok(msg) => msgs.push(msg),
@@ -304,7 +330,11 @@ where
                     Err(e) => return Err(Error::err(e)),
                 }
             }
-            drop(recv_span_guard);
+
+            self.metrics
+                .poll_channel_latency_histogram
+                .observe(start_poll_channel.elapsed().as_secs_f64());
+            drop(pool_channel_span_guard);
 
             for proposal in proposals {
                 self.propose(proposal).await?;
@@ -358,6 +388,8 @@ where
 
     #[tracing::instrument(level = "trace")]
     async fn handle_ready(&mut self) -> Result<()> {
+        let start = Instant::now();
+
         let mut ready = self.raft.ready().await;
 
         // 0. Update soft state.
@@ -401,11 +433,19 @@ where
         self.apply_log_entries(ready.take_committed_entries())
             .await?;
 
+        self.metrics
+            .handle_ready_latency_histogram
+            .observe(start.elapsed().as_secs_f64());
+
         Ok(())
     }
 
     #[tracing::instrument(level = "trace")]
     async fn send_messages(&mut self, messages: Vec<raft::prelude::Message>) -> Result<()> {
+        if messages.is_empty() {
+            return Ok(());
+        }
+
         if cfg!(feature = "tracing") {
             let span = tracing::Span::current();
             for msg in messages.iter() {
@@ -465,13 +505,17 @@ where
 
     #[tracing::instrument(level = "trace")]
     async fn apply_log_entries(&mut self, entries: Vec<raft::prelude::Entry>) -> Result<()> {
-        let start = Instant::now();
         let is_leader = match &self.raft_soft_state {
             None => false,
             Some(ss) => ss.raft_state == raft::StateRole::Leader,
         };
+
+        let start = Instant::now();
+
         self.fsm.apply(self.group, is_leader, entries).await?;
+
         let elapsed = start.elapsed();
+
         self.metrics
             .apply_log_entries_latency_histogram
             .observe(elapsed.as_secs_f64());
@@ -480,6 +524,10 @@ where
 
     #[tracing::instrument(level = "trace")]
     async fn append_log_entries(&mut self, entries: Vec<raft::prelude::Entry>) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+
         let start = Instant::now();
         let mut bytes = 0;
         let mut builder = RaftLogBatchBuilder::default();
@@ -532,6 +580,7 @@ mod tests {
     use assert_matches::assert_matches;
     use runkv_common::tracing_slog_drain::TracingSlogDrain;
     use runkv_common::Worker;
+    use runkv_storage::raft_log_store::log::Persist;
     use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
     use runkv_storage::raft_log_store::RaftLogStore;
     use test_log::test;
@@ -619,6 +668,7 @@ mod tests {
             log_dir_path: path.to_string(),
             log_file_capacity: 64 << 20,
             block_cache_capacity: 64 << 20,
+            persist: Persist::Sync,
         };
         RaftLogStore::open(options).await.unwrap()
     }

@@ -9,6 +9,7 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use runkv_common::prometheus::DefaultPrometheusExporter;
 use runkv_storage::raft_log_store::entry::RaftLogBatchBuilder;
+use runkv_storage::raft_log_store::log::Persist;
 use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
 use runkv_storage::raft_log_store::RaftLogStore;
 
@@ -20,6 +21,9 @@ struct Args {
     log_file_capacity: usize,
     #[clap(long, default_value = "67108864")] // 64 MiB
     block_cache_capacity: usize,
+
+    #[clap(long, default_value = "sync")]
+    persist: Persist,
 
     #[clap(long, default_value = "100")]
     groups: usize,
@@ -54,6 +58,7 @@ async fn build_raft_log_store(args: &Args) -> RaftLogStore {
         log_dir_path: args.path.to_owned(),
         log_file_capacity: args.log_file_capacity,
         block_cache_capacity: args.block_cache_capacity,
+        persist: args.persist,
     };
     RaftLogStore::open(raft_log_store_options).await.unwrap()
 }

@@ -46,30 +46,40 @@ lazy_static! {
 }
 
 struct WheelServiceMetrics {
-    kv_service_get_latency_histogram_vec: prometheus::Histogram,
-    kv_service_put_latency_histogram_vec: prometheus::Histogram,
-    kv_service_delete_latency_histogram_vec: prometheus::Histogram,
-    kv_service_snapshot_latency_histogram_vec: prometheus::Histogram,
-    kv_service_txn_latency_histogram_vec: prometheus::Histogram,
+    kv_service_get_latency_histogram: prometheus::Histogram,
+    kv_service_put_latency_histogram: prometheus::Histogram,
+    kv_service_delete_latency_histogram: prometheus::Histogram,
+    kv_service_snapshot_latency_histogram: prometheus::Histogram,
+    kv_service_txn_latency_histogram: prometheus::Histogram,
+
+    kv_service_propose_latency_histogram: prometheus::Histogram,
+    kv_service_wait_latency_histogram: prometheus::Histogram,
 }
 
 impl WheelServiceMetrics {
     fn new(node: u64) -> Self {
         Self {
-            kv_service_get_latency_histogram_vec: KV_SERVICE_LATENCY_HISTOGRAM_VEC
+            kv_service_get_latency_histogram: KV_SERVICE_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&["get", &node.to_string()])
                 .unwrap(),
-            kv_service_put_latency_histogram_vec: KV_SERVICE_LATENCY_HISTOGRAM_VEC
+            kv_service_put_latency_histogram: KV_SERVICE_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&["put", &node.to_string()])
                 .unwrap(),
-            kv_service_delete_latency_histogram_vec: KV_SERVICE_LATENCY_HISTOGRAM_VEC
+            kv_service_delete_latency_histogram: KV_SERVICE_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&["delete", &node.to_string()])
                 .unwrap(),
-            kv_service_snapshot_latency_histogram_vec: KV_SERVICE_LATENCY_HISTOGRAM_VEC
+            kv_service_snapshot_latency_histogram: KV_SERVICE_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&["snapshot", &node.to_string()])
                 .unwrap(),
-            kv_service_txn_latency_histogram_vec: KV_SERVICE_LATENCY_HISTOGRAM_VEC
+            kv_service_txn_latency_histogram: KV_SERVICE_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&["txn", &node.to_string()])
+                .unwrap(),
+
+            kv_service_propose_latency_histogram: KV_SERVICE_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&["propose", &node.to_string()])
+                .unwrap(),
+            kv_service_wait_latency_histogram: KV_SERVICE_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&["wait", &node.to_string()])
                 .unwrap(),
         }
     }
@@ -192,7 +202,8 @@ impl Wheel {
 
     #[tracing::instrument(level = "trace", fields(request_id))]
     async fn txn_inner(&self, request: TxnRequest) -> Result<TxnResponse> {
-        let now = std::time::Instant::now();
+        let start = Instant::now();
+
         let span = tracing::Span::current();
         let span_id = span.id();
         // Pick raft leader of the request.
@@ -251,12 +262,24 @@ impl Wheel {
 
         self.inner.sequence_lock.release();
 
+        self.inner
+            .metrics
+            .kv_service_propose_latency_histogram
+            .observe(start.elapsed().as_secs_f64());
+
+        let start = Instant::now();
+
         // Wait for resposne.
         let response = rx
             .instrument(trace_span!("wait_apply"))
             .await
             .map_err(Error::err)?;
-        tracing::info!("txn inner takes: {:?}", now.elapsed());
+
+        self.inner
+            .metrics
+            .kv_service_wait_latency_histogram
+            .observe(start.elapsed().as_secs_f64());
+
         response
     }
 
@@ -376,7 +399,7 @@ impl KvService for Wheel {
         let elapsed = start.elapsed();
         self.inner
             .metrics
-            .kv_service_get_latency_histogram_vec
+            .kv_service_get_latency_histogram
             .observe(elapsed.as_secs_f64());
         Ok(Response::new(rsp))
     }
@@ -392,7 +415,7 @@ impl KvService for Wheel {
         let elapsed = start.elapsed();
         self.inner
             .metrics
-            .kv_service_put_latency_histogram_vec
+            .kv_service_put_latency_histogram
             .observe(elapsed.as_secs_f64());
         Ok(Response::new(rsp))
     }
@@ -409,7 +432,7 @@ impl KvService for Wheel {
         let elapsed = start.elapsed();
         self.inner
             .metrics
-            .kv_service_delete_latency_histogram_vec
+            .kv_service_delete_latency_histogram
             .observe(elapsed.as_secs_f64());
         Ok(Response::new(rsp))
     }
@@ -425,7 +448,7 @@ impl KvService for Wheel {
         let elapsed = start.elapsed();
         self.inner
             .metrics
-            .kv_service_snapshot_latency_histogram_vec
+            .kv_service_snapshot_latency_histogram
             .observe(elapsed.as_secs_f64());
         Ok(Response::new(rsp))
     }
@@ -441,7 +464,7 @@ impl KvService for Wheel {
         let elapsed = start.elapsed();
         self.inner
             .metrics
-            .kv_service_txn_latency_histogram_vec
+            .kv_service_txn_latency_histogram
             .observe(elapsed.as_secs_f64());
         Ok(Response::new(rsp))
     }
