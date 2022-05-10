@@ -498,6 +498,7 @@ mod tests {
     use test_log::test;
 
     use super::*;
+    use crate::components::LsmTreeMetrics;
     use crate::lsm_tree::components::{
         BlockCache, BlockMeta, CachePolicy, Sstable, SstableBuilder, SstableBuilderOptions,
         SstableMeta, SstableStore, SstableStoreOptions,
@@ -873,7 +874,7 @@ mod tests {
 
     fn build_sstable_store_for_test() -> SstableStoreRef {
         let object_store = Arc::new(MemObjectStore::default());
-        let block_cache = BlockCache::new(0, 0);
+        let block_cache = BlockCache::new(0, Arc::new(LsmTreeMetrics::new(0)));
         let sstable_store_options = SstableStoreOptions {
             path: "test".to_string(),
             object_store,

@@ -188,7 +188,7 @@ impl SstableUploader {
             }
         }
         self.lsm_tree.drop_oldest_immutable_memtable();
-        println!("last imm dropped");
+        trace!("last imm dropped");
         Ok(())
     }
 

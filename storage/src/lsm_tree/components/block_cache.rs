@@ -3,51 +3,20 @@ use std::time::Instant;
 
 use bytes::BufMut;
 use futures::Future;
-use lazy_static::lazy_static;
 use moka::future::Cache;
-use prometheus;
 
+use super::metrics::LsmTreeMetricsRef;
 use super::Block;
 use crate::lsm_tree::DEFAULT_BLOCK_SIZE;
 use crate::{Error, Result};
 
-lazy_static! {
-    static ref BLOCK_CACHE_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
-        prometheus::register_histogram_vec!(
-            "block_cache_latency_histogram_vec",
-            "block_cache latency histogram vec",
-            &["op", "node"]
-        )
-        .unwrap();
-}
-
-struct BlockCacheMetrics {
-    block_cache_get_latency_histogram: prometheus::Histogram,
-    block_cache_insert_latency_histogram: prometheus::Histogram,
-    block_cache_fill_latency_histogram: prometheus::Histogram,
-}
-impl BlockCacheMetrics {
-    fn new(node: u64) -> Self {
-        Self {
-            block_cache_get_latency_histogram: BLOCK_CACHE_LATENCY_HISTOGRAM_VEC
-                .get_metric_with_label_values(&["block_cache_get", &node.to_string()])
-                .unwrap(),
-            block_cache_insert_latency_histogram: BLOCK_CACHE_LATENCY_HISTOGRAM_VEC
-                .get_metric_with_label_values(&["block_cache_insert", &node.to_string()])
-                .unwrap(),
-            block_cache_fill_latency_histogram: BLOCK_CACHE_LATENCY_HISTOGRAM_VEC
-                .get_metric_with_label_values(&["block_cache_fill", &node.to_string()])
-                .unwrap(),
-        }
-    }
-}
 pub struct BlockCache {
     inner: Cache<Vec<u8>, Arc<Block>>,
-    metrics: BlockCacheMetrics,
+    metrics: LsmTreeMetricsRef,
 }
 
 impl BlockCache {
-    pub fn new(capacity: usize, node: u64) -> Self {
+    pub fn new(capacity: usize, metrics: LsmTreeMetricsRef) -> Self {
         let cache: Cache<Vec<u8>, Arc<Block>> = Cache::builder()
             .weigher(|_k, v: &Arc<Block>| v.len() as u32)
             .initial_capacity(capacity / DEFAULT_BLOCK_SIZE)
@@ -56,7 +25,7 @@ impl BlockCache {
 
         Self {
             inner: cache,
-            metrics: BlockCacheMetrics::new(node),
+            metrics,
         }
     }
 

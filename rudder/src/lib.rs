@@ -14,7 +14,10 @@ use meta::MetaStoreRef;
 use runkv_common::channel_pool::ChannelPool;
 use runkv_common::BoxedWorker;
 use runkv_proto::rudder::rudder_service_server::RudderServiceServer;
-use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions, SstableStoreRef};
+use runkv_storage::components::{
+    BlockCache, LsmTreeMetrics, LsmTreeMetricsRef, SstableStore, SstableStoreOptions,
+    SstableStoreRef,
+};
 use runkv_storage::manifest::{VersionManager, VersionManagerOptions};
 use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
 use service::{Rudder, RudderOptions};
@@ -49,7 +52,9 @@ pub async fn build_rudder_with_object_store(
     config: &RudderConfig,
     object_store: ObjectStoreRef,
 ) -> Result<(Rudder, Vec<BoxedWorker>)> {
-    let sstable_store = build_sstable_store(config, object_store)?;
+    let lsm_tree_metrics = Arc::new(LsmTreeMetrics::new(config.id));
+
+    let sstable_store = build_sstable_store(config, object_store, lsm_tree_metrics)?;
 
     let version_manager = build_version_manager(config, sstable_store.clone()).await?;
 
@@ -92,8 +97,9 @@ async fn build_object_store(config: &RudderConfig) -> ObjectStoreRef {
 fn build_sstable_store(
     config: &RudderConfig,
     object_store: ObjectStoreRef,
+    metrics: LsmTreeMetricsRef,
 ) -> Result<SstableStoreRef> {
-    let block_cache = BlockCache::new(0, config.id);
+    let block_cache = BlockCache::new(0, metrics);
     let sstable_store_options = SstableStoreOptions {
         path: config.data_path.clone(),
         object_store,

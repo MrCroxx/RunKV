@@ -226,8 +226,8 @@ mod tests {
 
     use super::*;
     use crate::components::{
-        BlockCache, SstableBuilder, SstableBuilderOptions, SstableMeta, SstableStore,
-        SstableStoreOptions,
+        BlockCache, LsmTreeMetrics, SstableBuilder, SstableBuilderOptions, SstableMeta,
+        SstableStore, SstableStoreOptions,
     };
     use crate::lsm_tree::TEST_DEFAULT_RESTART_INTERVAL;
     use crate::utils::full_key;
@@ -255,7 +255,7 @@ mod tests {
 
     async fn build_iterator_for_test() -> SstableIterator {
         let object_store = Arc::new(MemObjectStore::default());
-        let block_cache = BlockCache::new(65536, 0);
+        let block_cache = BlockCache::new(65536, Arc::new(LsmTreeMetrics::new(0)));
         let options = SstableStoreOptions {
             path: "test".to_string(),
             object_store,

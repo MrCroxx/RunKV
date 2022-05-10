@@ -146,7 +146,7 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use crate::components::{SstableBuilder, SstableBuilderOptions};
+    use crate::components::{LsmTreeMetrics, SstableBuilder, SstableBuilderOptions};
     use crate::lsm_tree::TEST_DEFAULT_RESTART_INTERVAL;
     use crate::MemObjectStore;
 
@@ -169,7 +169,7 @@ mod tests {
     #[test(tokio::test)]
     async fn test_sstable_store() {
         let object_store = Arc::new(MemObjectStore::default());
-        let block_cache = BlockCache::new(65536, 0);
+        let block_cache = BlockCache::new(65536, Arc::new(LsmTreeMetrics::new(0)));
         let options = SstableStoreOptions {
             path: "test".to_string(),
             object_store,
