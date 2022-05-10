@@ -34,7 +34,7 @@ pub struct LsmTreeOptions {
     pub bloom_false_positive: f64,
     pub compression_algorithm: CompressionAlgorithm,
     pub poll_interval: Duration,
-    pub lsm_tree_metrics: LsmTreeMetricsRef,
+    pub metrics: LsmTreeMetricsRef,
 }
 
 pub struct RaftManagerOptions {
@@ -110,7 +110,7 @@ impl RaftManager {
             sstable_store: self.sstable_store.clone(),
             write_buffer_capacity: self.lsm_tree_options.write_buffer_capacity,
             version_manager: self.version_manager.clone(),
-            metrics: self.lsm_tree_options.lsm_tree_metrics.clone(),
+            metrics: self.lsm_tree_options.metrics.clone(),
         };
         let lsm_tree = ObjectStoreLsmTree::new(lsm_tree_options);
 

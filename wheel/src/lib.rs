@@ -298,7 +298,7 @@ fn build_raft_manager(
                 .parse::<humantime::Duration>()
                 .map_err(Error::config_err)?
                 .into(),
-            lsm_tree_metrics,
+            metrics: lsm_tree_metrics,
         },
     };
     Ok(RaftManager::new(raft_manager_options))
