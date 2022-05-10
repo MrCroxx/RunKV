@@ -10,3 +10,5 @@ mod sstable_store;
 pub use sstable_store::*;
 mod skiplist;
 pub use skiplist::*;
+mod metrics;
+pub use metrics::*;

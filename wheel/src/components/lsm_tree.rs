@@ -5,7 +5,7 @@ use bytes::Bytes;
 use parking_lot::RwLock;
 use runkv_common::config::LevelCompactionStrategy;
 use runkv_storage::components::{
-    CachePolicy, Memtable, SstableStoreRef, SKIPLIST_NODE_TOWER_MAX_HEIGHT,
+    CachePolicy, LsmTreeMetricsRef, Memtable, SstableStoreRef, SKIPLIST_NODE_TOWER_MAX_HEIGHT,
 };
 use runkv_storage::iterator::{Iterator, MergeIterator, Seek, SstableIterator, UserKeyIterator};
 use runkv_storage::manifest::VersionManager;
@@ -22,6 +22,8 @@ pub struct ObjectStoreLsmTreeOptions {
     pub write_buffer_capacity: usize,
     /// Local version manager.
     pub version_manager: VersionManager,
+
+    pub metrics: LsmTreeMetricsRef,
 }
 
 pub struct MemtableWithCtx {
@@ -53,6 +55,8 @@ struct ObjectStoreLsmTreeCore {
     sstable_store: SstableStoreRef,
 
     memtables: RwLock<Memtables>,
+
+    _metrics: LsmTreeMetricsRef,
     // ----- critical section protected by rwlock -----
     // /// Current mutable memtable.
     // memtable: RefCell<Memtable>,
@@ -73,6 +77,8 @@ impl ObjectStoreLsmTreeCore {
                 memtable: MemtableWithCtx::new(options.write_buffer_capacity),
                 immutable_memtables: VecDeque::with_capacity(32),
             }),
+
+            _metrics: options.metrics.clone(),
 
             options,
         }

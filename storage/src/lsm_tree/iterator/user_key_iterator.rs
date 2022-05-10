@@ -169,15 +169,15 @@ mod tests {
 
     use super::*;
     use crate::components::{
-        BlockCache, CachePolicy, Sstable, SstableBuilder, SstableBuilderOptions, SstableMeta,
-        SstableStore, SstableStoreOptions,
+        BlockCache, CachePolicy, LsmTreeMetrics, Sstable, SstableBuilder, SstableBuilderOptions,
+        SstableMeta, SstableStore, SstableStoreOptions,
     };
     use crate::iterator::SstableIterator;
     use crate::MemObjectStore;
 
     async fn build_iterator_for_test(sequence: u64) -> UserKeyIterator {
         let object_store = Arc::new(MemObjectStore::default());
-        let block_cache = BlockCache::new(65536);
+        let block_cache = BlockCache::new(65536, Arc::new(LsmTreeMetrics::new(0)));
         let options = SstableStoreOptions {
             path: "path".to_string(),
             object_store,

@@ -24,7 +24,10 @@ use runkv_proto::kv::kv_service_server::KvServiceServer;
 use runkv_proto::kv::TxnResponse;
 use runkv_proto::wheel::raft_service_server::RaftServiceServer;
 use runkv_proto::wheel::wheel_service_server::WheelServiceServer;
-use runkv_storage::components::{BlockCache, SstableStore, SstableStoreOptions, SstableStoreRef};
+use runkv_storage::components::{
+    BlockCache, LsmTreeMetrics, LsmTreeMetricsRef, SstableStore, SstableStoreOptions,
+    SstableStoreRef,
+};
 use runkv_storage::manifest::{VersionManager, VersionManagerOptions};
 use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
 use runkv_storage::raft_log_store::RaftLogStore;
@@ -77,7 +80,9 @@ pub async fn build_wheel_with_object_store(
     config: &WheelConfig,
     object_store: ObjectStoreRef,
 ) -> Result<(Wheel, Vec<BoxedWorker>)> {
-    let sstable_store = build_sstable_store(config, object_store)?;
+    let lsm_tree_metrics = Arc::new(LsmTreeMetrics::new(config.id));
+
+    let sstable_store = build_sstable_store(config, object_store, lsm_tree_metrics.clone())?;
 
     let version_manager = build_version_manager(config, sstable_store.clone())?;
 
@@ -104,6 +109,7 @@ pub async fn build_wheel_with_object_store(
         version_manager.clone(),
         sstable_store.clone(),
         channel_pool.clone(),
+        lsm_tree_metrics.clone(),
     )?;
 
     let options = WheelOptions {
@@ -136,6 +142,7 @@ async fn build_object_store(config: &WheelConfig) -> ObjectStoreRef {
 fn build_sstable_store(
     config: &WheelConfig,
     object_store: ObjectStoreRef,
+    metrics: LsmTreeMetricsRef,
 ) -> Result<SstableStoreRef> {
     let block_cache = BlockCache::new(
         config
@@ -144,6 +151,7 @@ fn build_sstable_store(
             .parse::<ByteSize>()
             .map_err(Error::config_err)?
             .0 as usize,
+        metrics,
     );
     let sstable_store_options = SstableStoreOptions {
         path: config.data_path.clone(),
@@ -238,6 +246,7 @@ fn build_raft_network(config: &WheelConfig, channel_pool: ChannelPool) -> GrpcRa
     GrpcRaftNetwork::new(config.id, channel_pool)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_raft_manager(
     config: &WheelConfig,
     raft_log_store: RaftLogStore,
@@ -246,6 +255,7 @@ fn build_raft_manager(
     version_manager: VersionManager,
     sstable_store: SstableStoreRef,
     channel_pool: ChannelPool,
+    lsm_tree_metrics: LsmTreeMetricsRef,
 ) -> Result<RaftManager> {
     let raft_manager_options = RaftManagerOptions {
         node: config.id,
@@ -288,6 +298,7 @@ fn build_raft_manager(
                 .parse::<humantime::Duration>()
                 .map_err(Error::config_err)?
                 .into(),
+            metrics: lsm_tree_metrics,
         },
     };
     Ok(RaftManager::new(raft_manager_options))

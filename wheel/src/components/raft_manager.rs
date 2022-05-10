@@ -10,7 +10,7 @@ use runkv_common::time::rtimestamp;
 use runkv_common::tracing_slog_drain::TracingSlogDrain;
 use runkv_common::Worker;
 use runkv_proto::kv::TxnResponse;
-use runkv_storage::components::SstableStoreRef;
+use runkv_storage::components::{LsmTreeMetricsRef, SstableStoreRef};
 use runkv_storage::manifest::VersionManager;
 use runkv_storage::raft_log_store::RaftLogStore;
 use tokio::sync::{mpsc, RwLock};
@@ -34,6 +34,7 @@ pub struct LsmTreeOptions {
     pub bloom_false_positive: f64,
     pub compression_algorithm: CompressionAlgorithm,
     pub poll_interval: Duration,
+    pub metrics: LsmTreeMetricsRef,
 }
 
 pub struct RaftManagerOptions {
@@ -78,7 +79,6 @@ impl RaftManager {
     pub fn new(options: RaftManagerOptions) -> Self {
         let raft_logger_root =
             slog::Logger::root(TracingSlogDrain, slog::o!("namespace" => "raft"));
-
         Self {
             node: options.node,
             rudder_node_id: options.rudder_node_id,
@@ -110,6 +110,7 @@ impl RaftManager {
             sstable_store: self.sstable_store.clone(),
             write_buffer_capacity: self.lsm_tree_options.write_buffer_capacity,
             version_manager: self.version_manager.clone(),
+            metrics: self.lsm_tree_options.metrics.clone(),
         };
         let lsm_tree = ObjectStoreLsmTree::new(lsm_tree_options);
 
