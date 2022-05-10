@@ -5,8 +5,8 @@ use lazy_static::lazy_static;
 lazy_static! {
     static ref BLOCK_CACHE_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
         prometheus::register_histogram_vec!(
-            "block_cache_latency_histogram_vec",
-            "block_cache latency histogram vec",
+            "lsm_tree_block_cache_latency_histogram_vec",
+            "lsm tree block_cache latency histogram vec",
             &["op", "node"]
         )
         .unwrap();

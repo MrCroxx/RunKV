@@ -245,6 +245,7 @@ async fn build_raft_log_store(config: &WheelConfig) -> Result<RaftLogStore> {
 fn build_raft_network(config: &WheelConfig, channel_pool: ChannelPool) -> GrpcRaftNetwork {
     GrpcRaftNetwork::new(config.id, channel_pool)
 }
+
 #[allow(clippy::too_many_arguments)]
 fn build_raft_manager(
     config: &WheelConfig,
@@ -254,7 +255,7 @@ fn build_raft_manager(
     version_manager: VersionManager,
     sstable_store: SstableStoreRef,
     channel_pool: ChannelPool,
-    metrics: LsmTreeMetricsRef,
+    lsm_tree_metrics: LsmTreeMetricsRef,
 ) -> Result<RaftManager> {
     let raft_manager_options = RaftManagerOptions {
         node: config.id,
@@ -297,7 +298,7 @@ fn build_raft_manager(
                 .parse::<humantime::Duration>()
                 .map_err(Error::config_err)?
                 .into(),
-            metrics,
+            lsm_tree_metrics,
         },
     };
     Ok(RaftManager::new(raft_manager_options))
