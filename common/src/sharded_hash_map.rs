@@ -1,7 +1,6 @@
 use std::collections::hash_map::{DefaultHasher, HashMap};
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -82,17 +81,16 @@ where
     }
 }
 
-pub struct ShardedHashMap<'g, K, V>
+pub struct ShardedHashMap<K, V>
 where
     K: Eq + Hash + Copy + Clone + Display + 'static,
     V: 'static,
 {
     shards: u16,
     buckets: HashMap<u16, ShardedHashMapCore<K, V>>,
-    _phantom: PhantomData<&'g ()>,
 }
 
-impl<'g, K, V> Clone for ShardedHashMap<'g, K, V>
+impl<K, V> Clone for ShardedHashMap<K, V>
 where
     K: Eq + Hash + Copy + Clone + Display + 'static,
     V: 'static,
@@ -101,12 +99,11 @@ where
         Self {
             shards: self.shards,
             buckets: self.buckets.clone(),
-            _phantom: PhantomData::default(),
         }
     }
 }
 
-impl<'g, K, V> ShardedHashMap<'g, K, V>
+impl<K, V> ShardedHashMap<K, V>
 where
     K: Eq + Hash + Copy + Clone + Display + 'static,
     V: 'static,
@@ -116,11 +113,7 @@ where
         for i in 0..shards {
             buckets.insert(i, ShardedHashMapCore::default());
         }
-        Self {
-            shards,
-            buckets,
-            _phantom: PhantomData::default(),
-        }
+        Self { shards, buckets }
     }
 
     pub fn insert(&self, key: K, value: V) -> Option<V> {
@@ -134,7 +127,7 @@ where
         bucket.inner.write().insert(key, value)
     }
 
-    pub fn read(&'g self, key: &'g K) -> ShardedHashMapRwLockReadGuard<'g, K, V> {
+    pub fn read<'a>(&'a self, key: &'a K) -> ShardedHashMapRwLockReadGuard<'_, K, V> {
         let mut hasher = DefaultHasher::new();
         key.hash(&mut hasher);
         let hash = hasher.finish();
@@ -147,7 +140,7 @@ where
         ShardedHashMapRwLockReadGuard { inner, key }
     }
 
-    pub fn write(&'g self, key: &'g K) -> ShardedHashMapRwLockWriteGuard<'g, K, V> {
+    pub fn write<'a>(&'a self, key: &'a K) -> ShardedHashMapRwLockWriteGuard<'_, K, V> {
         let mut hasher = DefaultHasher::new();
         key.hash(&mut hasher);
         let hash = hasher.finish();
