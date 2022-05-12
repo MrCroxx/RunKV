@@ -206,7 +206,7 @@ impl ObjectStoreLsmTreeCore {
         }
         guard.memtable.table.put(key, value, sequence);
         assert!(
-            apply_index > guard.memtable.max_applied_index,
+            apply_index >= guard.memtable.max_applied_index,
             "apply index: {}, max applied index: {}",
             apply_index,
             guard.memtable.max_applied_index,

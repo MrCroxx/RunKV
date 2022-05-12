@@ -6,6 +6,7 @@ use std::time::Duration;
 use runkv_common::channel_pool::ChannelPool;
 use runkv_common::coding::CompressionAlgorithm;
 use runkv_common::notify_pool::NotifyPool;
+use runkv_common::packer::Packer;
 use runkv_common::time::rtimestamp;
 use runkv_common::tracing_slog_drain::TracingSlogDrain;
 use runkv_common::Worker;
@@ -13,17 +14,20 @@ use runkv_proto::kv::TxnResponse;
 use runkv_storage::components::{LsmTreeMetricsRef, SstableStoreRef};
 use runkv_storage::manifest::VersionManager;
 use runkv_storage::raft_log_store::RaftLogStore;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tracing::error;
 
+use super::command::Command;
 use super::fsm::{ObjectLsmTreeFsm, ObjectLsmTreeFsmOptions};
 use super::lsm_tree::{ObjectStoreLsmTree, ObjectStoreLsmTreeOptions};
 use super::raft_log_store::RaftGroupLogStore;
 use super::raft_network::{GrpcRaftNetwork, RaftNetwork};
 use crate::error::{Error, RaftManageError, Result};
-use crate::worker::raft::{Proposal, RaftStartMode, RaftWorker, RaftWorkerOptions};
+use crate::worker::raft::{RaftStartMode, RaftWorker, RaftWorkerOptions};
 use crate::worker::sstable_uploader::{SstableUploader, SstableUploaderOptions};
+
+const COMMAND_PACKER_QUEUE_DEFAULT_CAPACITY: usize = 128;
 
 #[derive(Clone)]
 pub struct LsmTreeOptions {
@@ -50,7 +54,7 @@ pub struct RaftManagerOptions {
 }
 
 struct RaftManagerInner {
-    proposal_txs: BTreeMap<u64, mpsc::UnboundedSender<Proposal>>,
+    command_packers: BTreeMap<u64, Packer<Command, ()>>,
     raft_worker_handles: BTreeMap<u64, JoinHandle<()>>,
     sstable_uploader_handles: BTreeMap<u64, JoinHandle<()>>,
     sequences: BTreeMap<u64, Arc<AtomicU64>>,
@@ -91,7 +95,7 @@ impl RaftManager {
             lsm_tree_options: options.lsm_tree_options,
             channel_pool: options.channel_pool,
             inner: Arc::new(RwLock::new(RaftManagerInner {
-                proposal_txs: BTreeMap::default(),
+                command_packers: BTreeMap::default(),
                 raft_worker_handles: BTreeMap::default(),
                 sstable_uploader_handles: BTreeMap::default(),
                 sequences: BTreeMap::default(),
@@ -136,7 +140,9 @@ impl RaftManager {
 
         // Build raft worker.
         let peers = self.raft_network.raft_nodes(group).await?;
-        let (proposal_tx, proposal_rx) = mpsc::unbounded_channel();
+        let command_packer = Packer::new(COMMAND_PACKER_QUEUE_DEFAULT_CAPACITY);
+        let message_packer = self.raft_network.get_message_packer(raft_node).await?;
+
         let raft_worker_options = RaftWorkerOptions {
             group,
             node: self.node,
@@ -147,7 +153,8 @@ impl RaftManager {
             raft_logger,
             raft_network: self.raft_network.clone(),
 
-            proposal_rx,
+            command_packer: command_packer.clone(),
+            message_packer,
 
             fsm,
         };
@@ -193,7 +200,7 @@ impl RaftManager {
         });
 
         let mut guard = self.inner.write().await;
-        if guard.proposal_txs.insert(raft_node, proposal_tx).is_some()
+        if guard.command_packers.insert(raft_node, command_packer).is_some()
             || guard
                 .raft_worker_handles
                 .insert(raft_node, raft_worker_handle)
@@ -217,19 +224,19 @@ impl RaftManager {
         Ok(())
     }
 
-    // TODO: REMOVE ME.
-    pub async fn get_proposal_channel(
-        &self,
-        raft_node: u64,
-    ) -> Result<mpsc::UnboundedSender<Proposal>> {
+    pub async fn get_command_packer(&self, raft_node: u64) -> Result<Packer<Command, ()>> {
         let inner = self.inner.read().await;
-        inner.proposal_txs.get(&raft_node).cloned().ok_or_else(|| {
-            RaftManageError::RaftNodeNotExists {
-                raft_node,
-                node: self.node,
-            }
-            .into()
-        })
+        inner
+            .command_packers
+            .get(&raft_node)
+            .cloned()
+            .ok_or_else(|| {
+                RaftManageError::RaftNodeNotExists {
+                    raft_node,
+                    node: self.node,
+                }
+                .into()
+            })
     }
 
     // TODO: REMOVE ME.

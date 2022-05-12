@@ -1,7 +1,5 @@
 use std::collections::hash_map::{DefaultHasher, HashMap};
-use std::fmt::Display;
 use std::hash::{Hash, Hasher};
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -9,7 +7,7 @@ use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 #[must_use = "if unused the RwLock will immediately unlock"]
 pub struct ShardedHashMapRwLockReadGuard<'g, K, V>
 where
-    K: Eq + Hash + Copy + Clone + Display + 'static,
+    K: Eq + Hash + Copy + Clone + 'static,
     V: 'static,
 {
     inner: RwLockReadGuard<'g, HashMap<K, V>>,
@@ -18,7 +16,7 @@ where
 
 impl<'g, K, V> ShardedHashMapRwLockReadGuard<'g, K, V>
 where
-    K: Eq + Hash + Copy + Clone + Display + 'static,
+    K: Eq + Hash + Copy + Clone + 'static,
     V: 'static,
 {
     pub fn get(&self) -> Option<&'_ V> {
@@ -29,7 +27,7 @@ where
 #[must_use = "if unused the RwLock will immediately unlock"]
 pub struct ShardedHashMapRwLockWriteGuard<'g, K, V>
 where
-    K: Eq + Hash + Copy + Clone + Display + 'static,
+    K: Eq + Hash + Copy + Clone + 'static,
     V: 'static,
 {
     inner: RwLockWriteGuard<'g, HashMap<K, V>>,
@@ -38,7 +36,7 @@ where
 
 impl<'g, K, V> ShardedHashMapRwLockWriteGuard<'g, K, V>
 where
-    K: Eq + Hash + Copy + Clone + Display + 'static,
+    K: Eq + Hash + Copy + Clone + 'static,
     V: 'static,
 {
     pub fn get(&self) -> Option<&'_ V> {
@@ -52,7 +50,7 @@ where
 
 pub struct ShardedHashMapCore<K, V>
 where
-    K: Eq + Hash + Copy + Clone + Display + 'static,
+    K: Eq + Hash + Copy + Clone + 'static,
     V: 'static,
 {
     inner: Arc<RwLock<HashMap<K, V>>>,
@@ -60,7 +58,7 @@ where
 
 impl<K, V> Clone for ShardedHashMapCore<K, V>
 where
-    K: Eq + Hash + Copy + Clone + Display + 'static,
+    K: Eq + Hash + Copy + Clone + 'static,
     V: 'static,
 {
     fn clone(&self) -> Self {
@@ -72,7 +70,7 @@ where
 
 impl<K, V> Default for ShardedHashMapCore<K, V>
 where
-    K: Eq + Hash + Copy + Clone + Display + 'static,
+    K: Eq + Hash + Copy + Clone + 'static,
     V: 'static,
 {
     fn default() -> Self {
@@ -82,33 +80,41 @@ where
     }
 }
 
-pub struct ShardedHashMap<'g, K, V>
+pub struct ShardedHashMap<K, V>
 where
-    K: Eq + Hash + Copy + Clone + Display + 'static,
+    K: Eq + Hash + Copy + Clone + 'static,
     V: 'static,
 {
     shards: u16,
     buckets: HashMap<u16, ShardedHashMapCore<K, V>>,
-    _phantom: PhantomData<&'g ()>,
 }
 
-impl<'g, K, V> Clone for ShardedHashMap<'g, K, V>
+impl<K, V> Default for ShardedHashMap<K, V>
 where
-    K: Eq + Hash + Copy + Clone + Display + 'static,
+    K: Eq + Hash + Copy + Clone + 'static,
+    V: 'static,
+{
+    fn default() -> Self {
+        Self::new(64)
+    }
+}
+
+impl<K, V> Clone for ShardedHashMap<K, V>
+where
+    K: Eq + Hash + Copy + Clone + 'static,
     V: 'static,
 {
     fn clone(&self) -> Self {
         Self {
             shards: self.shards,
             buckets: self.buckets.clone(),
-            _phantom: PhantomData::default(),
         }
     }
 }
 
-impl<'g, K, V> ShardedHashMap<'g, K, V>
+impl<K, V> ShardedHashMap<K, V>
 where
-    K: Eq + Hash + Copy + Clone + Display + 'static,
+    K: Eq + Hash + Copy + Clone + 'static,
     V: 'static,
 {
     pub fn new(shards: u16) -> Self {
@@ -116,11 +122,7 @@ where
         for i in 0..shards {
             buckets.insert(i, ShardedHashMapCore::default());
         }
-        Self {
-            shards,
-            buckets,
-            _phantom: PhantomData::default(),
-        }
+        Self { shards, buckets }
     }
 
     pub fn insert(&self, key: K, value: V) -> Option<V> {
@@ -134,7 +136,7 @@ where
         bucket.inner.write().insert(key, value)
     }
 
-    pub fn read(&'g self, key: &'g K) -> ShardedHashMapRwLockReadGuard<'g, K, V> {
+    pub fn read<'a>(&'a self, key: &'a K) -> ShardedHashMapRwLockReadGuard<'_, K, V> {
         let mut hasher = DefaultHasher::new();
         key.hash(&mut hasher);
         let hash = hasher.finish();
@@ -147,7 +149,7 @@ where
         ShardedHashMapRwLockReadGuard { inner, key }
     }
 
-    pub fn write(&'g self, key: &'g K) -> ShardedHashMapRwLockWriteGuard<'g, K, V> {
+    pub fn write<'a>(&'a self, key: &'a K) -> ShardedHashMapRwLockWriteGuard<'_, K, V> {
         let mut hasher = DefaultHasher::new();
         key.hash(&mut hasher);
         let hash = hasher.finish();

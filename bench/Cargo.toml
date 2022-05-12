@@ -32,6 +32,9 @@ toml = "0.4.2"
 tonic = "0.6.2"
 tracing = "0.1"
 
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.4.3"
+
 [features]
 tracing = ["runkv-wheel/tracing"]
 

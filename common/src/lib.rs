@@ -5,6 +5,7 @@ pub mod config;
 pub mod context;
 pub mod log;
 pub mod notify_pool;
+pub mod packer;
 pub mod prometheus;
 pub mod sharded_hash_map;
 pub mod sync;

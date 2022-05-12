@@ -7,9 +7,7 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use runkv_common::channel_pool::ChannelPool;
-use runkv_common::coding::BytesSerde;
 use runkv_common::config::Node;
-use runkv_common::context::Context;
 use runkv_common::notify_pool::NotifyPool;
 use runkv_common::sync::TicketLock;
 use runkv_proto::common::Endpoint;
@@ -33,14 +31,14 @@ use crate::components::raft_manager::RaftManager;
 use crate::components::raft_network::{GrpcRaftNetwork, RaftNetwork};
 use crate::error::{Error, KvError, Result};
 use crate::meta::MetaStoreRef;
-use crate::worker::raft::Proposal;
 
 lazy_static! {
     static ref KV_SERVICE_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
         prometheus::register_histogram_vec!(
             "kv_service_latency_histogram_vec",
             "kv service latency histogram vec",
-            &["service", "node"]
+            &["service", "node"],
+            vec![0.05, 0.1, 0.3, 0.5, 1.0, 3.0]
         )
         .unwrap();
 }
@@ -204,8 +202,6 @@ impl Wheel {
     async fn txn_inner(&self, request: TxnRequest) -> Result<TxnResponse> {
         let start = Instant::now();
 
-        let span = tracing::Span::current();
-        let span_id = span.id();
         // Pick raft leader of the request.
         let raft_nodes = self.txn_raft_nodes(&request).await?;
         assert!(!raft_nodes.is_empty());
@@ -230,7 +226,6 @@ impl Wheel {
 
         // Register request.
         let request_id = self.inner.request_id.fetch_add(1, Ordering::SeqCst) + 1;
-        span.record("request_id", &request_id);
         let rx = self
             .inner
             .txn_notify_pool
@@ -238,27 +233,17 @@ impl Wheel {
             .map_err(Error::err)?;
 
         // Propose cmd with raft leader.
+        let command_packer = self
+            .inner
+            .raft_manager
+            .get_command_packer(raft_node)
+            .await?;
         let cmd = Command::TxnRequest {
             request_id,
             sequence,
             request,
         };
-        let ctx = Context {
-            span_id: span_id.map_or(0, |id| id.into_u64()),
-            request_id,
-        };
-        let data = cmd.encode_to_vec().map_err(Error::serde_err)?;
-        let context = ctx.encode_to_vec().map_err(Error::serde_err)?;
-
-        let proposal_tx = self
-            .inner
-            .raft_manager
-            .get_proposal_channel(raft_node)
-            .await?;
-
-        proposal_tx
-            .send(Proposal { data, context })
-            .map_err(Error::err)?;
+        command_packer.append(cmd, None);
 
         self.inner.sequence_lock.release();
 
