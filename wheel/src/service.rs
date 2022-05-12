@@ -38,7 +38,7 @@ lazy_static! {
             "kv_service_latency_histogram_vec",
             "kv service latency histogram vec",
             &["service", "node"],
-            vec![0.05, 0.1, 0.3, 0.5, 1.0, 3.0]
+            vec![0.001, 0.01, 0.05, 0.1, 0.2, 0.3, 0.5, 1.0, 2.0, 3.0]
         )
         .unwrap();
 }
@@ -244,6 +244,15 @@ impl Wheel {
             request,
         };
         command_packer.append(cmd, None);
+
+        #[cfg(feature = "tracing")]
+        {
+            use runkv_common::time::timestamp;
+
+            use crate::trace::TRACE_CTX;
+
+            TRACE_CTX.propose_ts.insert(request_id, timestamp());
+        }
 
         self.inner.sequence_lock.release();
 

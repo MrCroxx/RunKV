@@ -3393,7 +3393,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3516,7 +3517,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3554,7 +3556,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "histogram_quantile(0.5, avg(irate(raft_log_store_latency_histogram_vec_bucket{ op=~\"block_cache_.*\" }[1m])) by (le, op, instance))",
+          "expr": "histogram_quantile(0.5, avg(irate(raft_log_store_block_cache_latency_histogram_vec_bucket[1m])) by (le, op, instance))",
           "format": "time_series",
           "instant": false,
           "interval": "",
@@ -3568,7 +3570,7 @@
             "uid": "PEDE6B306CC9C0CD0"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.9, avg(irate(raft_log_store_latency_histogram_vec_bucket{ op=~\"block_cache_.*\" }[1m])) by (le, op, instance))",
+          "expr": "histogram_quantile(0.9, avg(irate(raft_log_store_block_cache_latency_histogram_vec_bucket[1m])) by (le, op, instance))",
           "hide": false,
           "legendFormat": "{{op}}-p90-{{instance}}",
           "range": true,
@@ -3580,7 +3582,7 @@
             "uid": "PEDE6B306CC9C0CD0"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, avg(irate(raft_log_store_latency_histogram_vec_bucket{ op=~\"block_cache_.*\" }[1m])) by (le, op, instance))",
+          "expr": "histogram_quantile(0.99, avg(irate(raft_log_store_block_cache_latency_histogram_vec_bucket[1m])) by (le, op, instance))",
           "hide": false,
           "legendFormat": "{{op}}-p99-{{instance}}",
           "range": true,
@@ -3666,7 +3668,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3703,7 +3706,7 @@
             "uid": "PEDE6B306CC9C0CD0"
           },
           "editorMode": "code",
-          "expr": "sum(irate(raft_log_store_latency_histogram_vec_count{ op=~\"block_cache_.*\" }[1m])) by (op, instance)",
+          "expr": "sum(irate(raft_log_store_block_cache_latency_histogram_vec_bucket[1m])) by (op, instance)",
           "hide": false,
           "legendFormat": "{{op}}-{{instance}}",
           "range": true,
@@ -3758,7 +3761,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3795,7 +3799,7 @@
             "uid": "PEDE6B306CC9C0CD0"
           },
           "editorMode": "code",
-          "expr": "sum(irate(raft_log_store_latency_histogram_vec_count{ op=\"block_cache_fill\" }[1m])) by (instance) / sum(irate(raft_log_store_latency_histogram_vec_count{ op=\"block_cache_get\" }[1m])) by (instance)",
+          "expr": "sum(irate(raft_log_store_block_cache_latency_histogram_vec_bucket{ op=\"block_cache_fill\" }[1m])) by (instance) / sum(irate(raft_log_store_block_cache_latency_histogram_vec_bucket{ op=\"block_cache_get\" }[1m])) by (instance)",
           "hide": false,
           "legendFormat": "miss-{{instance}}",
           "range": true,
@@ -3861,7 +3865,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3967,6 +3972,254 @@
         }
       ],
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PEDE6B306CC9C0CD0"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Frequency",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 156
+      },
+      "id": 57,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "sum(irate(lsm_tree_block_cache_latency_histogram_vec_bucket[1m])) by (op)",
+          "hide": false,
+          "legendFormat": "{{op}}",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Block Cache - Frequency",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 164
+      },
+      "id": 56,
+      "panels": [],
+      "title": "Trace",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PEDE6B306CC9C0CD0"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Latency",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "1-apply-p90"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 165
+      },
+      "id": 54,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "histogram_quantile(0.5, avg(irate(trace_raft_latency_histogram_vec_bucket[1m])) by (le, op, raft_node))",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "{{raft_node}}-{{op}}-p50",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.9, avg(irate(trace_raft_latency_histogram_vec_bucket[1m])) by (le, op, raft_node))",
+          "hide": false,
+          "legendFormat": "{{raft_node}}-{{op}}-p90",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, avg(irate(trace_raft_latency_histogram_vec_bucket[1m])) by (le, op, raft_node))",
+          "hide": false,
+          "legendFormat": "{{raft_node}}-{{op}}-p99",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Latency",
+      "transformations": [],
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",
@@ -3984,6 +4237,6 @@
   "timezone": "",
   "title": "RunKV Overview",
   "uid": "kJf6Tv_nk",
-  "version": 5,
+  "version": 1,
   "weekStart": ""
 }

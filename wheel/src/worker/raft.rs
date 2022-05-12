@@ -6,7 +6,6 @@ use futures::future;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use prost::Message;
-use runkv_common::context::Context;
 use runkv_common::packer::Packer;
 use runkv_common::Worker;
 use runkv_storage::raft_log_store::entry::RaftLogBatchBuilder;
@@ -25,7 +24,8 @@ lazy_static! {
         prometheus::register_histogram_vec!(
             "raft_latency_histogram_vec",
             "raft latency histogram vec",
-            &["op", "node", "group", "raft_node"]
+            &["op", "node", "group", "raft_node"],
+            vec![0.001, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0]
         )
         .unwrap();
     static ref RAFT_THROUGHPUT_GAUGE_VEC: prometheus::GaugeVec = prometheus::register_gauge_vec!(
@@ -38,7 +38,8 @@ lazy_static! {
         prometheus::register_histogram_vec!(
             "raft_batch_size_histogram_vec",
             "raft batch size histogram vec",
-            &["name", "node", "group", "raft_node"]
+            &["name", "node", "group", "raft_node"],
+            vec![1.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0]
         )
         .unwrap();
 }
@@ -379,11 +380,32 @@ where
 
     #[tracing::instrument(level = "trace", fields(request_id))]
     async fn propose(&mut self, proposal: Proposal<C>) -> Result<()> {
-        if cfg!(feature = "tracing") {
-            let span = tracing::Span::current();
-            let ctx: Context = bincode::deserialize(&proposal.context).map_err(Error::serde_err)?;
-            span.follows_from(tracing::Id::from_u64(ctx.span_id));
-            span.record("request_id", &ctx.request_id);
+        #[cfg(feature = "tracing")]
+        {
+            use runkv_common::time::timestamp;
+
+            use crate::components::command::Command;
+            use crate::trace::{TRACE_CTX, TRACE_RAFT_LATENCY_HISTOGRAM_VEC};
+
+            for cmd in proposal.cmds.iter() {
+                let buf = bincode::serialize(cmd).unwrap();
+                let cmd: Command = bincode::deserialize(&buf).unwrap();
+                if let Command::TxnRequest { request_id, .. } = cmd {
+                    let duration = {
+                        let guard = TRACE_CTX.propose_ts.read(&request_id);
+                        let ts = guard.get().unwrap();
+                        Duration::from_millis(timestamp() - *ts)
+                    };
+                    TRACE_RAFT_LATENCY_HISTOGRAM_VEC
+                        .with_label_values(&[
+                            "propose",
+                            &self.node.to_string(),
+                            &self.group.to_string(),
+                            &self.raft_node.to_string(),
+                        ])
+                        .observe(duration.as_secs_f64());
+                }
+            }
         }
         let context = proposal.context;
         let data = bincode::serialize(&proposal.cmds).map_err(Error::serde_err)?;
@@ -458,17 +480,37 @@ where
             return Ok(());
         }
 
-        if cfg!(feature = "tracing") {
-            let span = tracing::Span::current();
+        #[cfg(feature = "tracing")]
+        {
+            use runkv_common::time::timestamp;
+
+            use crate::components::command::Command;
+            use crate::trace::{TRACE_CTX, TRACE_RAFT_LATENCY_HISTOGRAM_VEC};
+
             for msg in messages.iter() {
                 if msg.msg_type() == raft::prelude::MessageType::MsgAppend {
                     for entry in msg.entries.iter() {
                         if entry.entry_type() == raft::prelude::EntryType::EntryNormal
                             && !entry.data.is_empty()
                         {
-                            let ctx: Context =
-                                bincode::deserialize(&entry.context).map_err(Error::serde_err)?;
-                            span.follows_from(tracing::Id::from_u64(ctx.span_id));
+                            let cmds: Vec<Command> = bincode::deserialize(&entry.data).unwrap();
+                            for cmd in cmds {
+                                if let Command::TxnRequest { request_id, .. } = cmd {
+                                    let duration = {
+                                        let guard = TRACE_CTX.propose_ts.read(&request_id);
+                                        let ts = guard.get().unwrap();
+                                        Duration::from_millis(timestamp() - *ts)
+                                    };
+                                    TRACE_RAFT_LATENCY_HISTOGRAM_VEC
+                                        .with_label_values(&[
+                                            "send",
+                                            &self.node.to_string(),
+                                            &self.group.to_string(),
+                                            &self.raft_node.to_string(),
+                                        ])
+                                        .observe(duration.as_secs_f64());
+                                }
+                            }
                         }
                     }
                 }
@@ -544,10 +586,35 @@ where
         let mut bytes = 0;
         let mut builder = RaftLogBatchBuilder::default();
         for entry in entries {
-            if cfg!(feature = "tracing") && let raft::prelude::EntryType::EntryNormal = entry.entry_type() && !entry.data.is_empty() {
-                let span = tracing::Span::current();
-                let ctx: Context = bincode::deserialize(&entry.context).map_err(Error::serde_err)?;
-                span.follows_from(tracing::Id::from_u64(ctx.span_id));
+            #[cfg(feature = "tracing")]
+            {
+                use runkv_common::time::timestamp;
+
+                use crate::components::command::Command;
+                use crate::trace::{TRACE_CTX, TRACE_RAFT_LATENCY_HISTOGRAM_VEC};
+
+                if entry.entry_type() == raft::prelude::EntryType::EntryNormal
+                    && !entry.data.is_empty()
+                {
+                    let cmds: Vec<Command> = bincode::deserialize(&entry.data).unwrap();
+                    for cmd in cmds {
+                        if let Command::TxnRequest { request_id, .. } = cmd {
+                            let duration = {
+                                let guard = TRACE_CTX.propose_ts.read(&request_id);
+                                let ts = guard.get().unwrap();
+                                Duration::from_millis(timestamp() - *ts)
+                            };
+                            TRACE_RAFT_LATENCY_HISTOGRAM_VEC
+                                .with_label_values(&[
+                                    "append",
+                                    &self.node.to_string(),
+                                    &self.group.to_string(),
+                                    &self.raft_node.to_string(),
+                                ])
+                                .observe(duration.as_secs_f64());
+                        }
+                    }
+                }
             }
 
             bytes += entry.encoded_len();

@@ -7,7 +7,16 @@ lazy_static! {
         prometheus::register_histogram_vec!(
             "raft_log_store_latency_histogram_vec",
             "raft log store latency histogram vec",
-            &["op", "node"]
+            &["op", "node"],
+            vec![0.0001, 0.001, 0.005, 0.01, 0.02, 0.05]
+        )
+        .unwrap();
+    static ref RAFT_LOG_STORE_BLOCK_CACHE_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
+        prometheus::register_histogram_vec!(
+            "raft_log_store_block_cache_latency_histogram_vec",
+            "raft log store block cache latency histogram vec",
+            &["op", "node"],
+            vec![0.00001, 0.0001, 0.0002, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1]
         )
         .unwrap();
     static ref RAFT_LOG_STORE_THROUGHPUT_GAUGE_VEC: prometheus::GaugeVec =
@@ -28,14 +37,16 @@ lazy_static! {
         prometheus::register_histogram_vec!(
             "raft_log_store_batch_writers_histogram_vec",
             "raft log store batch writers histogram vec",
-            &["node"]
+            &["node"],
+            vec![1.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0]
         )
         .unwrap();
     static ref RAFT_LOG_STORE_SYNC_SIZE_HISTOGRAM_VEC: prometheus::HistogramVec =
         prometheus::register_histogram_vec!(
             "raft_log_store_sync_size_histogram_vec",
             "raft log store sync size histogram vec",
-            &["node"]
+            &["node"],
+            vec![256.0, 1024.0, 4096.0, 8192.0, 16384.0, 65536.0],
         )
         .unwrap();
 }
@@ -79,13 +90,13 @@ impl RaftLogStoreMetrics {
                 .get_metric_with_label_values(&["append_log", &node.to_string()])
                 .unwrap(),
 
-            block_cache_get_latency_histogram: RAFT_LOG_STORE_LATENCY_HISTOGRAM_VEC
+            block_cache_get_latency_histogram: RAFT_LOG_STORE_BLOCK_CACHE_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&["block_cache_get", &node.to_string()])
                 .unwrap(),
-            block_cache_insert_latency_histogram: RAFT_LOG_STORE_LATENCY_HISTOGRAM_VEC
+            block_cache_insert_latency_histogram: RAFT_LOG_STORE_BLOCK_CACHE_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&["block_cache_insert", &node.to_string()])
                 .unwrap(),
-            block_cache_fill_latency_histogram: RAFT_LOG_STORE_LATENCY_HISTOGRAM_VEC
+            block_cache_fill_latency_histogram: RAFT_LOG_STORE_BLOCK_CACHE_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&["block_cache_fill", &node.to_string()])
                 .unwrap(),
 
