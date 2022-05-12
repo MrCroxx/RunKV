@@ -22,7 +22,6 @@ where
     queue: Mutex<Vec<Item<T, R>>>,
 }
 
-#[derive(Clone)]
 pub struct Packer<T, R>
 where
     T: 'static,
@@ -31,6 +30,19 @@ where
     default_queue_capacity: usize,
 
     core: Arc<PackerCore<T, R>>,
+}
+
+impl<T, R> Clone for Packer<T, R>
+where
+    T: 'static,
+    R: 'static,
+{
+    fn clone(&self) -> Self {
+        Self {
+            default_queue_capacity: self.default_queue_capacity,
+            core: self.core.clone(),
+        }
+    }
 }
 
 impl<T, R> Default for Packer<T, R>

@@ -4,13 +4,16 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use itertools::Itertools;
 use runkv_common::channel_pool::ChannelPool;
+use runkv_common::packer::Packer;
 use runkv_proto::wheel::raft_service_client::RaftServiceClient;
 use runkv_proto::wheel::RaftRequest;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::RwLock;
 use tonic::transport::Channel;
 use tonic::Request;
 
 use crate::error::{Error, RaftManageError, Result};
+
+const MESSAGE_PACKER_QUEUE_DEFAULT_CAPACITY: usize = 128;
 
 #[async_trait]
 pub trait RaftNetwork: Send + Sync + Clone + 'static {
@@ -25,10 +28,10 @@ pub trait RaftNetwork: Send + Sync + Clone + 'static {
 
     async fn recv(&self, msgs: Vec<raft::prelude::Message>) -> Result<()>;
 
-    async fn take_message_rx(
+    async fn get_message_packer(
         &self,
         raft_node: u64,
-    ) -> Result<mpsc::UnboundedReceiver<raft::prelude::Message>>;
+    ) -> Result<Packer<raft::prelude::Message, ()>>;
 }
 
 #[async_trait]
@@ -60,16 +63,11 @@ impl RaftClient for GrpcRaftClient {
     }
 }
 
-type MessageChannelPair = (
-    mpsc::UnboundedSender<raft::prelude::Message>,
-    Option<mpsc::UnboundedReceiver<raft::prelude::Message>>,
-);
-
 struct GrpcRaftNetworkCore {
     /// `{ raft node -> node }`
     raft_nodes: BTreeMap<u64, u64>,
-    /// `{ raft node -> channels }`
-    message_channels: BTreeMap<u64, MessageChannelPair>,
+    /// `{ raft node -> message packer }`
+    message_packers: BTreeMap<u64, Packer<raft::prelude::Message, ()>>,
     /// `{ group -> [ raft node, .. ] }`
     groups: BTreeMap<u64, Vec<u64>>,
 }
@@ -87,7 +85,7 @@ impl GrpcRaftNetwork {
             node,
             core: Arc::new(RwLock::new(GrpcRaftNetworkCore {
                 raft_nodes: BTreeMap::default(),
-                message_channels: BTreeMap::default(),
+                message_packers: BTreeMap::default(),
                 groups: BTreeMap::default(),
             })),
             channel_pool,
@@ -129,9 +127,9 @@ impl RaftNetwork for GrpcRaftNetwork {
                 .into());
             }
             guard.raft_nodes.insert(raft_node, node);
-            // FIXME: Chnanels doesn't belong to the current node should not be created.
-            let (tx, rx) = mpsc::unbounded_channel();
-            guard.message_channels.insert(raft_node, (tx, Some(rx)));
+
+            let message_packer = Packer::new(MESSAGE_PACKER_QUEUE_DEFAULT_CAPACITY);
+            guard.message_packers.insert(raft_node, message_packer);
         }
         Ok(())
     }
@@ -156,38 +154,32 @@ impl RaftNetwork for GrpcRaftNetwork {
     async fn recv(&self, msgs: Vec<raft::prelude::Message>) -> Result<()> {
         let guard = self.core.read().await;
         for msg in msgs {
-            let tx = &guard
-                .message_channels
-                .get(&msg.to)
-                .ok_or(RaftManageError::RaftNodeNotExists {
-                    raft_node: msg.to,
-                    node: self.node,
-                })?
-                .0;
-            tx.send(msg).map_err(Error::err)?;
+            let packer =
+                &guard
+                    .message_packers
+                    .get(&msg.to)
+                    .ok_or(RaftManageError::RaftNodeNotExists {
+                        raft_node: msg.to,
+                        node: self.node,
+                    })?;
+            packer.append(msg, None);
         }
         Ok(())
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn take_message_rx(
+    async fn get_message_packer(
         &self,
         raft_node: u64,
-    ) -> Result<mpsc::UnboundedReceiver<raft::prelude::Message>> {
-        let mut guard = self.core.write().await;
-        let channel = guard.message_channels.get_mut(&raft_node).ok_or(
+    ) -> Result<Packer<raft::prelude::Message, ()>> {
+        let guard = self.core.read().await;
+        let packer = guard.message_packers.get(&raft_node).cloned().ok_or(
             RaftManageError::RaftNodeNotExists {
                 raft_node,
                 node: self.node,
             },
         )?;
-        let rx = channel.1.take().ok_or_else(|| {
-            RaftManageError::Other(format!(
-                "message rx of raft node {} has already been taken",
-                raft_node
-            ))
-        })?;
-        Ok(rx)
+        Ok(packer)
     }
 }
 
@@ -196,20 +188,20 @@ pub mod tests {
     use super::*;
 
     #[derive(Clone)]
-    pub struct MockRaftClient(mpsc::UnboundedSender<raft::prelude::Message>);
+    pub struct MockRaftClient(Packer<raft::prelude::Message, ()>);
 
     #[async_trait]
     impl RaftClient for MockRaftClient {
         async fn send(&mut self, msgs: Vec<raft::prelude::Message>) -> Result<()> {
             for msg in msgs {
-                self.0.send(msg).unwrap();
+                self.0.append(msg, None);
             }
             Ok(())
         }
     }
 
     #[derive(Clone)]
-    pub struct MockRaftNetwork(Arc<RwLock<BTreeMap<u64, MessageChannelPair>>>);
+    pub struct MockRaftNetwork(Arc<RwLock<BTreeMap<u64, Packer<raft::prelude::Message, ()>>>>);
 
     impl Default for MockRaftNetwork {
         fn default() -> Self {
@@ -224,8 +216,7 @@ pub mod tests {
         async fn register(&self, _group: u64, raft_nodes: BTreeMap<u64, u64>) -> Result<()> {
             let mut guard = self.0.write().await;
             for (raft_node, _) in raft_nodes {
-                let (tx, rx) = mpsc::unbounded_channel();
-                if guard.insert(raft_node, (tx, Some(rx))).is_some() {
+                if guard.insert(raft_node, Packer::default()).is_some() {
                     panic!("redundant raft node");
                 };
             }
@@ -233,27 +224,19 @@ pub mod tests {
         }
 
         async fn client(&self, raft_node: u64) -> Result<MockRaftClient> {
-            let tx = self.0.read().await.get(&raft_node).unwrap().0.clone();
-            Ok(MockRaftClient(tx))
+            let packer = self.0.read().await.get(&raft_node).cloned().unwrap();
+            Ok(MockRaftClient(packer))
         }
 
         async fn recv(&self, _msgs: Vec<raft::prelude::Message>) -> Result<()> {
             unreachable!()
         }
 
-        async fn take_message_rx(
+        async fn get_message_packer(
             &self,
             raft_node: u64,
-        ) -> Result<mpsc::UnboundedReceiver<raft::prelude::Message>> {
-            Ok(self
-                .0
-                .write()
-                .await
-                .get_mut(&raft_node)
-                .unwrap()
-                .1
-                .take()
-                .unwrap())
+        ) -> Result<Packer<raft::prelude::Message, ()>> {
+            Ok(self.0.read().await.get(&raft_node).cloned().unwrap())
         }
     }
 }

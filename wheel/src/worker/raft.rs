@@ -7,11 +7,11 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 use prost::Message;
 use runkv_common::context::Context;
+use runkv_common::packer::Packer;
 use runkv_common::Worker;
 use runkv_storage::raft_log_store::entry::RaftLogBatchBuilder;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
-use tracing::{trace, trace_span, warn};
+use tracing::{trace, warn};
 
 use crate::components::fsm::Fsm;
 use crate::components::raft_log_store::{encode_entry_data, RaftGroupLogStore};
@@ -46,7 +46,6 @@ struct RaftMetrics {
     send_messages_throughput_gauge: prometheus::Gauge,
 
     handle_ready_latency_histogram: prometheus::Histogram,
-    poll_channel_latency_histogram: prometheus::Histogram,
 }
 
 impl RaftMetrics {
@@ -103,21 +102,13 @@ impl RaftMetrics {
                     &raft_node.to_string(),
                 ])
                 .unwrap(),
-            poll_channel_latency_histogram: RAFT_LATENCY_HISTOGRAM_VEC
-                .get_metric_with_label_values(&[
-                    "poll_channel",
-                    &node.to_string(),
-                    &group.to_string(),
-                    &raft_node.to_string(),
-                ])
-                .unwrap(),
         }
     }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Proposal {
-    pub data: Vec<u8>,
+pub struct Proposal<T: 'static> {
+    pub cmds: Vec<T>,
     pub context: Vec<u8>,
 }
 
@@ -126,7 +117,12 @@ pub enum RaftStartMode {
     Restart { peers: Vec<u64> },
 }
 
-pub struct RaftWorkerOptions<RN: RaftNetwork, F: Fsm> {
+pub struct RaftWorkerOptions<RN, F, C>
+where
+    RN: RaftNetwork,
+    F: Fsm,
+    C: Send + Sync + Serialize + std::fmt::Debug + 'static,
+{
     pub group: u64,
     pub node: u64,
     pub raft_node: u64,
@@ -136,15 +132,17 @@ pub struct RaftWorkerOptions<RN: RaftNetwork, F: Fsm> {
     pub raft_logger: slog::Logger,
     pub raft_network: RN,
 
-    pub proposal_rx: mpsc::UnboundedReceiver<Proposal>,
+    pub command_packer: Packer<C, ()>,
+    pub message_packer: Packer<raft::prelude::Message, ()>,
 
     pub fsm: F,
 }
 
-pub struct RaftWorker<RN, F>
+pub struct RaftWorker<RN, F, C>
 where
     RN: RaftNetwork,
     F: Fsm,
+    C: Send + Sync + Serialize + std::fmt::Debug + 'static,
 {
     group: u64,
     node: u64,
@@ -156,18 +154,19 @@ where
     raft_soft_state: Option<raft::SoftState>,
     raft_clients: HashMap<u64, RN::RaftClient>,
 
-    message_rx: mpsc::UnboundedReceiver<raft::prelude::Message>,
-    proposal_rx: mpsc::UnboundedReceiver<Proposal>,
+    command_packer: Packer<C, ()>,
+    message_packer: Packer<raft::prelude::Message, ()>,
 
     fsm: F,
 
     metrics: RaftMetrics,
 }
 
-impl<RN, F> std::fmt::Debug for RaftWorker<RN, F>
+impl<RN, F, C> std::fmt::Debug for RaftWorker<RN, F, C>
 where
     RN: RaftNetwork,
     F: Fsm,
+    C: Send + Sync + Serialize + std::fmt::Debug + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RaftWorker")
@@ -179,10 +178,11 @@ where
 }
 
 #[async_trait]
-impl<RN, F> Worker for RaftWorker<RN, F>
+impl<RN, F, C> Worker for RaftWorker<RN, F, C>
 where
     RN: RaftNetwork,
     F: Fsm,
+    C: Send + Sync + Serialize + std::fmt::Debug + 'static,
 {
     async fn run(&mut self) -> anyhow::Result<()> {
         // TODO: Gracefully kill.
@@ -195,12 +195,13 @@ where
     }
 }
 
-impl<RN, F> RaftWorker<RN, F>
+impl<RN, F, C> RaftWorker<RN, F, C>
 where
     RN: RaftNetwork,
     F: Fsm,
+    C: Send + Sync + Serialize + std::fmt::Debug + 'static,
 {
-    pub async fn build(options: RaftWorkerOptions<RN, F>) -> Result<Self> {
+    pub async fn build(options: RaftWorkerOptions<RN, F, C>) -> Result<Self> {
         let applied = match options.raft_start_mode {
             RaftStartMode::Initialize { .. } => 0,
             RaftStartMode::Restart { .. } => options.fsm.raft_applied_index().await?,
@@ -245,11 +246,6 @@ where
         let raft =
             raft::RawNode::new(&raft_config, raft_log_store.clone(), &options.raft_logger).await?;
 
-        let message_rx = options
-            .raft_network
-            .take_message_rx(options.raft_node)
-            .await?;
-
         let mut raft_clients = HashMap::default();
         for peer in peers {
             let client = options.raft_network.client(peer).await?;
@@ -269,8 +265,8 @@ where
 
             fsm: options.fsm,
 
-            proposal_rx: options.proposal_rx,
-            message_rx,
+            command_packer: options.command_packer,
+            message_packer: options.message_packer,
 
             metrics: RaftMetrics::new(options.node, options.group, options.raft_node),
         })
@@ -309,39 +305,18 @@ where
         loop {
             let now = Instant::now();
 
-            const BATCH_SIZE: usize = 128;
-            let mut msgs = Vec::with_capacity(BATCH_SIZE);
-            let mut proposals = Vec::with_capacity(BATCH_SIZE);
-
-            let pool_channel_span = trace_span!("pool_channel_span");
-            let pool_channel_span_guard = pool_channel_span.enter();
-            let start_poll_channel = Instant::now();
-
-            for _ in 0..BATCH_SIZE {
-                match self.message_rx.try_recv() {
-                    Ok(msg) => msgs.push(msg),
-                    Err(mpsc::error::TryRecvError::Empty) => {}
-                    Err(e) => return Err(Error::err(e)),
-                }
-
-                match self.proposal_rx.try_recv() {
-                    Ok(proposal) => proposals.push(proposal),
-                    Err(mpsc::error::TryRecvError::Empty) => {}
-                    Err(e) => return Err(Error::err(e)),
-                }
-            }
-
-            self.metrics
-                .poll_channel_latency_histogram
-                .observe(start_poll_channel.elapsed().as_secs_f64());
-            drop(pool_channel_span_guard);
-
-            for proposal in proposals {
+            let cmds = self.command_packer.package();
+            if !cmds.is_empty() {
+                let proposal = Proposal {
+                    cmds: cmds.into_iter().map(|raw| raw.data).collect_vec(),
+                    context: vec![],
+                };
                 self.propose(proposal).await?;
             }
 
+            let msgs = self.message_packer.package();
             for msg in msgs {
-                self.step(msg).await?;
+                self.step(msg.data).await?;
             }
 
             if self.raft.has_ready().await {
@@ -368,15 +343,17 @@ where
     }
 
     #[tracing::instrument(level = "trace", fields(request_id))]
-    async fn propose(&mut self, proposal: Proposal) -> Result<()> {
+    async fn propose(&mut self, proposal: Proposal<C>) -> Result<()> {
         if cfg!(feature = "tracing") {
             let span = tracing::Span::current();
             let ctx: Context = bincode::deserialize(&proposal.context).map_err(Error::serde_err)?;
             span.follows_from(tracing::Id::from_u64(ctx.span_id));
             span.record("request_id", &ctx.request_id);
         }
+        let context = proposal.context;
+        let data = bincode::serialize(&proposal.cmds).map_err(Error::serde_err)?;
         self.raft
-            .propose(proposal.context, proposal.data)
+            .propose(context, data)
             .await
             .map_err(Error::RaftError)
     }
@@ -584,6 +561,7 @@ mod tests {
     use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
     use runkv_storage::raft_log_store::RaftLogStore;
     use test_log::test;
+    use tokio::sync::mpsc;
 
     use super::*;
     use crate::components::fsm::tests::MockFsm;
@@ -619,21 +597,15 @@ mod tests {
             };
         }
 
-        let (proposal_tx_1, mut apply_rx_1) = worker!(1);
-        let (_proposal_tx_2, mut apply_rx_2) = worker!(2);
-        let (_proposal_tx_3, mut apply_rx_3) = worker!(3);
+        let (command_packer_1, mut apply_rx_1) = worker!(1);
+        let (_command_packer_2, mut apply_rx_2) = worker!(2);
+        let (_command_packer_3, mut apply_rx_3) = worker!(3);
 
         tokio::time::sleep(Duration::from_secs(10)).await;
 
         let data = vec![b'd'; 16];
-        let context = vec![b'c'; 16];
 
-        proposal_tx_1
-            .send(Proposal {
-                data: data.clone(),
-                context: context.clone(),
-            })
-            .unwrap();
+        command_packer_1.append(data.clone(), None);
 
         loop {
             let entry = tokio::select! {
@@ -648,11 +620,9 @@ mod tests {
             }
             assert_matches!(entry, raft::prelude::Entry {
                 data: edata,
-                context: econtext,
                 ..
             } => {
-                assert_eq!(edata, data);
-                assert_eq!(econtext, context);
+                assert_eq!(edata, bincode::serialize(&vec![data]).unwrap());
             });
             break;
         }
@@ -682,10 +652,11 @@ mod tests {
         raft_logger: slog::Logger,
         raft_network: RN,
     ) -> (
-        mpsc::UnboundedSender<Proposal>,
+        Packer<Vec<u8>, ()>,
         mpsc::UnboundedReceiver<raft::prelude::Entry>,
     ) {
-        let (proposal_tx, proposal_rx) = mpsc::unbounded_channel();
+        let command_packer = Packer::default();
+        let message_packer = raft_network.get_message_packer(raft_node).await.unwrap();
         let (fsm, apply_rx) = MockFsm::new(true);
         let options = RaftWorkerOptions {
             group,
@@ -696,12 +667,13 @@ mod tests {
             raft_logger,
             raft_network,
 
-            proposal_rx,
+            command_packer: command_packer.clone(),
+            message_packer,
 
             fsm,
         };
         let mut worker = RaftWorker::build(options).await.unwrap();
         let _handle = tokio::spawn(async move { worker.run().await });
-        (proposal_tx, apply_rx)
+        (command_packer, apply_rx)
     }
 }

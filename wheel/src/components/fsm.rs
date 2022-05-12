@@ -140,20 +140,22 @@ impl ObjectLsmTreeFsm {
             span.follows_from(tracing::Id::from_u64(ctx.span_id));
             span.record("request_id", &ctx.request_id);
         }
-        let cmd = bincode::deserialize(&entry.data).map_err(Error::serde_err)?;
-        match cmd {
-            Command::TxnRequest {
-                request_id,
-                sequence,
-                request,
-            } => {
-                let response = self.txn(request, sequence, entry.index).await;
-                if let Err(e) = self.txn_notify_pool.notify(request_id, response) {
-                    error!(request_id = request_id, "notify txn result error: {}", e);
+        let cmds: Vec<Command> = bincode::deserialize(&entry.data).map_err(Error::serde_err)?;
+        for cmd in cmds {
+            match cmd {
+                Command::TxnRequest {
+                    request_id,
+                    sequence,
+                    request,
+                } => {
+                    let response = self.txn(request, sequence, entry.index).await;
+                    if let Err(e) = self.txn_notify_pool.notify(request_id, response) {
+                        error!(request_id = request_id, "notify txn result error: {}", e);
+                    }
                 }
-            }
-            Command::CompactRaftLog { index, sequence } => {
-                self.compact_raft_log(index, sequence).await?;
+                Command::CompactRaftLog { index, sequence } => {
+                    self.compact_raft_log(index, sequence).await?;
+                }
             }
         }
         Ok(())
