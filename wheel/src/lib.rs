@@ -7,6 +7,9 @@ pub mod meta;
 pub mod service;
 pub mod worker;
 
+#[cfg(feature = "tracing")]
+pub mod trace;
+
 use std::sync::Arc;
 
 use bytesize::ByteSize;
