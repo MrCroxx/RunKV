@@ -37,7 +37,8 @@ lazy_static! {
         prometheus::register_histogram_vec!(
             "kv_service_latency_histogram_vec",
             "kv service latency histogram vec",
-            &["service", "node"]
+            &["service", "node"],
+            vec![0.05, 0.1, 0.3, 0.5, 1.0, 3.0]
         )
         .unwrap();
 }

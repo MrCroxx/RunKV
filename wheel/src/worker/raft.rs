@@ -34,6 +34,13 @@ lazy_static! {
         &["op", "node", "group", "raft_node"]
     )
     .unwrap();
+    static ref RAFT_BATCH_SIZE_HISTOGRAM_VEC: prometheus::HistogramVec =
+        prometheus::register_histogram_vec!(
+            "raft_batch_size_histogram_vec",
+            "raft batch size histogram vec",
+            &["name", "node", "group", "raft_node"]
+        )
+        .unwrap();
 }
 
 struct RaftMetrics {
@@ -46,6 +53,9 @@ struct RaftMetrics {
     send_messages_throughput_gauge: prometheus::Gauge,
 
     handle_ready_latency_histogram: prometheus::Histogram,
+
+    message_batch_size_histogram: prometheus::Histogram,
+    command_batch_size_histogram: prometheus::Histogram,
 }
 
 impl RaftMetrics {
@@ -97,6 +107,23 @@ impl RaftMetrics {
             handle_ready_latency_histogram: RAFT_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&[
                     "handle_ready",
+                    &node.to_string(),
+                    &group.to_string(),
+                    &raft_node.to_string(),
+                ])
+                .unwrap(),
+
+            message_batch_size_histogram: RAFT_BATCH_SIZE_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[
+                    "message",
+                    &node.to_string(),
+                    &group.to_string(),
+                    &raft_node.to_string(),
+                ])
+                .unwrap(),
+            command_batch_size_histogram: RAFT_BATCH_SIZE_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[
+                    "command",
                     &node.to_string(),
                     &group.to_string(),
                     &raft_node.to_string(),
@@ -307,6 +334,9 @@ where
 
             let cmds = self.command_packer.package();
             if !cmds.is_empty() {
+                self.metrics
+                    .command_batch_size_histogram
+                    .observe(cmds.len() as f64);
                 let proposal = Proposal {
                     cmds: cmds.into_iter().map(|raw| raw.data).collect_vec(),
                     context: vec![],
@@ -315,8 +345,13 @@ where
             }
 
             let msgs = self.message_packer.package();
-            for msg in msgs {
-                self.step(msg.data).await?;
+            if !msgs.is_empty() {
+                self.metrics
+                    .message_batch_size_histogram
+                    .observe(msgs.len() as f64);
+                for msg in msgs {
+                    self.step(msg.data).await?;
+                }
             }
 
             if self.raft.has_ready().await {

@@ -1305,18 +1305,75 @@
         "type": "prometheus",
         "uid": "PEDE6B306CC9C0CD0"
       },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Count",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
         "y": 42
       },
-      "id": 30,
+      "id": 25,
       "options": {
-        "content": "",
-        "mode": "markdown"
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
       },
-      "pluginVersion": "8.5.1",
       "targets": [
         {
           "datasource": {
@@ -1324,14 +1381,15 @@
             "uid": "PEDE6B306CC9C0CD0"
           },
           "editorMode": "code",
-          "expr": "sum(irate(raft_latency_histogram_vec_count[1m])) by (op)",
+          "expr": "avg by (name) (irate(raft_batch_size_histogram_vec_sum[1m])) / avg by (name) (irate(raft_batch_size_histogram_vec_count[1m]))",
           "hide": false,
-          "legendFormat": "{{op}}-frequency",
+          "legendFormat": "{{name}}",
           "range": true,
-          "refId": "C"
+          "refId": "D"
         }
       ],
-      "type": "text"
+      "title": "Batch Size",
+      "type": "timeseries"
     },
     {
       "datasource": {
@@ -2845,7 +2903,7 @@
         "x": 12,
         "y": 107
       },
-      "id": 25,
+      "id": 53,
       "options": {
         "legend": {
           "calcs": [],
@@ -3335,8 +3393,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3459,8 +3516,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3610,8 +3666,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3703,8 +3758,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3807,8 +3861,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3879,7 +3932,7 @@
           "refId": "C"
         }
       ],
-      "title": "Latency",
+      "title": "Block Cache - Latency",
       "transformations": [
         {
           "id": "concatenate",
@@ -3916,7 +3969,7 @@
       "type": "timeseries"
     }
   ],
-  "refresh": false,
+  "refresh": "10s",
   "schemaVersion": 36,
   "style": "dark",
   "tags": [],
@@ -3931,6 +3984,6 @@
   "timezone": "",
   "title": "RunKV Overview",
   "uid": "kJf6Tv_nk",
-  "version": 4,
+  "version": 5,
   "weekStart": ""
 }
