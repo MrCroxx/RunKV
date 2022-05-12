@@ -25,6 +25,7 @@ const DEFAULT_BUFFER_SIZE: usize = 64 << 10;
 pub enum Persist {
     Flush,
     Sync,
+    None,
 }
 
 impl FromStr for Persist {
@@ -34,6 +35,7 @@ impl FromStr for Persist {
         match s {
             "sync" => Ok(Self::Sync),
             "flush" => Ok(Self::Flush),
+            "none" => Ok(Self::None),
             _ => Err(Error::Other(format!("fail to parse {} to Persist", s))),
         }
     }
@@ -299,6 +301,7 @@ impl Log {
                     Persist::Sync => {
                         file.sync_data().await?;
                     }
+                    _ => {}
                 }
                 self.metrics
                     .sync_latency_histogram

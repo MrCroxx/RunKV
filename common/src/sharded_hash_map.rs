@@ -136,6 +136,17 @@ where
         bucket.inner.write().insert(key, value)
     }
 
+    pub fn remove(&self, key: &K) -> Option<V> {
+        let mut hasher = DefaultHasher::new();
+        key.hash(&mut hasher);
+        let hash = hasher.finish();
+        let shard = (hash % self.shards as u64) as u16;
+
+        let bucket = self.buckets.get(&shard).unwrap();
+
+        bucket.inner.write().remove(key)
+    }
+
     pub fn read<'a>(&'a self, key: &'a K) -> ShardedHashMapRwLockReadGuard<'_, K, V> {
         let mut hasher = DefaultHasher::new();
         key.hash(&mut hasher);

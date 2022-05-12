@@ -3,19 +3,17 @@ use runkv_common::sharded_hash_map::ShardedHashMap;
 
 lazy_static! {
     pub static ref TRACE_CTX: TraceContext = TraceContext::default();
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct RequestContext {
-    pub id: u64,
-    pub raft_node: u64,
+    pub static ref TRACE_RAFT_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
+        prometheus::register_histogram_vec!(
+            "trace_raft_latency_histogram_vec",
+            "trace raft latency histogram vec",
+            &["op", "node", "group", "raft_node"],
+            vec![0.001, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0]
+        )
+        .unwrap();
 }
 
 #[derive(Default)]
 pub struct TraceContext {
-    pub propose_ts: ShardedHashMap<RequestContext, u64>,
-    pub raft_propose_ts: ShardedHashMap<RequestContext, u64>,
-    pub raft_send_ts: ShardedHashMap<RequestContext, u64>,
-    pub raft_append_ts: ShardedHashMap<RequestContext, u64>,
-    pub raft_apply_ts: ShardedHashMap<RequestContext, u64>,
+    pub propose_ts: ShardedHashMap<u64, u64>,
 }

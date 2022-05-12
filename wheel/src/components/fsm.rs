@@ -2,7 +2,6 @@ use std::ops::Range;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use runkv_common::context::Context;
 use runkv_common::notify_pool::NotifyPool;
 use runkv_proto::kv::{
     kv_op_request, kv_op_response, DeleteRequest, DeleteResponse, GetRequest, GetResponse,
@@ -134,12 +133,6 @@ impl ObjectLsmTreeFsm {
         if entry.data.is_empty() {
             return Ok(());
         }
-        if cfg!(feature = "tracing") && let raft::prelude::EntryType::EntryNormal = entry.entry_type() && !entry.data.is_empty() {
-            let span = tracing::Span::current();
-            let ctx: Context = bincode::deserialize(&entry.context).map_err(Error::serde_err)?;
-            span.follows_from(tracing::Id::from_u64(ctx.span_id));
-            span.record("request_id", &ctx.request_id);
-        }
         let cmds: Vec<Command> = bincode::deserialize(&entry.data).map_err(Error::serde_err)?;
         for cmd in cmds {
             match cmd {
@@ -148,6 +141,27 @@ impl ObjectLsmTreeFsm {
                     sequence,
                     request,
                 } => {
+                    #[cfg(feature = "tracing")]
+                    {
+                        use runkv_common::time::timestamp;
+
+                        use crate::trace::{TRACE_CTX, TRACE_RAFT_LATENCY_HISTOGRAM_VEC};
+
+                        let duration = {
+                            let guard = TRACE_CTX.propose_ts.read(&request_id);
+                            let ts = guard.get().unwrap();
+                            std::time::Duration::from_millis(timestamp() - *ts)
+                        };
+                        TRACE_RAFT_LATENCY_HISTOGRAM_VEC
+                            .with_label_values(&[
+                                "apply",
+                                &self.node.to_string(),
+                                &self.group.to_string(),
+                                &self.raft_node.to_string(),
+                            ])
+                            .observe(duration.as_secs_f64());
+                    }
+
                     let response = self.txn(request, sequence, entry.index).await;
                     if let Err(e) = self.txn_notify_pool.notify(request_id, response) {
                         error!(request_id = request_id, "notify txn result error: {}", e);

@@ -7,7 +7,8 @@ lazy_static! {
         prometheus::register_histogram_vec!(
             "lsm_tree_block_cache_latency_histogram_vec",
             "lsm tree block cache latency histogram vec",
-            &["op", "node"]
+            &["op", "node"],
+            vec![0.00001, 0.0001, 0.0002, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1]
         )
         .unwrap();
 }
