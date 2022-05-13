@@ -1,9 +1,10 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
-use runkv_proto::meta::KeyRange;
+use runkv_proto::common::Endpoint;
+use runkv_proto::meta::{KeyRange, KeyRangeInfo};
 
 use crate::error::Result;
 
@@ -13,20 +14,26 @@ pub mod object;
 
 #[async_trait]
 pub trait MetaStore: Send + Sync + 'static {
+    /// Add new wheel.
+    async fn add_wheels(&self, wheels: HashMap<u64, Endpoint>) -> Result<()>;
+
+    /// Get all wheel ids.
+    async fn wheels(&self) -> Result<HashMap<u64, Endpoint>>;
+
+    /// Add new key range.
+    async fn add_key_ranges(&self, key_ranges: Vec<KeyRangeInfo>) -> Result<()>;
+
     /// Update exhauster meta.
-    async fn update_exhauster(&self, node_id: u64) -> Result<()>;
+    async fn update_exhauster(&self, node_id: u64, endpoint: Endpoint) -> Result<()>;
 
     /// Random pick a available exhauster.
     async fn pick_exhauster(&self, live: Duration) -> Result<Option<u64>>;
 
-    /// Update responsable key ranges of wheel node.
-    async fn update_node_ranges(&self, node_id: u64, ranges: Vec<KeyRange>) -> Result<()>;
-
-    /// Get all responsable key ranges grouped by nodes.
-    async fn all_node_ranges(&self) -> Result<BTreeMap<u64, Vec<KeyRange>>>;
+    /// Get all responsable key ranges grouped by groups.
+    async fn all_group_key_ranges(&self) -> Result<BTreeMap<u64, Vec<KeyRange>>>;
 
     /// Get all responsable key ranges.
-    async fn all_ranges(&self) -> Result<Vec<KeyRange>>;
+    async fn all_key_ranges(&self) -> Result<Vec<KeyRange>>;
 
     /// Pin sstables to prevent them from being compacted.
     ///
@@ -47,3 +54,11 @@ pub trait MetaStore: Send + Sync + 'static {
 }
 
 pub type MetaStoreRef = Arc<dyn MetaStore>;
+
+fn is_overlap(r1: &KeyRange, r2: &KeyRange) -> bool {
+    !(r1.start_key > r2.end_key || r1.end_key < r2.start_key)
+}
+
+fn _in_range(key: &[u8], range: &KeyRange) -> bool {
+    key >= &range.start_key[..] && key < &range.end_key[..]
+}

@@ -17,12 +17,10 @@ use runkv_proto::kv::{
     KvOpRequest, PutRequest, PutResponse, SnapshotRequest, SnapshotResponse, TxnRequest,
     TxnResponse,
 };
+use runkv_proto::meta::KeyRangeInfo;
 use runkv_proto::wheel::raft_service_server::RaftService;
 use runkv_proto::wheel::wheel_service_server::WheelService;
-use runkv_proto::wheel::{
-    AddEndpointsRequest, AddEndpointsResponse, AddKeyRangeRequest, AddKeyRangeResponse,
-    RaftRequest, RaftResponse,
-};
+use runkv_proto::wheel::*;
 use tonic::{Request, Response, Status};
 use tracing::{trace_span, Instrument};
 
@@ -310,12 +308,12 @@ impl Wheel {
 #[async_trait]
 impl WheelService for Wheel {
     #[tracing::instrument(level = "trace")]
-    async fn add_endpoints(
+    async fn add_wheels(
         &self,
-        request: Request<AddEndpointsRequest>,
-    ) -> core::result::Result<Response<AddEndpointsResponse>, Status> {
+        request: Request<AddWheelsRequest>,
+    ) -> core::result::Result<Response<AddWheelsResponse>, Status> {
         let req = request.into_inner();
-        for (node, Endpoint { host, port }) in req.endpoints.iter() {
+        for (node, Endpoint { host, port }) in req.wheels.iter() {
             let node = Node {
                 id: *node,
                 host: host.to_owned(),
@@ -323,43 +321,52 @@ impl WheelService for Wheel {
             };
             self.inner.channel_pool.put_node(node).await;
         }
-        Ok(Response::new(AddEndpointsResponse::default()))
+        Ok(Response::new(AddWheelsResponse::default()))
     }
 
     #[tracing::instrument(level = "trace")]
-    async fn add_key_range(
+    async fn add_key_ranges(
         &self,
-        request: Request<AddKeyRangeRequest>,
-    ) -> core::result::Result<Response<AddKeyRangeResponse>, Status> {
+        request: Request<AddKeyRangesRequest>,
+    ) -> core::result::Result<Response<AddKeyRangesResponse>, Status> {
         let req = request.into_inner();
-        self.inner
-            .meta_store
-            .add_key_range(req.key_range.unwrap(), req.group, &req.raft_nodes)
-            .await
-            .map_err(internal)?;
-
-        self.inner
-            .raft_network
-            .register(
-                req.group,
-                BTreeMap::from_iter(
-                    req.nodes
-                        .iter()
-                        .map(|(&raft_node, &node)| (raft_node, node)),
-                ),
-            )
-            .await
-            .map_err(internal)?;
-
-        for raft_node in req.raft_nodes.iter() {
+        for KeyRangeInfo {
+            group,
+            key_range,
+            raft_nodes,
+        } in req.key_ranges
+        {
+            let key_range = key_range.unwrap();
             self.inner
-                .raft_manager
-                .create_raft_node(req.group, *raft_node)
+                .meta_store
+                .add_key_range(key_range, group, &raft_nodes.keys().copied().collect_vec())
                 .await
                 .map_err(internal)?;
+            self.inner
+                .raft_network
+                .register(
+                    group,
+                    BTreeMap::from_iter(
+                        raft_nodes
+                            .iter()
+                            .map(|(&raft_node, &node)| (raft_node, node)),
+                    ),
+                )
+                .await
+                .map_err(internal)?;
+            for (raft_node, node) in raft_nodes.into_iter() {
+                if node != self.node {
+                    continue;
+                }
+                self.inner
+                    .raft_manager
+                    .create_raft_node(group, raft_node)
+                    .await
+                    .map_err(internal)?;
+            }
         }
 
-        let rsp = AddKeyRangeResponse::default();
+        let rsp = AddKeyRangesResponse::default();
         Ok(Response::new(rsp))
     }
 }

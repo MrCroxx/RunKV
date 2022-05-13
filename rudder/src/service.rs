@@ -1,11 +1,17 @@
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use itertools::Itertools;
 use runkv_common::channel_pool::ChannelPool;
 use runkv_common::config::Node;
 use runkv_proto::common::Endpoint as PbEndpoint;
 use runkv_proto::manifest::{SstableDiff, SstableOp, VersionDiff};
+use runkv_proto::rudder::control_service_server::ControlService;
 use runkv_proto::rudder::rudder_service_server::RudderService;
 use runkv_proto::rudder::*;
+use runkv_proto::wheel;
+use runkv_proto::wheel::wheel_service_client::WheelServiceClient;
 use runkv_storage::components::SstableStoreRef;
 use runkv_storage::manifest::VersionManager;
 use tonic::{Request, Response, Status};
@@ -20,13 +26,16 @@ fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
 }
 
 pub struct RudderOptions {
+    pub node: u64,
     pub version_manager: VersionManager,
     pub sstable_store: SstableStoreRef,
     pub meta_store: MetaStoreRef,
     pub channel_pool: ChannelPool,
 }
 
+#[derive(Clone)]
 pub struct Rudder {
+    node: u64,
     /// Manifest of sstables.
     version_manager: VersionManager,
     channel_pool: ChannelPool,
@@ -35,21 +44,67 @@ pub struct Rudder {
     ///
     /// `wheel node` maintains its own watermark, and `rudder node` collects watermarks from each
     /// `wheel node` periodically and choose the min watermark among them as its own watermark.
-    _watermark: u64,
+    _watermark: Arc<AtomicU64>,
     _sstable_store: SstableStoreRef,
     meta_store: MetaStoreRef,
+}
+
+impl std::fmt::Debug for Rudder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Rudder").field("node", &self.node).finish()
+    }
 }
 
 impl Rudder {
     pub fn new(options: RudderOptions) -> Self {
         Self {
+            node: options.node,
             version_manager: options.version_manager,
             channel_pool: options.channel_pool,
             // TODO: Restore from meta store.
-            _watermark: 0,
+            _watermark: Arc::new(AtomicU64::new(0)),
             _sstable_store: options.sstable_store,
             meta_store: options.meta_store,
         }
+    }
+}
+
+impl Rudder {
+    async fn handle_wheel_heartbeat(
+        &self,
+        _node: u64,
+        _endpoint: &PbEndpoint,
+        hb: WheelHeartbeatRequest,
+    ) -> Result<heartbeat_response::HeartbeatMessage> {
+        let version_diffs = self
+            .version_manager
+            .version_diffs_from(hb.next_version_id, DEFAULT_VERSION_DIFF_BATCH)
+            .await?;
+        let rsp = heartbeat_response::HeartbeatMessage::WheelHeartbeat(WheelHeartbeatResponse {
+            version_diffs,
+        });
+        Ok(rsp)
+    }
+
+    async fn handle_exhauster_heartbeat(
+        &self,
+        node: u64,
+        endpoint: &PbEndpoint,
+        _hb: ExhausterHeartbeatRequest,
+    ) -> Result<heartbeat_response::HeartbeatMessage> {
+        self.channel_pool
+            .put_node(Node {
+                id: node,
+                host: endpoint.host.clone(),
+                port: endpoint.port as u16,
+            })
+            .await;
+        self.meta_store
+            .update_exhauster(node, endpoint.clone())
+            .await?;
+        let rsp =
+            heartbeat_response::HeartbeatMessage::ExhausterHeartbeat(ExhausterHeartbeatResponse {});
+        Ok(rsp)
     }
 }
 
@@ -126,42 +181,93 @@ impl RudderService for Rudder {
     }
 }
 
-impl Rudder {
-    async fn handle_wheel_heartbeat(
+#[async_trait]
+impl ControlService for Rudder {
+    #[tracing::instrument(level = "trace")]
+    async fn add_wheels(
         &self,
-        node_id: u64,
-        _endpoint: &PbEndpoint,
-        hb: WheelHeartbeatRequest,
-    ) -> Result<heartbeat_response::HeartbeatMessage> {
-        let version_diffs = self
-            .version_manager
-            .version_diffs_from(hb.next_version_id, DEFAULT_VERSION_DIFF_BATCH)
-            .await?;
+        request: Request<AddWheelsRequest>,
+    ) -> core::result::Result<Response<AddWheelsResponse>, Status> {
+        let req = request.into_inner();
+
+        let origin_wheels = self.meta_store.wheels().await.map_err(internal)?;
+
+        // Update meta store.
         self.meta_store
-            .update_node_ranges(node_id, hb.key_ranges)
-            .await?;
-        let rsp = heartbeat_response::HeartbeatMessage::WheelHeartbeat(WheelHeartbeatResponse {
-            version_diffs,
-        });
-        Ok(rsp)
+            .add_wheels(req.wheels.clone())
+            .await
+            .map_err(internal)?;
+
+        // Update channel pool.
+        for (&node, endpoint) in req.wheels.iter() {
+            self.channel_pool
+                .put_node(Node {
+                    id: node,
+                    host: endpoint.host.clone(),
+                    port: endpoint.port as u16,
+                })
+                .await;
+        }
+
+        // Broadcast delta wheels to origin wheels.
+        for (&node, _endpoint) in origin_wheels.iter() {
+            let channel = self.channel_pool.get(node).await.map_err(internal)?;
+            let mut client = WheelServiceClient::new(channel);
+            let wreq = wheel::AddWheelsRequest {
+                wheels: req.wheels.clone(),
+            };
+            client
+                .add_wheels(Request::new(wreq))
+                .await
+                .map_err(internal)?;
+        }
+
+        // Broadcast full wheels to new wheels.
+        let wheels = self.meta_store.wheels().await.map_err(internal)?;
+        for (node, _endpoint) in req.wheels {
+            let channel = self.channel_pool.get(node).await.map_err(internal)?;
+            let mut client = WheelServiceClient::new(channel);
+            let wreq = wheel::AddWheelsRequest {
+                wheels: wheels.clone(),
+            };
+            client
+                .add_wheels(Request::new(wreq))
+                .await
+                .map_err(internal)?;
+        }
+
+        // TODO: Broadcast full key range info to new wheels.
+
+        let rsp = AddWheelsResponse::default();
+        Ok(Response::new(rsp))
     }
 
-    async fn handle_exhauster_heartbeat(
+    #[tracing::instrument(level = "trace")]
+    async fn add_key_ranges(
         &self,
-        node_id: u64,
-        endpoint: &PbEndpoint,
-        _hb: ExhausterHeartbeatRequest,
-    ) -> Result<heartbeat_response::HeartbeatMessage> {
-        self.channel_pool
-            .put_node(Node {
-                id: node_id,
-                host: endpoint.host.clone(),
-                port: endpoint.port as u16,
-            })
-            .await;
-        self.meta_store.update_exhauster(node_id).await?;
-        let rsp =
-            heartbeat_response::HeartbeatMessage::ExhausterHeartbeat(ExhausterHeartbeatResponse {});
-        Ok(rsp)
+        request: Request<AddKeyRangesRequest>,
+    ) -> core::result::Result<Response<AddKeyRangesResponse>, Status> {
+        let req = request.into_inner();
+        // Update meta store.
+        self.meta_store
+            .add_key_ranges(req.key_ranges.clone())
+            .await
+            .map_err(internal)?;
+
+        // Broadcast requests to all wheels.
+        for (node, _endpoint) in self.meta_store.wheels().await.map_err(internal)? {
+            let channel = self.channel_pool.get(node).await.map_err(internal)?;
+            let mut client = WheelServiceClient::new(channel);
+            let wreq = wheel::AddKeyRangesRequest {
+                key_ranges: req.key_ranges.clone(),
+            };
+            client
+                .add_key_ranges(Request::new(wreq))
+                .await
+                .map_err(internal)?;
+        }
+
+        let rsp = AddKeyRangesResponse::default();
+        Ok(Response::new(rsp))
     }
 }

@@ -1,6 +1,6 @@
-id = 101
+id = 0
 host = "127.0.0.1"
-port = 12301
+port = 0
 log = ".run/log/"
 data_path = "data"
 meta_path = "meta"

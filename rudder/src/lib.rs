@@ -13,6 +13,7 @@ use meta::mem::MemoryMetaStore;
 use meta::MetaStoreRef;
 use runkv_common::channel_pool::ChannelPool;
 use runkv_common::BoxedWorker;
+use runkv_proto::rudder::control_service_server::ControlServiceServer;
 use runkv_proto::rudder::rudder_service_server::RudderServiceServer;
 use runkv_storage::components::{
     BlockCache, LsmTreeMetrics, LsmTreeMetricsRef, SstableStore, SstableStoreOptions,
@@ -37,7 +38,8 @@ pub async fn bootstrap_rudder(
     }
 
     Server::builder()
-        .add_service(RudderServiceServer::new(rudder))
+        .add_service(RudderServiceServer::new(rudder.clone()))
+        .add_service(ControlServiceServer::new(rudder))
         .serve(addr_str.parse().map_err(Error::err)?)
         .await
         .map_err(Error::err)
@@ -70,6 +72,7 @@ pub async fn build_rudder_with_object_store(
     )?;
 
     let options = RudderOptions {
+        node: config.id,
         version_manager,
         sstable_store,
         meta_store,

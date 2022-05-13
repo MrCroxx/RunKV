@@ -1,4 +1,5 @@
 use std::collections::btree_map::BTreeMap;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime};
 
@@ -7,21 +8,35 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
-use runkv_proto::meta::KeyRange;
+use runkv_proto::common::Endpoint;
+use runkv_proto::meta::{KeyRange, KeyRangeInfo};
 use tracing::trace;
 
-use super::MetaStore;
-use crate::error::Result;
+use super::{is_overlap, MetaStore};
+use crate::error::{ControlError, Result};
 
 struct ExhausterInfo {
+    _endpoint: Endpoint,
     // TODO: Track pressure.
     heartbeat: SystemTime,
 }
 
 #[derive(Default)]
 pub struct MemoryMetaStoreCore {
+    /// { (wheel) node id -> endpoint }
+    wheels: BTreeMap<u64, Endpoint>,
+    /// { (exhauster) node id -> exhauster info }
     exhausters: BTreeMap<u64, ExhausterInfo>,
-    node_ranges: BTreeMap<u64, Vec<KeyRange>>,
+
+    /// { key range -> raft group id}
+    key_range_groups: BTreeMap<KeyRange, u64>,
+    /// { node id -> [raft node id] }
+    node_raft_nodes: BTreeMap<u64, Vec<u64>>,
+    /// { raft group id -> [raft node id] }
+    group_raft_nodes: BTreeMap<u64, Vec<u64>>,
+    /// { raft node id -> raft group id }
+    raft_node_groups: BTreeMap<u64, u64>,
+
     pinned_sstables: BTreeMap<u64, SystemTime>,
     sstable_pin_ttl: Duration,
 }
@@ -45,12 +60,81 @@ impl MemoryMetaStore {
 
 #[async_trait]
 impl MetaStore for MemoryMetaStore {
-    async fn update_exhauster(&self, node_id: u64) -> Result<()> {
+    async fn add_wheels(&self, endpoints: HashMap<u64, Endpoint>) -> Result<()> {
+        let mut core = self.core.write();
+        for (node, endpoint) in endpoints {
+            if let Some(origin) = core.wheels.get(&node) {
+                return Err(ControlError::NodeAlreadyExists {
+                    node,
+                    origin: origin.clone(),
+                    given: endpoint,
+                }
+                .into());
+            }
+            core.wheels.insert(node, endpoint);
+        }
+        Ok(())
+    }
+
+    async fn wheels(&self) -> Result<HashMap<u64, Endpoint>> {
+        let core = self.core.read();
+        let wheels = HashMap::from_iter(
+            core.wheels
+                .iter()
+                .map(|(&node, endpoint)| (node, endpoint.clone())),
+        );
+        Ok(wheels)
+    }
+
+    async fn add_key_ranges(&self, key_ranges: Vec<KeyRangeInfo>) -> Result<()> {
+        let mut core = self.core.write();
+        for KeyRangeInfo {
+            group,
+            key_range,
+            raft_nodes,
+        } in key_ranges
+        {
+            let key_range = key_range.unwrap();
+            if core.group_raft_nodes.get(&group).is_some() {
+                return Err(ControlError::GroupAlreadyExists(group).into());
+            }
+            for r in core.key_range_groups.keys() {
+                if is_overlap(&key_range, r) {
+                    return Err(ControlError::KeyRangeOverlaps(key_range, r.clone()).into());
+                }
+            }
+            for (raft_node, node) in raft_nodes.iter() {
+                if core.raft_node_groups.get(raft_node).is_some() {
+                    return Err(ControlError::RaftNodeAlreadyExists(*raft_node).into());
+                }
+                if core.wheels.get(node).is_none() {
+                    return Err(ControlError::NodeNotExists(*node).into());
+                }
+            }
+
+            core.key_range_groups.insert(key_range, group);
+            core.group_raft_nodes
+                .insert(group, raft_nodes.keys().copied().collect_vec());
+            for (&raft_node, &node) in raft_nodes.iter() {
+                core.node_raft_nodes
+                    .entry(node)
+                    .or_insert_with(|| Vec::with_capacity(16))
+                    .push(raft_node);
+                core.raft_node_groups.insert(raft_node, group);
+            }
+        }
+        Ok(())
+    }
+
+    async fn update_exhauster(&self, node_id: u64, endpoint: Endpoint) -> Result<()> {
         let heartbeat = SystemTime::now();
-        self.core
-            .write()
-            .exhausters
-            .insert(node_id, ExhausterInfo { heartbeat });
+        self.core.write().exhausters.insert(
+            node_id,
+            ExhausterInfo {
+                _endpoint: endpoint,
+                heartbeat,
+            },
+        );
         Ok(())
     }
 
@@ -71,25 +155,21 @@ impl MetaStore for MemoryMetaStore {
         Ok(None)
     }
 
-    async fn update_node_ranges(&self, node_id: u64, ranges: Vec<KeyRange>) -> Result<()> {
-        let mut guard = self.core.write();
-        guard.node_ranges.insert(node_id, ranges);
-        Ok(())
+    async fn all_group_key_ranges(&self) -> Result<BTreeMap<u64, Vec<KeyRange>>> {
+        let core = self.core.read();
+        let mut group_key_ranges = BTreeMap::default();
+        for (key_range, &group) in core.key_range_groups.iter() {
+            group_key_ranges
+                .entry(group)
+                .or_insert_with(Vec::new)
+                .push(key_range.clone());
+        }
+        Ok(group_key_ranges)
     }
 
-    async fn all_node_ranges(&self) -> Result<BTreeMap<u64, Vec<KeyRange>>> {
-        let guard = self.core.read();
-        let node_ranges = guard.node_ranges.clone();
-        Ok(node_ranges)
-    }
-
-    async fn all_ranges(&self) -> Result<Vec<KeyRange>> {
-        let guard = self.core.read();
-        let ranges = guard
-            .node_ranges
-            .iter()
-            .flat_map(|(_node_id, ranges)| ranges.clone())
-            .collect_vec();
+    async fn all_key_ranges(&self) -> Result<Vec<KeyRange>> {
+        let core = self.core.read();
+        let ranges = core.key_range_groups.keys().cloned().collect_vec();
         Ok(ranges)
     }
 

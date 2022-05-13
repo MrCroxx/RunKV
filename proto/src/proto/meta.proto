@@ -10,6 +10,15 @@ message KeyRange {
   bytes end_key = 2;
 }
 
+message KeyRangeInfo {
+  // raft group id
+  uint64 group = 1;
+  // key range
+  meta.KeyRange key_range = 2;
+  // { raft node id -> node id }
+  map<uint64, uint64> raft_nodes = 3;
+}
+
 message WheelMeta {
   uint64 id = 1;
   KeyRange key_range = 2;

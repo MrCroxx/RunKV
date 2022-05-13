@@ -125,7 +125,10 @@ impl ObjectLsmTreeFsm {
     async fn apply_entry(&self, entry: raft::prelude::Entry) -> Result<()> {
         match entry.entry_type() {
             raft::prelude::EntryType::EntryNormal => self.apply_normal(entry).await,
-            _ => todo!(),
+            _ => {
+                tracing::error!("not implemented: apply entry with non-normal entries");
+                todo!();
+            }
         }
     }
 
@@ -234,6 +237,7 @@ impl ObjectLsmTreeFsm {
 
     #[tracing::instrument(level = "trace")]
     async fn compact_raft_log(&self, _compact_index: u64, _sequence: u64) -> Result<()> {
+        tracing::error!("not implemented: compact raft log");
         todo!()
     }
 }

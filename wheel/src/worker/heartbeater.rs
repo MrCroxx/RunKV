@@ -1,6 +1,9 @@
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use parking_lot::Mutex;
 use runkv_common::channel_pool::ChannelPool;
 use runkv_common::Worker;
 use runkv_proto::common::Endpoint;
@@ -15,23 +18,34 @@ use tracing::warn;
 use crate::error::{Error, Result};
 use crate::meta::MetaStoreRef;
 
+pub type RaftStates = Arc<Mutex<HashMap<u64, Option<raft::SoftState>>>>;
+
 pub struct HeartbeaterOptions {
-    pub node_id: u64,
+    pub node: u64,
+    pub rudder_node: u64,
+
     pub meta_store: MetaStoreRef,
     pub version_manager: VersionManager,
     pub channel_pool: ChannelPool,
-    pub rudder_node_id: u64,
     pub heartbeat_interval: Duration,
     pub endpoint: Endpoint,
+    pub raft_states: RaftStates,
 }
 
 /// [`Heartbeater`] is respons responsible to sync local version manager.
 pub struct Heartbeater {
-    options: HeartbeaterOptions,
-    meta_store: MetaStoreRef,
+    node: u64,
+    rudder_node: u64,
+
+    endpoint: Endpoint,
+    heartbeat_interval: Duration,
+
+    _meta_store: MetaStoreRef,
     version_manager: VersionManager,
     channel_pool: ChannelPool,
-    rudder_node_id: u64,
+
+    // TODO: Move the field into meta store.
+    raft_states: RaftStates,
 }
 
 #[async_trait]
@@ -50,30 +64,49 @@ impl Worker for Heartbeater {
 impl Heartbeater {
     pub fn new(options: HeartbeaterOptions) -> Self {
         Self {
-            version_manager: options.version_manager.clone(),
-            meta_store: options.meta_store.clone(),
-            channel_pool: options.channel_pool.clone(),
-            rudder_node_id: options.rudder_node_id,
-            options,
+            node: options.node,
+            rudder_node: options.rudder_node,
+
+            endpoint: options.endpoint,
+            heartbeat_interval: options.heartbeat_interval,
+
+            version_manager: options.version_manager,
+            _meta_store: options.meta_store,
+            channel_pool: options.channel_pool,
+            raft_states: options.raft_states,
         }
     }
 
     async fn run_inner(&mut self) -> Result<()> {
+        let raft_states = { self.raft_states.lock().clone() };
+        let raft_states = raft_states
+            .into_iter()
+            .map(|(raft_node, ss)| {
+                (
+                    raft_node,
+                    match ss {
+                        Some(ss) => ss.raft_state == raft::StateRole::Leader,
+                        None => false,
+                    },
+                )
+            })
+            .collect();
+
         let request = Request::new(HeartbeatRequest {
-            node_id: self.options.node_id,
-            endpoint: Some(self.options.endpoint.clone()),
+            node_id: self.node,
+            endpoint: Some(self.endpoint.clone()),
             heartbeat_message: Some(heartbeat_request::HeartbeatMessage::WheelHeartbeat(
                 WheelHeartbeatRequest {
                     watermark: self.version_manager.watermark().await,
                     next_version_id: self.version_manager.latest_version_id().await + 1,
-                    key_ranges: self.meta_store.key_ranges().await?,
+                    raft_states,
                 },
             )),
         });
 
         let mut client = RudderServiceClient::new(
             self.channel_pool
-                .get(self.rudder_node_id)
+                .get(self.rudder_node)
                 .await
                 .map_err(Error::err)?,
         );
@@ -95,7 +128,7 @@ impl Heartbeater {
                 );
             }
         }
-        tokio::time::sleep(self.options.heartbeat_interval).await;
+        tokio::time::sleep(self.heartbeat_interval).await;
         Ok(())
     }
 }

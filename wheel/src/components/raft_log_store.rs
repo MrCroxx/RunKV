@@ -249,6 +249,7 @@ impl raft::Storage for RaftGroupLogStore {
         // Impl me!!!
         // Impl me!!!
         // Impl me!!!
+        tracing::error!("not implemented: snapshot");
         todo!()
     }
 }

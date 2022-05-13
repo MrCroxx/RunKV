@@ -9,7 +9,7 @@ import "meta.proto";
 message WheelHeartbeatRequest {
   uint64 watermark = 1;
   uint64 next_version_id = 2;
-  repeated meta.KeyRange key_ranges = 3;
+  map<uint64, bool> raft_states = 3;
 }
 
 message WheelHeartbeatResponse {
@@ -54,7 +54,30 @@ message TsoResponse {
 }
 
 service RudderService {
+  // Called by `wheel` and `exhauster`.
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  // Called by `wheel` when sstable uploader finish upload new L0 sstable to S3.
   rpc InsertL0(InsertL0Request) returns (InsertL0Response);
+  // TODO: Implement transaction.
   rpc Tso(TsoRequest) returns (TsoResponse);
+}
+
+// ***** Control Service *****
+
+message AddWheelsRequest {
+  // { node id -> endpoint }
+  map<uint64, common.Endpoint> wheels = 1;
+}
+
+message AddWheelsResponse {}
+
+message AddKeyRangesRequest {
+  repeated meta.KeyRangeInfo key_ranges = 1;
+}
+
+message AddKeyRangesResponse {}
+
+service ControlService {
+  rpc AddWheels(AddWheelsRequest) returns (AddWheelsResponse);
+  rpc AddKeyRanges(AddKeyRangesRequest) returns (AddKeyRangesResponse);
 }
