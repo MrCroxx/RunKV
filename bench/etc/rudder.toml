@@ -1,6 +1,6 @@
-id = 1
+id = 0
 host = "127.0.0.1"
-port = 12300
+port = 0
 data_path = "data"
 meta_path = "meta"
 health_timeout = "10 s"

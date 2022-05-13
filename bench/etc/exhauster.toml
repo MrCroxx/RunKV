@@ -1,6 +1,6 @@
-id = 201
+id = 0
 host = "127.0.0.1"
-port = 12302
+port = 0
 data_path = "data"
 meta_path = "meta"
 heartbeat_interval = "1 s"

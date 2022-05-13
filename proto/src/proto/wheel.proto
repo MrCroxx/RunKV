@@ -5,30 +5,31 @@ package wheel;
 import "common.proto";
 import "meta.proto";
 
-// ***** inner service *****
+// ***** Inner Service *****
 
-message AddEndpointsRequest {
-  map<uint64, common.Endpoint> endpoints = 1;
+message AddWheelsRequest {
+  // { node id -> endpoint }
+  map<uint64, common.Endpoint> wheels = 1;
 }
 
-message AddEndpointsResponse {}
+message AddWheelsResponse {}
 
-message AddKeyRangeRequest {
-  meta.KeyRange key_range = 1;
-  uint64 group = 2;
-  repeated uint64 raft_nodes = 3;
-  // { raft node -> node }
-  map<uint64, uint64> nodes = 4;
+message AddKeyRangesRequest {
+  repeated meta.KeyRangeInfo key_ranges = 1;
 }
 
-message AddKeyRangeResponse {}
+message AddKeyRangesResponse {}
 
 service WheelService {
-  rpc AddKeyRange(AddKeyRangeRequest) returns (AddKeyRangeResponse);
-  rpc AddEndpoints(AddEndpointsRequest) returns (AddEndpointsResponse);
+  rpc AddWheels(AddWheelsRequest) returns (AddWheelsResponse);
+  rpc AddKeyRanges(AddKeyRangesRequest) returns (AddKeyRangesResponse);
+  // TODO: Implement them.
+  // rpc SyncEndpoints(SyncEndpointsRequest) returns (SyncEndpointsResponse);
+  // rpc SyncKeyRanges(SyncKeyRangesRequest) returns (SyncKeyRangesResponse);
+
 }
 
-// ***** raft service *****
+// ***** Raft Service *****
 
 message RaftRequest {
   bytes data = 1;

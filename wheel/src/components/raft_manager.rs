@@ -24,6 +24,7 @@ use super::lsm_tree::{ObjectStoreLsmTree, ObjectStoreLsmTreeOptions};
 use super::raft_log_store::RaftGroupLogStore;
 use super::raft_network::{GrpcRaftNetwork, RaftNetwork};
 use crate::error::{Error, RaftManageError, Result};
+use crate::worker::heartbeater::RaftStates;
 use crate::worker::raft::{RaftStartMode, RaftWorker, RaftWorkerOptions};
 use crate::worker::sstable_uploader::{SstableUploader, SstableUploaderOptions};
 
@@ -46,6 +47,7 @@ pub struct RaftManagerOptions {
     pub rudder_node_id: u64,
     pub raft_log_store: RaftLogStore,
     pub raft_network: GrpcRaftNetwork,
+    pub raft_states: RaftStates,
     pub txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
     pub version_manager: VersionManager,
     pub sstable_store: SstableStoreRef,
@@ -67,6 +69,7 @@ pub struct RaftManager {
 
     raft_log_store: RaftLogStore,
     raft_network: GrpcRaftNetwork,
+    raft_states: RaftStates,
     raft_logger_root: slog::Logger,
 
     txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
@@ -88,6 +91,7 @@ impl RaftManager {
             rudder_node_id: options.rudder_node_id,
             raft_log_store: options.raft_log_store,
             raft_network: options.raft_network,
+            raft_states: options.raft_states,
             raft_logger_root,
             txn_notify_pool: options.txn_notify_pool,
             version_manager: options.version_manager,
@@ -152,6 +156,7 @@ impl RaftManager {
             raft_log_store,
             raft_logger,
             raft_network: self.raft_network.clone(),
+            raft_states: self.raft_states.clone(),
 
             command_packer: command_packer.clone(),
             message_packer,

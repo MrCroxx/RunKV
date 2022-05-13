@@ -12,6 +12,7 @@ use runkv_storage::raft_log_store::entry::RaftLogBatchBuilder;
 use serde::{Deserialize, Serialize};
 use tracing::{trace, warn};
 
+use super::heartbeater::RaftStates;
 use crate::components::fsm::Fsm;
 use crate::components::raft_log_store::{encode_entry_data, RaftGroupLogStore};
 use crate::components::raft_network::{RaftClient, RaftNetwork};
@@ -159,6 +160,7 @@ where
     pub raft_log_store: RaftGroupLogStore,
     pub raft_logger: slog::Logger,
     pub raft_network: RN,
+    pub raft_states: RaftStates,
 
     pub command_packer: Packer<C, ()>,
     pub message_packer: Packer<raft::prelude::Message, ()>,
@@ -181,6 +183,7 @@ where
     _raft_network: RN,
     raft_soft_state: Option<raft::SoftState>,
     raft_clients: HashMap<u64, RN::RaftClient>,
+    raft_states: RaftStates,
 
     command_packer: Packer<C, ()>,
     message_packer: Packer<raft::prelude::Message, ()>,
@@ -290,6 +293,7 @@ where
             _raft_network: options.raft_network,
             raft_soft_state: None,
             raft_clients,
+            raft_states: options.raft_states,
 
             fsm: options.fsm,
 
@@ -358,6 +362,10 @@ where
             if self.raft.has_ready().await {
                 self.handle_ready().await?;
             }
+
+            self.raft_states
+                .lock()
+                .insert(self.raft_node, self.raft_soft_state.clone());
 
             let mut elapsed = now.elapsed();
             if elapsed < MIN_LOOP_DURATION {
@@ -554,6 +562,7 @@ where
         // Impl me!!!
         // Impl me!!!
         // Impl me!!!
+        tracing::error!("not implemented: apply snapshot");
         todo!()
     }
 
@@ -759,6 +768,7 @@ mod tests {
     ) {
         let command_packer = Packer::default();
         let message_packer = raft_network.get_message_packer(raft_node).await.unwrap();
+        let raft_states = RaftStates::default();
         let (fsm, apply_rx) = MockFsm::new(true);
         let options = RaftWorkerOptions {
             group,
@@ -768,6 +778,7 @@ mod tests {
             raft_log_store,
             raft_logger,
             raft_network,
+            raft_states,
 
             command_packer: command_packer.clone(),
             message_packer,

@@ -276,7 +276,7 @@ async fn trigger_compaction(ctx: CompactionContext) -> Result<()> {
     let now = SystemTime::now();
 
     // Calculate partition points based on node ranges.
-    let node_ranges = ctx.meta_store.all_node_ranges().await?;
+    let node_ranges = ctx.meta_store.all_group_key_ranges().await?;
     let partition_points = node_ranges
         .iter()
         .flat_map(|(_node_id, ranges)| ranges.iter().map(|range| range.start_key.clone()))

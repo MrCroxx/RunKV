@@ -1,7 +1,9 @@
+#![allow(dead_code)]
+
 use std::fs::read_to_string;
 
-mod test_concurrent_put_get;
-mod test_multi_raft_group_concurrent_put_get;
+// mod test_concurrent_put_get;
+// mod test_multi_raft_group_concurrent_put_get;
 
 const PORT_CONFIG_PATH: &str = "etc/port.toml";
 
