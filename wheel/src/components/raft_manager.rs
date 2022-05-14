@@ -23,6 +23,7 @@ use super::fsm::{ObjectLsmTreeFsm, ObjectLsmTreeFsmOptions};
 use super::lsm_tree::{ObjectStoreLsmTree, ObjectStoreLsmTreeOptions};
 use super::raft_log_store::RaftGroupLogStore;
 use super::raft_network::{GrpcRaftNetwork, RaftNetwork};
+use super::read_only_cmd_pool::ReadOnlyCmdPool;
 use crate::error::{Error, RaftManageError, Result};
 use crate::meta::MetaStoreRef;
 use crate::worker::raft::{RaftStartMode, RaftWorker, RaftWorkerOptions};
@@ -112,6 +113,8 @@ impl RaftManager {
     }
 
     pub async fn create_raft_node(&self, group: u64, raft_node: u64) -> Result<()> {
+        let read_only_cmd_pool = ReadOnlyCmdPool::default();
+
         // Build Lsm-tree.
         let lsm_tree_options = ObjectStoreLsmTreeOptions {
             raft_node,
@@ -133,6 +136,7 @@ impl RaftManager {
             raft_node,
             raft_log_store: raft_log_store.clone(),
             lsm_tree: lsm_tree.clone(),
+            read_only_cmd_pool: read_only_cmd_pool.clone(),
             txn_notify_pool: self.txn_notify_pool.clone(),
         };
         let fsm = ObjectLsmTreeFsm::new(fsm_options);
@@ -157,6 +161,8 @@ impl RaftManager {
             raft_logger,
             raft_network: self.raft_network.clone(),
             meta_store: self.meta_store.clone(),
+
+            read_only_cmd_pool,
 
             command_packer: command_packer.clone(),
             message_packer,
