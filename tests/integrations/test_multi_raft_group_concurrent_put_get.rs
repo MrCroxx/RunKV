@@ -6,7 +6,7 @@ use test_log::test;
 use crate::*;
 
 #[test(tokio::test)]
-async fn test_concurrent_put_get() {
+async fn test_multi_raft_group_concurrent_put_get() {
     let port = crate::port("test_multi_raft_group_concurrent_put_get");
 
     let options = Options {
