@@ -2,23 +2,27 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use bytes::{Buf, BufMut};
 use futures::future;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use prost::Message;
-use runkv_common::packer::Packer;
+use runkv_common::packer::{Item, Packer};
 use runkv_common::Worker;
 use runkv_storage::raft_log_store::entry::RaftLogBatchBuilder;
 use serde::{Deserialize, Serialize};
 use tracing::{trace, warn};
 
+use crate::components::command::Command;
 use crate::components::fsm::Fsm;
 use crate::components::raft_log_store::{encode_entry_data, RaftGroupLogStore};
 use crate::components::raft_network::{RaftClient, RaftNetwork};
+use crate::components::read_only_cmd_pool::ReadOnlyCmdPool;
 use crate::error::{Error, Result};
 use crate::meta::MetaStoreRef;
 
 const RAFT_HEARTBEAT_TICK_DURATION: Duration = Duration::from_millis(100);
+const DEFAULT_PROPOSAL_BATCH_SIZE: usize = 64;
 
 lazy_static! {
     static ref RAFT_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
@@ -58,6 +62,7 @@ struct RaftMetrics {
 
     message_batch_size_histogram: prometheus::Histogram,
     command_batch_size_histogram: prometheus::Histogram,
+    proposal_batch_size_histogram: prometheus::Histogram,
 }
 
 impl RaftMetrics {
@@ -131,14 +136,77 @@ impl RaftMetrics {
                     &raft_node.to_string(),
                 ])
                 .unwrap(),
+            proposal_batch_size_histogram: RAFT_BATCH_SIZE_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[
+                    "proposal",
+                    &node.to_string(),
+                    &group.to_string(),
+                    &raft_node.to_string(),
+                ])
+                .unwrap(),
         }
     }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Proposal<T: 'static> {
-    pub cmds: Vec<T>,
+pub struct Proposal {
+    pub cmds: Vec<Command>,
     pub context: Vec<u8>,
+}
+
+/// [`ProposalBuilder`] is used to batch command and split read-only and non-read-only batches.
+struct ProposalsBuilder {
+    cmds: Vec<Command>,
+    read_only: bool,
+}
+
+impl Default for ProposalsBuilder {
+    fn default() -> Self {
+        Self {
+            cmds: Vec::with_capacity(DEFAULT_PROPOSAL_BATCH_SIZE),
+            read_only: true,
+        }
+    }
+}
+
+impl ProposalsBuilder {
+    fn add(&mut self, cmd: Command) -> Option<(Proposal, bool)> {
+        if self.cmds.is_empty() {
+            self.read_only = cmd.is_read_only();
+            self.cmds.push(cmd);
+            return None;
+        }
+        if cmd.is_read_only() == self.read_only {
+            self.cmds.push(cmd);
+            return None;
+        }
+        let read_only = self.read_only;
+        let mut cmds = Vec::with_capacity(DEFAULT_PROPOSAL_BATCH_SIZE);
+        std::mem::swap(&mut cmds, &mut self.cmds);
+        self.read_only = cmd.is_read_only();
+        self.cmds.push(cmd);
+        Some((
+            Proposal {
+                cmds,
+                context: vec![],
+            },
+            read_only,
+        ))
+    }
+
+    fn finish(self) -> Option<(Proposal, bool)> {
+        if self.cmds.is_empty() {
+            None
+        } else {
+            Some((
+                Proposal {
+                    cmds: self.cmds,
+                    context: vec![],
+                },
+                self.read_only,
+            ))
+        }
+    }
 }
 
 pub enum RaftStartMode {
@@ -146,11 +214,10 @@ pub enum RaftStartMode {
     Restart { peers: Vec<u64> },
 }
 
-pub struct RaftWorkerOptions<RN, F, C>
+pub struct RaftWorkerOptions<RN, F>
 where
     RN: RaftNetwork,
     F: Fsm,
-    C: Send + Sync + Serialize + std::fmt::Debug + 'static,
 {
     pub group: u64,
     pub node: u64,
@@ -162,17 +229,18 @@ where
     pub raft_network: RN,
     pub meta_store: MetaStoreRef,
 
-    pub command_packer: Packer<C, ()>,
+    pub read_only_cmd_pool: ReadOnlyCmdPool,
+
+    pub command_packer: Packer<Command, ()>,
     pub message_packer: Packer<raft::prelude::Message, ()>,
 
     pub fsm: F,
 }
 
-pub struct RaftWorker<RN, F, C>
+pub struct RaftWorker<RN, F>
 where
     RN: RaftNetwork,
     F: Fsm,
-    C: Send + Sync + Serialize + std::fmt::Debug + 'static,
 {
     group: u64,
     node: u64,
@@ -185,7 +253,9 @@ where
     raft_clients: HashMap<u64, RN::RaftClient>,
     meta_store: MetaStoreRef,
 
-    command_packer: Packer<C, ()>,
+    read_only_cmd_pool: ReadOnlyCmdPool,
+
+    command_packer: Packer<Command, ()>,
     message_packer: Packer<raft::prelude::Message, ()>,
 
     fsm: F,
@@ -193,11 +263,10 @@ where
     metrics: RaftMetrics,
 }
 
-impl<RN, F, C> std::fmt::Debug for RaftWorker<RN, F, C>
+impl<RN, F> std::fmt::Debug for RaftWorker<RN, F>
 where
     RN: RaftNetwork,
     F: Fsm,
-    C: Send + Sync + Serialize + std::fmt::Debug + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RaftWorker")
@@ -209,11 +278,10 @@ where
 }
 
 #[async_trait]
-impl<RN, F, C> Worker for RaftWorker<RN, F, C>
+impl<RN, F> Worker for RaftWorker<RN, F>
 where
     RN: RaftNetwork,
     F: Fsm,
-    C: Send + Sync + Serialize + std::fmt::Debug + 'static,
 {
     async fn run(&mut self) -> anyhow::Result<()> {
         // TODO: Gracefully kill.
@@ -226,13 +294,12 @@ where
     }
 }
 
-impl<RN, F, C> RaftWorker<RN, F, C>
+impl<RN, F> RaftWorker<RN, F>
 where
     RN: RaftNetwork,
     F: Fsm,
-    C: Send + Sync + Serialize + std::fmt::Debug + 'static,
 {
-    pub async fn build(options: RaftWorkerOptions<RN, F, C>) -> Result<Self> {
+    pub async fn build(options: RaftWorkerOptions<RN, F>) -> Result<Self> {
         let applied = match options.raft_start_mode {
             RaftStartMode::Initialize { .. } => 0,
             RaftStartMode::Restart { .. } => options.fsm.raft_applied_index().await?,
@@ -295,6 +362,8 @@ where
             raft_clients,
             meta_store: options.meta_store,
 
+            read_only_cmd_pool: options.read_only_cmd_pool,
+
             fsm: options.fsm,
 
             command_packer: options.command_packer,
@@ -305,33 +374,6 @@ where
     }
 
     async fn run_inner(&mut self) -> Result<()> {
-        // // [`Interval`] with default [`MissedTickBehavior::Brust`].
-        // let mut ticker = tokio::time::interval(RAFT_HEARTBEAT_TICK_DURATION);
-
-        // loop {
-        //     tokio::select! {
-        //         biased;
-
-        //         _ = ticker.tick() => {
-        //             self.tick().await;
-        //         }
-
-        //         true = self.raft.has_ready() => {
-        //             self.handle_ready().await?;
-
-        //         }
-
-        //         Some(msg) = self.message_rx.recv() => {
-        //             self.step(msg).await?;
-        //         }
-
-        //         Some(proposal) = self.proposal_rx.recv() => {
-        //             self.propose(proposal).await?;
-        //         }
-
-        //     }
-        // }
-
         const MIN_LOOP_DURATION: Duration = Duration::from_millis(10);
         let mut remaining_timeout = RAFT_HEARTBEAT_TICK_DURATION;
         loop {
@@ -342,11 +384,27 @@ where
                 self.metrics
                     .command_batch_size_histogram
                     .observe(cmds.len() as f64);
-                let proposal = Proposal {
-                    cmds: cmds.into_iter().map(|raw| raw.data).collect_vec(),
-                    context: vec![],
-                };
-                self.propose(proposal).await?;
+
+                let mut proposals = 0;
+                let mut builder = ProposalsBuilder::default();
+                for Item {
+                    data: cmd,
+                    notifier: _,
+                } in cmds
+                {
+                    if let Some((proposal, read_only)) = builder.add(cmd) {
+                        self.propose(proposal, read_only).await?;
+                        proposals += 1;
+                    }
+                }
+                if let Some((proposal, read_only)) = builder.finish() {
+                    self.propose(proposal, read_only).await?;
+                    proposals += 1
+                }
+
+                self.metrics
+                    .proposal_batch_size_histogram
+                    .observe(proposals as f64);
             }
 
             let msgs = self.message_packer.package();
@@ -386,8 +444,8 @@ where
         self.raft.tick().await;
     }
 
-    #[tracing::instrument(level = "trace", fields(request_id))]
-    async fn propose(&mut self, proposal: Proposal<C>) -> Result<()> {
+    #[tracing::instrument(level = "trace")]
+    async fn propose(&mut self, proposal: Proposal, read_only: bool) -> Result<()> {
         #[cfg(feature = "tracing")]
         {
             use runkv_common::time::timestamp;
@@ -416,12 +474,21 @@ where
             }
         }
 
-        let context = proposal.context;
-        let data = bincode::serialize(&proposal.cmds).map_err(Error::serde_err)?;
-        self.raft
-            .propose(context, data)
-            .await
-            .map_err(Error::RaftError)
+        if read_only {
+            let id = proposal.cmds.first().as_ref().unwrap().id();
+            let mut ctx = Vec::with_capacity(8);
+            ctx.put_u64(id);
+            self.read_only_cmd_pool.append(id, proposal.cmds);
+            self.raft.read_index(ctx).await;
+        } else {
+            let context = proposal.context;
+            let data = bincode::serialize(&proposal.cmds).map_err(Error::serde_err)?;
+            self.raft
+                .propose(context, data)
+                .await
+                .map_err(Error::RaftError)?;
+        }
+        Ok(())
     }
 
     #[tracing::instrument(level = "trace")]
@@ -452,7 +519,7 @@ where
         }
 
         // 3. Apply committed logs.
-        self.apply_log_entries(ready.take_committed_entries())
+        self.apply_log_entries(ready.take_read_states(), ready.take_committed_entries())
             .await?;
 
         // 4. Append entries to log store.
@@ -473,7 +540,7 @@ where
         self.send_messages(ready.take_messages()).await?;
 
         // 9. Apply committed logs of light ready.
-        self.apply_log_entries(ready.take_committed_entries())
+        self.apply_log_entries(vec![], ready.take_committed_entries())
             .await?;
 
         self.metrics
@@ -568,13 +635,28 @@ where
     }
 
     #[tracing::instrument(level = "trace")]
-    async fn apply_log_entries(&mut self, entries: Vec<raft::prelude::Entry>) -> Result<()> {
+    async fn apply_log_entries(
+        &mut self,
+        read_states: Vec<raft::ReadState>,
+        entries: Vec<raft::prelude::Entry>,
+    ) -> Result<()> {
         let is_leader = match &self.raft_soft_state {
             None => false,
             Some(ss) => ss.raft_state == raft::StateRole::Leader,
         };
 
         let start = Instant::now();
+
+        for raft::ReadState {
+            index,
+            request_ctx: ctx,
+        } in read_states
+        {
+            // TODO: Clear stale read-onlt proposals.
+            // Only leader can get read-only proposals at the same term.
+            let id = (&mut &ctx[..]).get_u64();
+            self.read_only_cmd_pool.ready(id, index);
+        }
 
         self.fsm.apply(self.group, is_leader, entries).await?;
 
@@ -677,6 +759,7 @@ mod tests {
     use tokio::sync::mpsc;
 
     use super::*;
+    use crate::components::command::Command;
     use crate::components::fsm::tests::MockFsm;
     use crate::components::raft_network::tests::MockRaftNetwork;
     use crate::meta::mem::MemoryMetaStore;
@@ -719,9 +802,12 @@ mod tests {
 
         tokio::time::sleep(Duration::from_secs(10)).await;
 
-        let data = vec![b'd'; 16];
+        let cmd = Command::CompactRaftLog {
+            index: 42,
+            sequence: 42,
+        };
 
-        command_packer_1.append(data.clone(), None);
+        command_packer_1.append(cmd.clone(), None);
 
         loop {
             let entry = tokio::select! {
@@ -738,7 +824,7 @@ mod tests {
                 data: edata,
                 ..
             } => {
-                assert_eq!(edata, bincode::serialize(&vec![data]).unwrap());
+                assert_eq!(edata, bincode::serialize(&vec![cmd]).unwrap());
             });
             break;
         }
@@ -770,11 +856,12 @@ mod tests {
         raft_network: RN,
         meta_store: MetaStoreRef,
     ) -> (
-        Packer<Vec<u8>, ()>,
+        Packer<Command, ()>,
         mpsc::UnboundedReceiver<raft::prelude::Entry>,
     ) {
         let command_packer = Packer::default();
         let message_packer = raft_network.get_message_packer(raft_node).await.unwrap();
+        let read_only_cmd_pool = ReadOnlyCmdPool::default();
         let (fsm, apply_rx) = MockFsm::new(true);
         let options = RaftWorkerOptions {
             group,
@@ -785,6 +872,8 @@ mod tests {
             raft_logger,
             raft_network,
             meta_store,
+
+            read_only_cmd_pool,
 
             command_packer: command_packer.clone(),
             message_packer,

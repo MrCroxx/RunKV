@@ -10,6 +10,7 @@ use tracing::error;
 use super::command::Command;
 use super::lsm_tree::ObjectStoreLsmTree;
 use super::raft_log_store::RaftGroupLogStore;
+use super::read_only_cmd_pool::ReadOnlyCmdPool;
 use crate::error::{Error, Result};
 
 #[async_trait]
@@ -64,6 +65,7 @@ pub struct ObjectLsmTreeFsmOptions {
 
     pub raft_log_store: RaftGroupLogStore,
     pub lsm_tree: ObjectStoreLsmTree,
+    pub read_only_cmd_pool: ReadOnlyCmdPool,
     pub txn_notify_pool: NotifyPool<u64, Result<KvResponse>>,
 }
 
@@ -75,6 +77,7 @@ pub struct ObjectLsmTreeFsm {
 
     raft_log_store: RaftGroupLogStore,
     lsm_tree: ObjectStoreLsmTree,
+    read_only_cmd_pool: ReadOnlyCmdPool,
     txn_notify_pool: NotifyPool<u64, Result<KvResponse>>,
 }
 
@@ -97,6 +100,7 @@ impl ObjectLsmTreeFsm {
 
             raft_log_store: options.raft_log_store,
             lsm_tree: options.lsm_tree,
+            read_only_cmd_pool: options.read_only_cmd_pool,
             txn_notify_pool: options.txn_notify_pool,
         }
     }
@@ -134,41 +138,55 @@ impl ObjectLsmTreeFsm {
         }
         let cmds: Vec<Command> = bincode::deserialize(&entry.data).map_err(Error::serde_err)?;
         for cmd in cmds {
-            match cmd {
-                Command::KvRequest {
-                    request_id,
-                    sequence,
-                    request,
-                } => {
-                    #[cfg(feature = "tracing")]
-                    {
-                        use runkv_common::time::timestamp;
+            self.apply_cmd(entry.index, cmd).await?;
+        }
+        Ok(())
+    }
 
-                        use crate::trace::{TRACE_CTX, TRACE_RAFT_LATENCY_HISTOGRAM_VEC};
+    async fn apply_read_only_until(&self, index: u64) -> Result<()> {
+        let cmds = self.read_only_cmd_pool.split(index);
+        for cmd in cmds {
+            // No raft log index needed for read-only cmds.
+            self.apply_cmd(0, cmd).await?;
+        }
+        Ok(())
+    }
 
-                        let duration = {
-                            let guard = TRACE_CTX.propose_ts.read(&request_id);
-                            let ts = guard.get().unwrap();
-                            std::time::Duration::from_millis(timestamp() - *ts)
-                        };
-                        TRACE_RAFT_LATENCY_HISTOGRAM_VEC
-                            .with_label_values(&[
-                                "apply",
-                                &self.node.to_string(),
-                                &self.group.to_string(),
-                                &self.raft_node.to_string(),
-                            ])
-                            .observe(duration.as_secs_f64());
-                    }
+    async fn apply_cmd(&self, index: u64, cmd: Command) -> Result<()> {
+        match cmd {
+            Command::KvRequest {
+                request_id,
+                sequence,
+                request,
+            } => {
+                #[cfg(feature = "tracing")]
+                {
+                    use runkv_common::time::timestamp;
 
-                    let response = self.kv(request, sequence, entry.index).await;
-                    if let Err(e) = self.txn_notify_pool.notify(request_id, response) {
-                        error!(request_id = request_id, "notify txn result error: {}", e);
-                    }
+                    use crate::trace::{TRACE_CTX, TRACE_RAFT_LATENCY_HISTOGRAM_VEC};
+
+                    let duration = {
+                        let guard = TRACE_CTX.propose_ts.read(&request_id);
+                        let ts = guard.get().unwrap();
+                        std::time::Duration::from_millis(timestamp() - *ts)
+                    };
+                    TRACE_RAFT_LATENCY_HISTOGRAM_VEC
+                        .with_label_values(&[
+                            "apply",
+                            &self.node.to_string(),
+                            &self.group.to_string(),
+                            &self.raft_node.to_string(),
+                        ])
+                        .observe(duration.as_secs_f64());
                 }
-                Command::CompactRaftLog { index, sequence } => {
-                    self.compact_raft_log(index, sequence).await?;
+
+                let response = self.kv(request, sequence, index).await;
+                if let Err(e) = self.txn_notify_pool.notify(request_id, response) {
+                    error!(request_id = request_id, "notify txn result error: {}", e);
                 }
+            }
+            Command::CompactRaftLog { index, sequence } => {
+                self.compact_raft_log(index, sequence).await?;
             }
         }
         Ok(())
@@ -312,8 +330,11 @@ impl Fsm for ObjectLsmTreeFsm {
 
         // Apply carried entries.
         for entry in entries {
+            let index = entry.index;
             self.apply_entry(entry).await?;
+            self.apply_read_only_until(index).await?;
         }
+        self.apply_read_only_until(last_apply_index).await?;
 
         // Update `done index`.
         let done_index = last_apply_index;
@@ -359,6 +380,7 @@ pub mod tests {
             entries: Vec<raft::prelude::Entry>,
         ) -> Result<()> {
             if !self.leader_apply || is_leader {
+                // TODO: Handle read-only proposals.
                 for entry in entries {
                     self.tx.send(entry).unwrap()
                 }
