@@ -1,8 +1,20 @@
 global:
-  scrape_interval: 15s 
-  evaluation_interval: 15s 
+  scrape_interval: 15s
+  evaluation_interval: 15s
 scrape_configs:
   - job_name: "prometheus-runkv"
     scrape_interval: 1s
     static_configs:
-      - targets: ["127.0.0.1:9898"]
+      - targets:
+          [
+            "127.0.0.1:9890",
+            "127.0.0.1:9891",
+            "127.0.0.1:9892",
+            "127.0.0.1:9893",
+            "127.0.0.1:9894",
+            "127.0.0.1:9895",
+            "127.0.0.1:9896",
+            "127.0.0.1:9897",
+            "127.0.0.1:9898",
+            "127.0.0.1:9899",
+          ]

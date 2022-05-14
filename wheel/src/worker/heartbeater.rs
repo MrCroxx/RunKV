@@ -1,9 +1,6 @@
-use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use parking_lot::Mutex;
 use runkv_common::channel_pool::ChannelPool;
 use runkv_common::Worker;
 use runkv_proto::common::Endpoint;
@@ -18,8 +15,6 @@ use tracing::warn;
 use crate::error::{Error, Result};
 use crate::meta::MetaStoreRef;
 
-pub type RaftStates = Arc<Mutex<HashMap<u64, Option<raft::SoftState>>>>;
-
 pub struct HeartbeaterOptions {
     pub node: u64,
     pub rudder_node: u64,
@@ -29,7 +24,6 @@ pub struct HeartbeaterOptions {
     pub channel_pool: ChannelPool,
     pub heartbeat_interval: Duration,
     pub endpoint: Endpoint,
-    pub raft_states: RaftStates,
 }
 
 /// [`Heartbeater`] is respons responsible to sync local version manager.
@@ -40,12 +34,9 @@ pub struct Heartbeater {
     endpoint: Endpoint,
     heartbeat_interval: Duration,
 
-    _meta_store: MetaStoreRef,
+    meta_store: MetaStoreRef,
     version_manager: VersionManager,
     channel_pool: ChannelPool,
-
-    // TODO: Move the field into meta store.
-    raft_states: RaftStates,
 }
 
 #[async_trait]
@@ -71,14 +62,13 @@ impl Heartbeater {
             heartbeat_interval: options.heartbeat_interval,
 
             version_manager: options.version_manager,
-            _meta_store: options.meta_store,
+            meta_store: options.meta_store,
             channel_pool: options.channel_pool,
-            raft_states: options.raft_states,
         }
     }
 
     async fn run_inner(&mut self) -> Result<()> {
-        let raft_states = { self.raft_states.lock().clone() };
+        let raft_states = self.meta_store.all_raft_states().await?;
         let raft_states = raft_states
             .into_iter()
             .map(|(raft_node, ss)| {

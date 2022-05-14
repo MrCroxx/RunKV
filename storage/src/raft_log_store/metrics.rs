@@ -8,7 +8,7 @@ lazy_static! {
             "raft_log_store_latency_histogram_vec",
             "raft log store latency histogram vec",
             &["op", "node"],
-            vec![0.0001, 0.001, 0.005, 0.01, 0.02, 0.05]
+            vec![0.0001, 0.001, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5]
         )
         .unwrap();
     static ref RAFT_LOG_STORE_BLOCK_CACHE_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =

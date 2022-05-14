@@ -33,4 +33,4 @@ persist = "{persist}"
 
 [prometheus]
 host = "127.0.0.1"
-port = 9898
+port = 0
