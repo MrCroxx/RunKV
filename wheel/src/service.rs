@@ -12,11 +12,7 @@ use runkv_common::notify_pool::NotifyPool;
 use runkv_common::sync::TicketLock;
 use runkv_proto::common::Endpoint;
 use runkv_proto::kv::kv_service_server::KvService;
-use runkv_proto::kv::{
-    kv_op_request, kv_op_response, DeleteRequest, DeleteResponse, GetRequest, GetResponse,
-    KvOpRequest, PutRequest, PutResponse, SnapshotRequest, SnapshotResponse, TxnRequest,
-    TxnResponse,
-};
+use runkv_proto::kv::*;
 use runkv_proto::meta::KeyRangeInfo;
 use runkv_proto::wheel::raft_service_server::RaftService;
 use runkv_proto::wheel::wheel_service_server::WheelService;
@@ -27,7 +23,7 @@ use tracing::{trace_span, Instrument};
 use crate::components::command::Command;
 use crate::components::raft_manager::RaftManager;
 use crate::components::raft_network::{GrpcRaftNetwork, RaftNetwork};
-use crate::error::{Error, KvError, Result};
+use crate::error::{Error, Result};
 use crate::meta::MetaStoreRef;
 
 lazy_static! {
@@ -91,7 +87,7 @@ pub struct WheelOptions {
     pub channel_pool: ChannelPool,
     pub raft_network: GrpcRaftNetwork,
     pub raft_manager: RaftManager,
-    pub txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
+    pub txn_notify_pool: NotifyPool<u64, Result<KvResponse>>,
 }
 
 struct WheelInner {
@@ -99,7 +95,7 @@ struct WheelInner {
     channel_pool: ChannelPool,
     raft_network: GrpcRaftNetwork,
     raft_manager: RaftManager,
-    txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
+    txn_notify_pool: NotifyPool<u64, Result<KvResponse>>,
     request_id: AtomicU64,
 
     sequence_lock: TicketLock,
@@ -140,119 +136,64 @@ impl std::fmt::Debug for Wheel {
 }
 
 impl Wheel {
-    async fn get_inner(&self, request: GetRequest) -> Result<GetResponse> {
-        let req = TxnRequest {
-            ops: vec![KvOpRequest {
-                request: Some(kv_op_request::Request::Get(request)),
-            }],
-        };
-        let mut rsp = self.txn_inner(req).await?;
-        let response = match rsp.ops.remove(0).response.unwrap() {
-            kv_op_response::Response::Get(response) => response,
-            _ => unreachable!(),
-        };
-        Ok(response)
-    }
-
-    async fn put_inner(&self, request: PutRequest) -> Result<PutResponse> {
-        let req = TxnRequest {
-            ops: vec![KvOpRequest {
-                request: Some(kv_op_request::Request::Put(request)),
-            }],
-        };
-        let mut rsp = self.txn_inner(req).await?;
-        let response = match rsp.ops.remove(0).response.unwrap() {
-            kv_op_response::Response::Put(response) => response,
-            _ => unreachable!(),
-        };
-        Ok(response)
-    }
-
-    async fn delete_inner(&self, request: DeleteRequest) -> Result<DeleteResponse> {
-        let req = TxnRequest {
-            ops: vec![KvOpRequest {
-                request: Some(kv_op_request::Request::Delete(request)),
-            }],
-        };
-        let mut rsp = self.txn_inner(req).await?;
-        let response = match rsp.ops.remove(0).response.unwrap() {
-            kv_op_response::Response::Delete(response) => response,
-            _ => unreachable!(),
-        };
-        Ok(response)
-    }
-
-    async fn snapshot_inner(&self, request: SnapshotRequest) -> Result<SnapshotResponse> {
-        let req = TxnRequest {
-            ops: vec![KvOpRequest {
-                request: Some(kv_op_request::Request::Snapshot(request)),
-            }],
-        };
-        let mut rsp = self.txn_inner(req).await?;
-        let response = match rsp.ops.remove(0).response.unwrap() {
-            kv_op_response::Response::Snapshot(response) => response,
-            _ => unreachable!(),
-        };
-        Ok(response)
-    }
-
-    #[tracing::instrument(level = "trace", fields(request_id))]
-    async fn txn_inner(&self, request: TxnRequest) -> Result<TxnResponse> {
+    async fn kv_inner(&self, request: KvRequest) -> Result<KvResponse> {
         let start = Instant::now();
 
-        // Pick raft leader of the request.
-        let raft_nodes = self.txn_raft_nodes(&request).await?;
-        assert!(!raft_nodes.is_empty());
-        let raft_node = *raft_nodes.first().unwrap();
+        let target = request.target;
+        let read_only = request.is_read_only();
 
-        let read_only = request.ops.iter().all(|op| {
-            matches!(
-                op.request,
-                Some(kv_op_request::Request::Snapshot(_)) | Some(kv_op_request::Request::Get(_))
-            )
-        });
-
-        let sequence = self.inner.raft_manager.get_sequence(raft_node).await?;
-
-        self.inner.sequence_lock.async_acquire().await;
-
-        let sequence = if read_only {
-            sequence.load(Ordering::Acquire)
-        } else {
-            sequence.fetch_add(1, Ordering::SeqCst) + 1
+        let command_packer = match self.inner.raft_manager.get_command_packer(target).await {
+            Some(packer) => packer,
+            None => {
+                return Ok(KvResponse {
+                    ops: request.ops,
+                    err: ErrCode::Redirect.into(),
+                })
+            }
         };
 
-        // Register request.
-        let request_id = self.inner.request_id.fetch_add(1, Ordering::SeqCst) + 1;
-        let rx = self
-            .inner
-            .txn_notify_pool
-            .register(request_id)
-            .map_err(Error::err)?;
+        let sequence = self.inner.raft_manager.get_sequence(target).await?;
 
-        // Propose cmd with raft leader.
-        let command_packer = self
-            .inner
-            .raft_manager
-            .get_command_packer(raft_node)
-            .await?;
-        let cmd = Command::TxnRequest {
-            request_id,
-            sequence,
-            request,
+        // Critical area for propose sequence.
+        let rx = {
+            self.inner.sequence_lock.async_acquire().await;
+
+            // Increase sequence if request is not read-only.
+            let sequence = if read_only {
+                sequence.load(Ordering::Acquire)
+            } else {
+                sequence.fetch_add(1, Ordering::SeqCst) + 1
+            };
+
+            // Register request.
+            let request_id = self.inner.request_id.fetch_add(1, Ordering::SeqCst) + 1;
+            let rx = self
+                .inner
+                .txn_notify_pool
+                .register(request_id)
+                .map_err(Error::err)?;
+
+            // Propose cmd with raft leader.
+            let cmd = Command::KvRequest {
+                request_id,
+                sequence,
+                request,
+            };
+            command_packer.append(cmd, None);
+
+            #[cfg(feature = "tracing")]
+            {
+                use runkv_common::time::timestamp;
+
+                use crate::trace::TRACE_CTX;
+
+                TRACE_CTX.propose_ts.insert(request_id, timestamp());
+            }
+
+            self.inner.sequence_lock.release();
+
+            rx
         };
-        command_packer.append(cmd, None);
-
-        #[cfg(feature = "tracing")]
-        {
-            use runkv_common::time::timestamp;
-
-            use crate::trace::TRACE_CTX;
-
-            TRACE_CTX.propose_ts.insert(request_id, timestamp());
-        }
-
-        self.inner.sequence_lock.release();
 
         self.inner
             .metrics
@@ -273,35 +214,6 @@ impl Wheel {
             .observe(start.elapsed().as_secs_f64());
 
         response
-    }
-
-    async fn txn_raft_nodes<'a>(&self, request: &'a TxnRequest) -> Result<Vec<u64>> {
-        assert!(!request.ops.is_empty());
-
-        let key = |req: &'a kv_op_request::Request| -> &'a [u8] {
-            match req {
-                kv_op_request::Request::Get(GetRequest { key, .. }) => key,
-                kv_op_request::Request::Put(PutRequest { key, .. }) => key,
-                kv_op_request::Request::Delete(DeleteRequest { key }) => key,
-                kv_op_request::Request::Snapshot(SnapshotRequest { key }) => key,
-            }
-        };
-
-        let keys = request
-            .ops
-            .iter()
-            .map(|op| key(op.request.as_ref().unwrap()))
-            .collect_vec();
-
-        let (_range, _group, raft_nodes) = self
-            .inner
-            .meta_store
-            .all_in_range(&keys)
-            .await?
-            .ok_or_else(|| KvError::InvalidShard(format!("request {:?}", request)))?;
-
-        // TODO: Find the potential leader.
-        Ok(raft_nodes)
     }
 }
 
@@ -391,83 +303,46 @@ impl RaftService for Wheel {
 #[async_trait]
 impl KvService for Wheel {
     #[tracing::instrument(level = "trace")]
-    async fn get(
+    async fn kv(
         &self,
-        request: Request<GetRequest>,
-    ) -> core::result::Result<Response<GetResponse>, Status> {
+        request: Request<KvRequest>,
+    ) -> core::result::Result<Response<KvResponse>, Status> {
         let start = Instant::now();
-        let req = request.into_inner();
-        let rsp = self.get_inner(req).await.map_err(internal)?;
-        let elapsed = start.elapsed();
-        self.inner
-            .metrics
-            .kv_service_get_latency_histogram
-            .observe(elapsed.as_secs_f64());
-        Ok(Response::new(rsp))
-    }
 
-    #[tracing::instrument(level = "trace")]
-    async fn put(
-        &self,
-        request: Request<PutRequest>,
-    ) -> core::result::Result<Response<PutResponse>, Status> {
-        let start = Instant::now();
         let req = request.into_inner();
-        let rsp = self.put_inner(req).await.map_err(internal)?;
-        let elapsed = start.elapsed();
-        self.inner
-            .metrics
-            .kv_service_put_latency_histogram
-            .observe(elapsed.as_secs_f64());
-        Ok(Response::new(rsp))
-    }
+        let r#type = req.r#type();
+        let rsp = self.kv_inner(req).await.map_err(internal)?;
 
-    #[tracing::instrument(level = "trace")]
-    async fn delete(
-        &self,
-        request: Request<DeleteRequest>,
-    ) -> core::result::Result<Response<DeleteResponse>, Status> {
-        let start = Instant::now();
-        let req = request.into_inner();
-        let rsp = self.delete_inner(req).await.map_err(internal)?;
+        let elapsed = start.elapsed().as_secs_f64();
 
-        let elapsed = start.elapsed();
-        self.inner
-            .metrics
-            .kv_service_delete_latency_histogram
-            .observe(elapsed.as_secs_f64());
-        Ok(Response::new(rsp))
-    }
-
-    #[tracing::instrument(level = "trace")]
-    async fn snapshot(
-        &self,
-        request: Request<SnapshotRequest>,
-    ) -> core::result::Result<Response<SnapshotResponse>, Status> {
-        let start = Instant::now();
-        let req = request.into_inner();
-        let rsp = self.snapshot_inner(req).await.map_err(internal)?;
-        let elapsed = start.elapsed();
-        self.inner
-            .metrics
-            .kv_service_snapshot_latency_histogram
-            .observe(elapsed.as_secs_f64());
-        Ok(Response::new(rsp))
-    }
-
-    #[tracing::instrument(level = "trace")]
-    async fn txn(
-        &self,
-        request: Request<TxnRequest>,
-    ) -> core::result::Result<Response<TxnResponse>, Status> {
-        let start = Instant::now();
-        let req = request.into_inner();
-        let rsp = self.txn_inner(req).await.map_err(internal)?;
-        let elapsed = start.elapsed();
-        self.inner
-            .metrics
-            .kv_service_txn_latency_histogram
-            .observe(elapsed.as_secs_f64());
+        match r#type {
+            Type::TNone => {}
+            Type::TGet => self
+                .inner
+                .metrics
+                .kv_service_get_latency_histogram
+                .observe(elapsed),
+            Type::TPut => self
+                .inner
+                .metrics
+                .kv_service_put_latency_histogram
+                .observe(elapsed),
+            Type::TDelete => self
+                .inner
+                .metrics
+                .kv_service_delete_latency_histogram
+                .observe(elapsed),
+            Type::TSnapshot => self
+                .inner
+                .metrics
+                .kv_service_snapshot_latency_histogram
+                .observe(elapsed),
+            Type::TTxn => self
+                .inner
+                .metrics
+                .kv_service_txn_latency_histogram
+                .observe(elapsed),
+        }
         Ok(Response::new(rsp))
     }
 }

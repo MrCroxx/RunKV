@@ -2,9 +2,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use runkv_common::channel_pool::ChannelPool;
+use runkv_common::config::Node;
 use runkv_common::Worker;
 use runkv_proto::rudder::control_service_client::ControlServiceClient;
-use runkv_proto::rudder::ListKeyRangesRequest;
+use runkv_proto::rudder::RouterRequest;
 use tonic::Request;
 use tracing::warn;
 
@@ -47,12 +48,20 @@ impl Heartbeater {
                 .await
                 .map_err(Error::err)?;
             let mut client = ControlServiceClient::new(channel);
-            let infos = client
-                .list_key_ranges(Request::new(ListKeyRangesRequest::default()))
+            let rsp = client
+                .router(Request::new(RouterRequest::default()))
                 .await?
-                .into_inner()
-                .key_ranges;
-            self.router.update_key_ranges(infos);
+                .into_inner();
+            self.router.update_key_ranges(rsp.key_ranges);
+            for (node, endpoint) in rsp.wheels {
+                self.channel_pool
+                    .put_node(Node {
+                        id: node,
+                        host: endpoint.host,
+                        port: endpoint.port as u16,
+                    })
+                    .await;
+            }
         }
     }
 }

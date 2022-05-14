@@ -398,7 +398,7 @@ where
             for cmd in proposal.cmds.iter() {
                 let buf = bincode::serialize(cmd).unwrap();
                 let cmd: Command = bincode::deserialize(&buf).unwrap();
-                if let Command::TxnRequest { request_id, .. } = cmd {
+                if let Command::KvRequest { request_id, .. } = cmd {
                     let duration = {
                         let guard = TRACE_CTX.propose_ts.read(&request_id);
                         let ts = guard.get().unwrap();
@@ -503,7 +503,7 @@ where
                         {
                             let cmds: Vec<Command> = bincode::deserialize(&entry.data).unwrap();
                             for cmd in cmds {
-                                if let Command::TxnRequest { request_id, .. } = cmd {
+                                if let Command::KvRequest { request_id, .. } = cmd {
                                     let duration = {
                                         let guard = TRACE_CTX.propose_ts.read(&request_id);
                                         let ts = guard.get().unwrap();
@@ -607,7 +607,7 @@ where
                 {
                     let cmds: Vec<Command> = bincode::deserialize(&entry.data).unwrap();
                     for cmd in cmds {
-                        if let Command::TxnRequest { request_id, .. } = cmd {
+                        if let Command::KvRequest { request_id, .. } = cmd {
                             let duration = {
                                 let guard = TRACE_CTX.propose_ts.read(&request_id);
                                 let ts = guard.get().unwrap();

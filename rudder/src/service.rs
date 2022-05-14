@@ -276,16 +276,17 @@ impl ControlService for Rudder {
     }
 
     #[tracing::instrument(level = "trace")]
-    async fn list_key_ranges(
+    async fn router(
         &self,
-        _request: Request<ListKeyRangesRequest>,
-    ) -> core::result::Result<Response<ListKeyRangesResponse>, Status> {
-        let infos = self
+        _request: Request<RouterRequest>,
+    ) -> core::result::Result<Response<RouterResponse>, Status> {
+        let key_ranges = self
             .meta_store
             .all_key_range_infos()
             .await
             .map_err(internal)?;
-        let rsp = ListKeyRangesResponse { key_ranges: infos };
+        let wheels = self.meta_store.wheels().await.map_err(internal)?;
+        let rsp = RouterResponse { key_ranges, wheels };
         Ok(Response::new(rsp))
     }
 }

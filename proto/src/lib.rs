@@ -48,6 +48,48 @@ pub mod kv {
 
     use runkv_common::coding::BytesSerde;
 
-    impl<'de> BytesSerde<'de> for TxnRequest {}
-    impl<'de> BytesSerde<'de> for TxnResponse {}
+    impl<'de> BytesSerde<'de> for KvRequest {}
+    impl<'de> BytesSerde<'de> for KvResponse {}
+
+    impl KvRequest {
+        pub fn r#type(&self) -> Type {
+            let mut r#type = Type::TNone;
+            for op in self.ops.iter() {
+                match op.r#type() {
+                    OpType::None => {}
+                    OpType::Get => match r#type {
+                        Type::TNone => r#type = Type::TGet,
+                        Type::TGet | Type::TTxn => {}
+                        _ => r#type = Type::TTxn,
+                    },
+                    OpType::Put => match r#type {
+                        Type::TNone => r#type = Type::TPut,
+                        Type::TPut | Type::TTxn => {}
+                        _ => r#type = Type::TTxn,
+                    },
+                    OpType::Delete => match r#type {
+                        Type::TNone => r#type = Type::TDelete,
+                        Type::TDelete | Type::TTxn => {}
+                        _ => r#type = Type::TTxn,
+                    },
+                    OpType::Snapshot => match r#type {
+                        Type::TNone => r#type = Type::TSnapshot,
+                        Type::TSnapshot | Type::TTxn => {}
+                        _ => r#type = Type::TTxn,
+                    },
+                }
+            }
+            r#type
+        }
+
+        pub fn is_read_only(&self) -> bool {
+            for op in self.ops.iter() {
+                match op.r#type() {
+                    OpType::None | OpType::Get | OpType::Snapshot => {}
+                    OpType::Put | OpType::Delete => return false,
+                }
+            }
+            true
+        }
+    }
 }

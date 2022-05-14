@@ -81,14 +81,15 @@ message AddKeyRangesRequest {
 
 message AddKeyRangesResponse {}
 
-message ListKeyRangesRequest {}
+message RouterRequest {}
 
-message ListKeyRangesResponse {
+message RouterResponse {
   repeated meta.KeyRangeInfo key_ranges = 1;
+  map<uint64, common.Endpoint> wheels = 2;
 }
 
 service ControlService {
   rpc AddWheels(AddWheelsRequest) returns (AddWheelsResponse);
   rpc AddKeyRanges(AddKeyRangesRequest) returns (AddKeyRangesResponse);
-  rpc ListKeyRanges(ListKeyRangesRequest) returns (ListKeyRangesResponse);
+  rpc Router(RouterRequest) returns (RouterResponse);
 }
