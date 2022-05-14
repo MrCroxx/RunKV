@@ -20,6 +20,7 @@ runkv-exhauster = { path = "../exhauster" }
 runkv-proto = { path = "../proto" }
 runkv-rudder = { path = "../rudder" }
 runkv-storage = { path = "../storage" }
+runkv-tests = { path = "../tests" }
 runkv-wheel = { path = "../wheel" }
 tempfile = "3"
 test-log = "0.2.10"
