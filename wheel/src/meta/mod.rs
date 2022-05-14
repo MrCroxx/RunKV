@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -23,6 +24,16 @@ pub trait MetaStore: Send + Sync + 'static {
     async fn in_range(&self, key: &[u8]) -> Result<Option<(KeyRange, u64, Vec<u64>)>>;
 
     async fn all_in_range(&self, keys: &[&[u8]]) -> Result<Option<(KeyRange, u64, Vec<u64>)>>;
+
+    async fn update_raft_state(
+        &self,
+        raft_node: u64,
+        raft_state: Option<raft::SoftState>,
+    ) -> Result<()>;
+
+    async fn all_raft_states(&self) -> Result<HashMap<u64, Option<raft::SoftState>>>;
+
+    async fn is_raft_leader(&self, raft_node: u64) -> Result<bool>;
 }
 
 pub type MetaStoreRef = Arc<dyn MetaStore>;

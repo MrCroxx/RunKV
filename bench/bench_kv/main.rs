@@ -43,13 +43,13 @@ const EXHAUSTER_NODE_ID_BASE: u64 = 100;
 
 const RUDDER_PORT: u16 = 12300;
 const WHEEL_PORT_BASE: u16 = 12300;
+const WHEEL_PROMETHEUS_PORT_BASE: u16 = 9890;
 const EXHAUSTER_PORT_BASE: u16 = 12400;
 
 const LOCALHOST: &str = "127.0.0.1";
 
 #[derive(Parser, Debug, Clone)]
 struct Args {
-    // TODO: Increase default value to 3.
     /// Count of wheel nodes, [1, 10].
     #[clap(long, default_value = "1")]
     wheels: u64,
@@ -277,6 +277,7 @@ async fn main() {
             config.raft_log_store.log_dir_path = format!("{}/{}", raft_log_store_data_dir, i);
             config.id = i + WHEEL_NODE_ID_BASE;
             config.port = i as u16 + WHEEL_PORT_BASE;
+            config.prometheus.port = i as u16 + WHEEL_PROMETHEUS_PORT_BASE;
             config
         };
         let (wheel, wheel_workers) =

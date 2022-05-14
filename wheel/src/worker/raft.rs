@@ -12,11 +12,11 @@ use runkv_storage::raft_log_store::entry::RaftLogBatchBuilder;
 use serde::{Deserialize, Serialize};
 use tracing::{trace, warn};
 
-use super::heartbeater::RaftStates;
 use crate::components::fsm::Fsm;
 use crate::components::raft_log_store::{encode_entry_data, RaftGroupLogStore};
 use crate::components::raft_network::{RaftClient, RaftNetwork};
 use crate::error::{Error, Result};
+use crate::meta::MetaStoreRef;
 
 const RAFT_HEARTBEAT_TICK_DURATION: Duration = Duration::from_millis(100);
 
@@ -160,7 +160,7 @@ where
     pub raft_log_store: RaftGroupLogStore,
     pub raft_logger: slog::Logger,
     pub raft_network: RN,
-    pub raft_states: RaftStates,
+    pub meta_store: MetaStoreRef,
 
     pub command_packer: Packer<C, ()>,
     pub message_packer: Packer<raft::prelude::Message, ()>,
@@ -183,7 +183,7 @@ where
     _raft_network: RN,
     raft_soft_state: Option<raft::SoftState>,
     raft_clients: HashMap<u64, RN::RaftClient>,
-    raft_states: RaftStates,
+    meta_store: MetaStoreRef,
 
     command_packer: Packer<C, ()>,
     message_packer: Packer<raft::prelude::Message, ()>,
@@ -293,7 +293,7 @@ where
             _raft_network: options.raft_network,
             raft_soft_state: None,
             raft_clients,
-            raft_states: options.raft_states,
+            meta_store: options.meta_store,
 
             fsm: options.fsm,
 
@@ -363,9 +363,9 @@ where
                 self.handle_ready().await?;
             }
 
-            self.raft_states
-                .lock()
-                .insert(self.raft_node, self.raft_soft_state.clone());
+            self.meta_store
+                .update_raft_state(self.raft_node, self.raft_soft_state.clone())
+                .await?;
 
             let mut elapsed = now.elapsed();
             if elapsed < MIN_LOOP_DURATION {
@@ -415,6 +415,7 @@ where
                 }
             }
         }
+
         let context = proposal.context;
         let data = bincode::serialize(&proposal.cmds).map_err(Error::serde_err)?;
         self.raft
@@ -664,6 +665,7 @@ where
 mod tests {
 
     use std::collections::BTreeMap;
+    use std::sync::Arc;
 
     use assert_matches::assert_matches;
     use runkv_common::tracing_slog_drain::TracingSlogDrain;
@@ -677,6 +679,7 @@ mod tests {
     use super::*;
     use crate::components::fsm::tests::MockFsm;
     use crate::components::raft_network::tests::MockRaftNetwork;
+    use crate::meta::mem::MemoryMetaStore;
 
     #[test(tokio::test)]
     async fn test_raft_basic() {
@@ -692,6 +695,7 @@ mod tests {
             .register(100, BTreeMap::from_iter([(1, 10), (2, 10), (3, 10)]))
             .await
             .unwrap();
+        let meta_store = Arc::new(MemoryMetaStore::default());
 
         macro_rules! worker {
             ($id:expr) => {
@@ -703,6 +707,7 @@ mod tests {
                     RaftGroupLogStore::new($id, raft_log_store.clone()),
                     raft_logger.clone(),
                     raft_network.clone(),
+                    meta_store.clone(),
                 )
                 .await
             };
@@ -754,6 +759,7 @@ mod tests {
         RaftLogStore::open(options).await.unwrap()
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn build_raft_worker<RN: RaftNetwork>(
         group: u64,
         node: u64,
@@ -762,13 +768,13 @@ mod tests {
         raft_log_store: RaftGroupLogStore,
         raft_logger: slog::Logger,
         raft_network: RN,
+        meta_store: MetaStoreRef,
     ) -> (
         Packer<Vec<u8>, ()>,
         mpsc::UnboundedReceiver<raft::prelude::Entry>,
     ) {
         let command_packer = Packer::default();
         let message_packer = raft_network.get_message_packer(raft_node).await.unwrap();
-        let raft_states = RaftStates::default();
         let (fsm, apply_rx) = MockFsm::new(true);
         let options = RaftWorkerOptions {
             group,
@@ -778,7 +784,7 @@ mod tests {
             raft_log_store,
             raft_logger,
             raft_network,
-            raft_states,
+            meta_store,
 
             command_packer: command_packer.clone(),
             message_packer,

@@ -152,6 +152,13 @@ impl Wheel {
             }
         };
 
+        if !self.inner.meta_store.is_raft_leader(target).await? {
+            return Ok(KvResponse {
+                ops: request.ops,
+                err: ErrCode::Redirect.into(),
+            });
+        }
+
         let sequence = self.inner.raft_manager.get_sequence(target).await?;
 
         // Critical area for propose sequence.

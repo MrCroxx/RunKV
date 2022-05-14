@@ -1,4 +1,5 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -7,6 +8,8 @@ use runkv_proto::meta::KeyRange;
 
 use super::{in_range, is_overlap, MetaStore};
 use crate::error::{MetaError, Result};
+
+type RaftStates = Arc<RwLock<HashMap<u64, Option<raft::SoftState>>>>;
 
 #[derive(Default)]
 struct MemoryMetaStoreCore {
@@ -17,6 +20,8 @@ struct MemoryMetaStoreCore {
 #[derive(Default)]
 pub struct MemoryMetaStore {
     inner: RwLock<MemoryMetaStoreCore>,
+
+    raft_states: RaftStates,
 }
 
 impl MemoryMetaStore {}
@@ -82,5 +87,28 @@ impl MetaStore for MemoryMetaStore {
             }
         }
         Ok(Some((range, group, raft_nodes)))
+    }
+
+    async fn update_raft_state(
+        &self,
+        raft_node: u64,
+        raft_state: Option<raft::SoftState>,
+    ) -> Result<()> {
+        let mut raft_states = self.raft_states.write();
+        raft_states.insert(raft_node, raft_state);
+        Ok(())
+    }
+
+    async fn all_raft_states(&self) -> Result<HashMap<u64, Option<raft::SoftState>>> {
+        Ok(self.raft_states.read().clone())
+    }
+
+    async fn is_raft_leader(&self, raft_node: u64) -> Result<bool> {
+        let raft_states = self.raft_states.read();
+        let is_leader = match raft_states.get(&raft_node) {
+            None | Some(None) => false,
+            Some(Some(ss)) => ss.raft_state == raft::StateRole::Leader,
+        };
+        Ok(is_leader)
     }
 }

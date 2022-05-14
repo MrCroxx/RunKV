@@ -38,7 +38,7 @@ use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
 use service::{Wheel, WheelOptions};
 use tonic::transport::Server;
 use tracing::info;
-use worker::heartbeater::{Heartbeater, HeartbeaterOptions, RaftStates};
+use worker::heartbeater::{Heartbeater, HeartbeaterOptions};
 
 use crate::config::WheelConfig;
 
@@ -85,8 +85,6 @@ pub async fn build_wheel_with_object_store(
 ) -> Result<(Wheel, Vec<BoxedWorker>)> {
     let lsm_tree_metrics = Arc::new(LsmTreeMetrics::new(config.id));
 
-    let raft_states = RaftStates::default();
-
     let sstable_store = build_sstable_store(config, object_store, lsm_tree_metrics.clone())?;
 
     let version_manager = build_version_manager(config, sstable_store.clone())?;
@@ -100,7 +98,6 @@ pub async fn build_wheel_with_object_store(
         version_manager.clone(),
         meta_store.clone(),
         channel_pool.clone(),
-        raft_states.clone(),
     )?;
 
     let txn_notify_pool = build_txn_notify_pool();
@@ -111,9 +108,9 @@ pub async fn build_wheel_with_object_store(
         config,
         raft_log_store,
         raft_network.clone(),
-        raft_states,
         txn_notify_pool.clone(),
         version_manager.clone(),
+        meta_store.clone(),
         sstable_store.clone(),
         channel_pool.clone(),
         lsm_tree_metrics.clone(),
@@ -193,7 +190,6 @@ fn build_heartbeater(
     version_manager: VersionManager,
     meta_store: MetaStoreRef,
     channel_pool: ChannelPool,
-    raft_states: RaftStates,
 ) -> Result<Heartbeater> {
     let wheel_version_manager_options = HeartbeaterOptions {
         node: config.id,
@@ -210,7 +206,6 @@ fn build_heartbeater(
             host: config.host.clone(),
             port: config.port as u32,
         },
-        raft_states,
     };
     Ok(Heartbeater::new(wheel_version_manager_options))
 }
@@ -260,9 +255,9 @@ fn build_raft_manager(
     config: &WheelConfig,
     raft_log_store: RaftLogStore,
     raft_network: GrpcRaftNetwork,
-    raft_states: RaftStates,
     txn_notify_pool: NotifyPool<u64, Result<KvResponse>>,
     version_manager: VersionManager,
+    meta_store: MetaStoreRef,
     sstable_store: SstableStoreRef,
     channel_pool: ChannelPool,
     lsm_tree_metrics: LsmTreeMetricsRef,
@@ -272,9 +267,9 @@ fn build_raft_manager(
         rudder_node_id: config.rudder.id,
         raft_log_store,
         raft_network,
-        raft_states,
         txn_notify_pool,
         version_manager,
+        meta_store,
         sstable_store,
         channel_pool,
         lsm_tree_options: crate::components::raft_manager::LsmTreeOptions {
