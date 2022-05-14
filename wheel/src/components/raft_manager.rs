@@ -10,7 +10,7 @@ use runkv_common::packer::Packer;
 use runkv_common::time::rtimestamp;
 use runkv_common::tracing_slog_drain::TracingSlogDrain;
 use runkv_common::Worker;
-use runkv_proto::kv::TxnResponse;
+use runkv_proto::kv::KvResponse;
 use runkv_storage::components::{LsmTreeMetricsRef, SstableStoreRef};
 use runkv_storage::manifest::VersionManager;
 use runkv_storage::raft_log_store::RaftLogStore;
@@ -48,7 +48,7 @@ pub struct RaftManagerOptions {
     pub raft_log_store: RaftLogStore,
     pub raft_network: GrpcRaftNetwork,
     pub raft_states: RaftStates,
-    pub txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
+    pub txn_notify_pool: NotifyPool<u64, Result<KvResponse>>,
     pub version_manager: VersionManager,
     pub sstable_store: SstableStoreRef,
     pub channel_pool: ChannelPool,
@@ -72,7 +72,7 @@ pub struct RaftManager {
     raft_states: RaftStates,
     raft_logger_root: slog::Logger,
 
-    txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
+    txn_notify_pool: NotifyPool<u64, Result<KvResponse>>,
     version_manager: VersionManager,
     sstable_store: SstableStoreRef,
     channel_pool: ChannelPool,
@@ -229,19 +229,9 @@ impl RaftManager {
         Ok(())
     }
 
-    pub async fn get_command_packer(&self, raft_node: u64) -> Result<Packer<Command, ()>> {
+    pub async fn get_command_packer(&self, raft_node: u64) -> Option<Packer<Command, ()>> {
         let inner = self.inner.read().await;
-        inner
-            .command_packers
-            .get(&raft_node)
-            .cloned()
-            .ok_or_else(|| {
-                RaftManageError::RaftNodeNotExists {
-                    raft_node,
-                    node: self.node,
-                }
-                .into()
-            })
+        inner.command_packers.get(&raft_node).cloned()
     }
 
     // TODO: REMOVE ME.

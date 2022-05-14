@@ -9,7 +9,7 @@ use runkv_common::Worker;
 use runkv_proto::common::Endpoint;
 use runkv_proto::rudder::rudder_service_client::RudderServiceClient;
 use runkv_proto::rudder::{
-    heartbeat_request, heartbeat_response, HeartbeatRequest, WheelHeartbeatRequest,
+    heartbeat_request, heartbeat_response, HeartbeatRequest, RaftState, WheelHeartbeatRequest,
 };
 use runkv_storage::manifest::{ManifestError, VersionManager};
 use tonic::Request;
@@ -84,9 +84,11 @@ impl Heartbeater {
             .map(|(raft_node, ss)| {
                 (
                     raft_node,
-                    match ss {
-                        Some(ss) => ss.raft_state == raft::StateRole::Leader,
-                        None => false,
+                    RaftState {
+                        is_leader: match ss {
+                            Some(ss) => ss.raft_state == raft::StateRole::Leader,
+                            None => false,
+                        },
                     },
                 )
             })

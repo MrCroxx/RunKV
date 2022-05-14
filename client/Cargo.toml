@@ -5,6 +5,18 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+itertools = "0.10.3"
+parking_lot = "0.12"
 runkv-common = { path = "../common" }
 runkv-proto = { path = "../proto" }
+thiserror = "1.0"
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+] }
 tonic = "0.6.2"
+tracing = "0.1"

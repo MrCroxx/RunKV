@@ -17,6 +17,9 @@ message KeyRangeInfo {
   meta.KeyRange key_range = 2;
   // { raft node id -> node id }
   map<uint64, uint64> raft_nodes = 3;
+  // leader raft node id
+  // Used by query router info.
+  uint64 leader = 4;
 }
 
 message WheelMeta {

@@ -24,7 +24,7 @@ use runkv_common::prometheus::DefaultPrometheusExporter;
 use runkv_common::BoxedWorker;
 use runkv_proto::common::Endpoint as PbEndpoint;
 use runkv_proto::kv::kv_service_server::KvServiceServer;
-use runkv_proto::kv::TxnResponse;
+use runkv_proto::kv::KvResponse;
 use runkv_proto::wheel::raft_service_server::RaftServiceServer;
 use runkv_proto::wheel::wheel_service_server::WheelServiceServer;
 use runkv_storage::components::{
@@ -261,7 +261,7 @@ fn build_raft_manager(
     raft_log_store: RaftLogStore,
     raft_network: GrpcRaftNetwork,
     raft_states: RaftStates,
-    txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
+    txn_notify_pool: NotifyPool<u64, Result<KvResponse>>,
     version_manager: VersionManager,
     sstable_store: SstableStoreRef,
     channel_pool: ChannelPool,
@@ -315,6 +315,6 @@ fn build_raft_manager(
     Ok(RaftManager::new(raft_manager_options))
 }
 
-fn build_txn_notify_pool() -> NotifyPool<u64, Result<TxnResponse>> {
+fn build_txn_notify_pool() -> NotifyPool<u64, Result<KvResponse>> {
     NotifyPool::new(65535)
 }

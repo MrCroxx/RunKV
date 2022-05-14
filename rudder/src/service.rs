@@ -80,6 +80,10 @@ impl Rudder {
             .version_manager
             .version_diffs_from(hb.next_version_id, DEFAULT_VERSION_DIFF_BATCH)
             .await?;
+        self.meta_store
+            .update_raft_states(hb.raft_states)
+            .await
+            .map_err(internal)?;
         let rsp = heartbeat_response::HeartbeatMessage::WheelHeartbeat(WheelHeartbeatResponse {
             version_diffs,
         });
@@ -268,6 +272,21 @@ impl ControlService for Rudder {
         }
 
         let rsp = AddKeyRangesResponse::default();
+        Ok(Response::new(rsp))
+    }
+
+    #[tracing::instrument(level = "trace")]
+    async fn router(
+        &self,
+        _request: Request<RouterRequest>,
+    ) -> core::result::Result<Response<RouterResponse>, Status> {
+        let key_ranges = self
+            .meta_store
+            .all_key_range_infos()
+            .await
+            .map_err(internal)?;
+        let wheels = self.meta_store.wheels().await.map_err(internal)?;
+        let rsp = RouterResponse { key_ranges, wheels };
         Ok(Response::new(rsp))
     }
 }

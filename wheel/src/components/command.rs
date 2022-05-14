@@ -1,13 +1,13 @@
 use runkv_common::coding::BytesSerde;
-use runkv_proto::kv::TxnRequest;
+use runkv_proto::kv::KvRequest;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Command {
-    TxnRequest {
+    KvRequest {
         request_id: u64,
         sequence: u64,
-        request: TxnRequest,
+        request: KvRequest,
     },
     CompactRaftLog {
         index: u64,

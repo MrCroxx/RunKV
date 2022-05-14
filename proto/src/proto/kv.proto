@@ -2,67 +2,46 @@ syntax = "proto3";
 
 package kv;
 
-message GetRequest {
-  bytes key = 1;
-  uint64 sequence = 2;
+enum ErrCode {
+  OK = 0;
+  REDIRECT = 1;
 }
 
-message GetResponse {
-  bytes value = 1;
+enum OpType {
+  NONE = 0;
+  GET = 1; // (key[, sequence]) -> (value)
+  PUT = 2; // (key, value) -> ()
+  DELETE = 3; // (key) -> ()
+  SNAPSHOT = 4; // () -> (sequence)
 }
 
-message PutRequest {
-  bytes key = 1;
-  bytes value = 2;
+enum Type {
+  T_NONE = 0;
+  T_GET = 1;
+  T_PUT = 2;
+  T_DELETE = 3;
+  T_SNAPSHOT = 4;
+  T_TXN = 5;
 }
 
-message PutResponse {}
-
-message DeleteRequest {
-  bytes key = 1;
+message Op {
+  OpType type = 1;
+  bytes key = 2;
+  bytes value = 3;
+  uint64 sequence = 4;
 }
 
-message DeleteResponse {}
-
-message SnapshotRequest {
-  // A dummy key, infers that take snapshot of the shard that belongs.
-  bytes key = 1;
+message KvRequest {
+  repeated Op ops = 1;
+  // target raft node id
+  uint64 target = 2;
 }
 
-message SnapshotResponse {
-  uint64 sequence = 1;
-}
-
-message KvOpRequest {
-  oneof request {
-    GetRequest get = 1;
-    PutRequest put = 2;
-    DeleteRequest delete = 3;
-    SnapshotRequest snapshot = 4;
-  }
-}
-
-message KvOpResponse {
-  oneof response {
-    GetResponse get = 1;
-    PutResponse put = 2;
-    DeleteResponse delete = 3;
-    SnapshotResponse snapshot = 4;
-  }
-}
-
-message TxnRequest {
-  repeated KvOpRequest ops = 1;
-}
-
-message TxnResponse {
-  repeated KvOpResponse ops = 1;
+message KvResponse {
+  repeated Op ops = 1;
+  ErrCode err = 2;
 }
 
 service KvService {
-  rpc Get(GetRequest) returns (GetResponse);
-  rpc Put(PutRequest) returns (PutResponse);
-  rpc Delete(DeleteRequest) returns (DeleteResponse);
-  rpc Snapshot(SnapshotRequest) returns (SnapshotResponse);
-  rpc Txn(TxnRequest) returns (TxnResponse);
+  rpc Kv(KvRequest) returns (KvResponse);
 }

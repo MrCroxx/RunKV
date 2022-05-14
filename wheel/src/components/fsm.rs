@@ -3,11 +3,7 @@ use std::ops::Range;
 use async_trait::async_trait;
 use bytes::Bytes;
 use runkv_common::notify_pool::NotifyPool;
-use runkv_proto::kv::{
-    kv_op_request, kv_op_response, DeleteRequest, DeleteResponse, GetRequest, GetResponse,
-    KvOpResponse, PutRequest, PutResponse, SnapshotRequest, SnapshotResponse, TxnRequest,
-    TxnResponse,
-};
+use runkv_proto::kv::*;
 use runkv_storage::raft_log_store::error::RaftLogStoreError;
 use tracing::error;
 
@@ -68,7 +64,7 @@ pub struct ObjectLsmTreeFsmOptions {
 
     pub raft_log_store: RaftGroupLogStore,
     pub lsm_tree: ObjectStoreLsmTree,
-    pub txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
+    pub txn_notify_pool: NotifyPool<u64, Result<KvResponse>>,
 }
 
 #[derive(Clone)]
@@ -79,7 +75,7 @@ pub struct ObjectLsmTreeFsm {
 
     raft_log_store: RaftGroupLogStore,
     lsm_tree: ObjectStoreLsmTree,
-    txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
+    txn_notify_pool: NotifyPool<u64, Result<KvResponse>>,
 }
 
 impl std::fmt::Debug for ObjectLsmTreeFsm {
@@ -139,7 +135,7 @@ impl ObjectLsmTreeFsm {
         let cmds: Vec<Command> = bincode::deserialize(&entry.data).map_err(Error::serde_err)?;
         for cmd in cmds {
             match cmd {
-                Command::TxnRequest {
+                Command::KvRequest {
                     request_id,
                     sequence,
                     request,
@@ -165,7 +161,7 @@ impl ObjectLsmTreeFsm {
                             .observe(duration.as_secs_f64());
                     }
 
-                    let response = self.txn(request, sequence, entry.index).await;
+                    let response = self.kv(request, sequence, entry.index).await;
                     if let Err(e) = self.txn_notify_pool.notify(request_id, response) {
                         error!(request_id = request_id, "notify txn result error: {}", e);
                     }
@@ -179,38 +175,59 @@ impl ObjectLsmTreeFsm {
     }
 
     #[tracing::instrument(level = "trace")]
-    async fn txn(
+    async fn kv(
         &self,
-        request: TxnRequest,
+        request: KvRequest,
         sequence: u64,
         raft_log_index: u64,
-    ) -> Result<TxnResponse> {
+    ) -> Result<KvResponse> {
         let mut ops = Vec::with_capacity(request.ops.len());
         for op in request.ops {
-            let op = match op.request.unwrap() {
-                kv_op_request::Request::Get(GetRequest { key, sequence: seq }) => {
-                    kv_op_response::Response::Get(GetResponse {
-                        value: self
-                            .get(key, if seq > 0 { seq } else { sequence })
-                            .await?
-                            .unwrap_or_default(),
-                    })
+            let op = match op.r#type() {
+                OpType::None => Op {
+                    r#type: OpType::None.into(),
+                    ..Default::default()
+                },
+                OpType::Get => {
+                    let value = self
+                        .get(
+                            op.key,
+                            if op.sequence > 0 {
+                                op.sequence
+                            } else {
+                                sequence
+                            },
+                        )
+                        .await?
+                        .unwrap_or_default();
+                    Op {
+                        r#type: OpType::Get.into(),
+                        value,
+                        ..Default::default()
+                    }
                 }
-                kv_op_request::Request::Put(PutRequest { key, value }) => {
-                    self.put(key, value, raft_log_index, sequence).await?;
-                    kv_op_response::Response::Put(PutResponse::default())
+                OpType::Put => {
+                    self.put(op.key, op.value, raft_log_index, sequence).await?;
+                    Op {
+                        r#type: OpType::Put.into(),
+                        ..Default::default()
+                    }
                 }
-                kv_op_request::Request::Delete(DeleteRequest { key }) => {
-                    self.delete(key, raft_log_index, sequence).await?;
-                    kv_op_response::Response::Delete(DeleteResponse::default())
+                OpType::Delete => {
+                    self.delete(op.key, raft_log_index, sequence).await?;
+                    Op {
+                        r#type: OpType::Delete.into(),
+                        ..Default::default()
+                    }
                 }
-                kv_op_request::Request::Snapshot(SnapshotRequest { .. }) => {
-                    kv_op_response::Response::Snapshot(SnapshotResponse { sequence })
-                }
+                OpType::Snapshot => todo!(),
             };
-            ops.push(KvOpResponse { response: Some(op) });
+            ops.push(op);
         }
-        Ok(TxnResponse { ops })
+        Ok(KvResponse {
+            ops,
+            err: ErrCode::Ok.into(),
+        })
     }
 
     #[tracing::instrument(level = "trace")]
