@@ -334,6 +334,7 @@ impl WheelService for Wheel {
             group,
             key_range,
             raft_nodes,
+            ..
         } in req.key_ranges
         {
             let key_range = key_range.unwrap();

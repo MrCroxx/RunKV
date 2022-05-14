@@ -166,6 +166,7 @@ impl ClusterInitializer {
             group,
             key_range: Some(KeyRange { start_key, end_key }),
             raft_nodes,
+            leader: 0,
         });
     }
 

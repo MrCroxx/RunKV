@@ -5,6 +5,7 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use runkv_proto::common::Endpoint;
 use runkv_proto::meta::{KeyRange, KeyRangeInfo};
+use runkv_proto::rudder::RaftState;
 
 use crate::error::Result;
 
@@ -22,6 +23,12 @@ pub trait MetaStore: Send + Sync + 'static {
 
     /// Add new key range.
     async fn add_key_ranges(&self, key_ranges: Vec<KeyRangeInfo>) -> Result<()>;
+
+    /// Get all key range infos.
+    async fn all_key_range_infos(&self) -> Result<Vec<KeyRangeInfo>>;
+
+    /// Update raft states.
+    async fn update_raft_states(&self, raft_states: HashMap<u64, RaftState>) -> Result<()>;
 
     /// Update exhauster meta.
     async fn update_exhauster(&self, node_id: u64, endpoint: Endpoint) -> Result<()>;

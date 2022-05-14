@@ -2256,9 +2256,16 @@ dependencies = [
 name = "runkv-client"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "async-trait",
+ "itertools",
+ "parking_lot 0.12.0",
  "runkv-common",
  "runkv-proto",
+ "thiserror",
+ "tokio",
  "tonic",
+ "tracing",
 ]
 
 [[package]]

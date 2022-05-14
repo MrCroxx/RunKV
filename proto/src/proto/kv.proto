@@ -2,6 +2,11 @@ syntax = "proto3";
 
 package kv;
 
+enum ErrCode {
+  OK = 0;
+  REDIRECT = 1;
+}
+
 message GetRequest {
   bytes key = 1;
   uint64 sequence = 2;
@@ -9,6 +14,7 @@ message GetRequest {
 
 message GetResponse {
   bytes value = 1;
+  ErrCode err = 100;
 }
 
 message PutRequest {
@@ -16,13 +22,17 @@ message PutRequest {
   bytes value = 2;
 }
 
-message PutResponse {}
+message PutResponse {
+  ErrCode err = 100;
+}
 
 message DeleteRequest {
   bytes key = 1;
 }
 
-message DeleteResponse {}
+message DeleteResponse {
+  ErrCode err = 100;
+}
 
 message SnapshotRequest {
   // A dummy key, infers that take snapshot of the shard that belongs.
@@ -31,6 +41,7 @@ message SnapshotRequest {
 
 message SnapshotResponse {
   uint64 sequence = 1;
+  ErrCode err = 100;
 }
 
 message KvOpRequest {
@@ -57,6 +68,7 @@ message TxnRequest {
 
 message TxnResponse {
   repeated KvOpResponse ops = 1;
+  ErrCode err = 100;
 }
 
 service KvService {

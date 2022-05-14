@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use runkv_common::notify_pool::NotifyPool;
 use runkv_proto::kv::{
-    kv_op_request, kv_op_response, DeleteRequest, DeleteResponse, GetRequest, GetResponse,
+    kv_op_request, kv_op_response, DeleteRequest, DeleteResponse, ErrCode, GetRequest, GetResponse,
     KvOpResponse, PutRequest, PutResponse, SnapshotRequest, SnapshotResponse, TxnRequest,
     TxnResponse,
 };
@@ -194,23 +194,34 @@ impl ObjectLsmTreeFsm {
                             .get(key, if seq > 0 { seq } else { sequence })
                             .await?
                             .unwrap_or_default(),
+                        err: ErrCode::Ok.into(),
                     })
                 }
                 kv_op_request::Request::Put(PutRequest { key, value }) => {
                     self.put(key, value, raft_log_index, sequence).await?;
-                    kv_op_response::Response::Put(PutResponse::default())
+                    kv_op_response::Response::Put(PutResponse {
+                        err: ErrCode::Ok.into(),
+                    })
                 }
                 kv_op_request::Request::Delete(DeleteRequest { key }) => {
                     self.delete(key, raft_log_index, sequence).await?;
-                    kv_op_response::Response::Delete(DeleteResponse::default())
+                    kv_op_response::Response::Delete(DeleteResponse {
+                        err: ErrCode::Ok.into(),
+                    })
                 }
                 kv_op_request::Request::Snapshot(SnapshotRequest { .. }) => {
-                    kv_op_response::Response::Snapshot(SnapshotResponse { sequence })
+                    kv_op_response::Response::Snapshot(SnapshotResponse {
+                        sequence,
+                        err: ErrCode::Ok.into(),
+                    })
                 }
             };
             ops.push(KvOpResponse { response: Some(op) });
         }
-        Ok(TxnResponse { ops })
+        Ok(TxnResponse {
+            ops,
+            err: ErrCode::Ok.into(),
+        })
     }
 
     #[tracing::instrument(level = "trace")]

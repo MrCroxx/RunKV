@@ -10,10 +10,13 @@ use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use runkv_proto::common::Endpoint;
 use runkv_proto::meta::{KeyRange, KeyRangeInfo};
+use runkv_proto::rudder::RaftState;
 use tracing::trace;
 
 use super::{is_overlap, MetaStore};
 use crate::error::{ControlError, Result};
+
+const RAFT_STATE_TIMEOUT_DURATION: Duration = Duration::from_secs(10);
 
 struct ExhausterInfo {
     _endpoint: Endpoint,
@@ -23,6 +26,8 @@ struct ExhausterInfo {
 
 #[derive(Default)]
 pub struct MemoryMetaStoreCore {
+    key_range_infos: Vec<KeyRangeInfo>,
+
     /// { (wheel) node id -> endpoint }
     wheels: BTreeMap<u64, Endpoint>,
     /// { (exhauster) node id -> exhauster info }
@@ -36,6 +41,9 @@ pub struct MemoryMetaStoreCore {
     group_raft_nodes: BTreeMap<u64, Vec<u64>>,
     /// { raft node id -> raft group id }
     raft_node_groups: BTreeMap<u64, u64>,
+
+    /// { raft node id -> (raft state, update timestamp) }
+    raft_states: HashMap<u64, (RaftState, SystemTime)>,
 
     pinned_sstables: BTreeMap<u64, SystemTime>,
     sstable_pin_ttl: Duration,
@@ -88,13 +96,11 @@ impl MetaStore for MemoryMetaStore {
 
     async fn add_key_ranges(&self, key_ranges: Vec<KeyRangeInfo>) -> Result<()> {
         let mut core = self.core.write();
-        for KeyRangeInfo {
-            group,
-            key_range,
-            raft_nodes,
-        } in key_ranges
-        {
-            let key_range = key_range.unwrap();
+        for info in key_ranges {
+            let key_range = info.key_range.clone().unwrap();
+            let group = info.group;
+            let raft_nodes = info.raft_nodes.clone();
+
             if core.group_raft_nodes.get(&group).is_some() {
                 return Err(ControlError::GroupAlreadyExists(group).into());
             }
@@ -122,6 +128,37 @@ impl MetaStore for MemoryMetaStore {
                     .push(raft_node);
                 core.raft_node_groups.insert(raft_node, group);
             }
+
+            core.key_range_infos.push(info);
+        }
+        Ok(())
+    }
+
+    async fn all_key_range_infos(&self) -> Result<Vec<KeyRangeInfo>> {
+        let core = self.core.read();
+        let mut key_range_infos = core.key_range_infos.clone();
+        let now = SystemTime::now();
+        let mut leaders = HashMap::new();
+        for (&raft_node, (raft_state, ts)) in core.raft_states.iter() {
+            if now.duration_since(*ts).unwrap() > RAFT_STATE_TIMEOUT_DURATION {
+                continue;
+            }
+            if raft_state.is_leader {
+                let group = *core.raft_node_groups.get(&raft_node).unwrap();
+                leaders.insert(group, raft_node);
+            }
+        }
+        for info in key_range_infos.iter_mut() {
+            info.leader = leaders.get(&info.group).copied().unwrap_or(0);
+        }
+        Ok(key_range_infos)
+    }
+
+    async fn update_raft_states(&self, raft_states: HashMap<u64, RaftState>) -> Result<()> {
+        let mut core = self.core.write();
+        let now = SystemTime::now();
+        for (raft_node, raft_state) in raft_states {
+            core.raft_states.insert(raft_node, (raft_state, now));
         }
         Ok(())
     }
