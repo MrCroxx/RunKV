@@ -243,8 +243,6 @@ impl ObjectStoreLsmTreeCore {
     }
 }
 
-unsafe impl Sync for ObjectStoreLsmTreeCore {}
-
 #[derive(Clone)]
 pub struct ObjectStoreLsmTree {
     raft_node: u64,
