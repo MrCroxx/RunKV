@@ -194,7 +194,6 @@ impl SstableUploader {
 
     fn gen_sstable_id(&self) -> u64 {
         let sequential_id = self.sstable_sequential_id.fetch_add(1, Ordering::SeqCst);
-        let node_id = self.options.raft_node;
-        (node_id << 32) | sequential_id
+        (self.raft_node << 32) | sequential_id
     }
 }

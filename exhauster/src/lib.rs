@@ -56,7 +56,7 @@ pub async fn build_exhauster_with_object_store(
     let sstable_store = build_sstable_store(config, object_store, lsm_tree_metrics)?;
 
     let options = ExhausterOptions {
-        node_id: config.id,
+        node: config.id,
         sstable_store,
         // TODO: Restore from persistent store.
         sstable_sequential_id: 1,

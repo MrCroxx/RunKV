@@ -14,6 +14,7 @@ use crate::utils::user_key;
 use crate::Result;
 
 pub struct VersionManagerOptions {
+    pub node: u64,
     /// Level compaction and compression strategies for each level.
     ///
     /// Usually, L0 uses `Overlap`, the others use `NonOverlap`.
@@ -27,77 +28,133 @@ pub struct VersionManagerOptions {
     pub sstable_store: SstableStoreRef,
 }
 
-pub struct VersionManagerCore {
-    /// Level compaction and compression strategies for each level.
-    ///
-    /// Usually, L0 uses `Overlap`, the others use `NonOverlap`.
-    level_options: Vec<LevelOptions>,
+struct VersionManagerCore {
     /// Sst ids of each level of the lastest version.
     ///
     /// If the compaction strategy is `NonOverlap`, the sstable ids of the level are guaranteed
     /// sorted in ASC order.
     levels: Vec<Vec<u64>>,
     /// SSTable data files size of each level.
-    levels_data_size: Vec<usize>,
+    level_data_sizes: Vec<usize>,
     /// List of history version diffs. Used for syncing with other nodes.
     ///
     /// TODO: Restore diff from `MetaStore`.
     diffs: VecDeque<VersionDiff>,
-    /// `sstable_store` is used to fetch sstable meta.
-    sstable_store: SstableStoreRef,
+
     /// Minimum accessable sequence.
     watermark: u64,
 }
 
-impl VersionManagerCore {
-    fn new(options: VersionManagerOptions) -> Self {
-        assert_eq!(options.levels.len(), options.levels_options.len());
+#[derive(Clone)]
+pub struct VersionManager {
+    node: u64,
+    /// Level compaction and compression strategies for each level.
+    ///
+    /// Usually, L0 uses `Overlap`, the others use `NonOverlap`.
+    level_options: Vec<LevelOptions>,
+
+    /// `sstable_store` is used to fetch sstable meta.
+    sstable_store: SstableStoreRef,
+
+    core: Arc<RwLock<VersionManagerCore>>,
+}
+
+impl std::fmt::Debug for VersionManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VersionManager")
+            .field("node", &self.node)
+            .finish()
+    }
+}
+
+impl VersionManager {
+    pub fn new(options: VersionManagerOptions) -> Self {
         Self {
+            node: options.node,
             level_options: options.levels_options,
-            levels_data_size: vec![0; options.levels.len()],
-            levels: options.levels,
-            diffs: VecDeque::default(),
+
             sstable_store: options.sstable_store,
-            watermark: 0,
+
+            core: Arc::new(RwLock::new(VersionManagerCore {
+                // TODO: Calculate level sizes here.
+                level_data_sizes: vec![0; options.levels.len()],
+                levels: options.levels,
+                // TODO: Restore diffs.
+                diffs: VecDeque::default(),
+                // TODO: Restore watermark.
+                watermark: 0,
+            })),
         }
     }
 
-    fn levels(&self) -> usize {
-        self.levels.len()
+    #[tracing::instrument(level = "trace", ret)]
+    pub async fn levels(&self) -> usize {
+        self.core.read().await.levels.len()
     }
 
-    fn level_data_size(&self, level_idx: usize) -> usize {
-        self.levels_data_size[level_idx]
+    #[tracing::instrument(level = "trace", ret)]
+    pub async fn level_data_sizes(&self) -> Vec<usize> {
+        self.core.read().await.level_data_sizes.clone()
     }
 
-    fn watermark(&self) -> u64 {
-        self.watermark
+    #[tracing::instrument(level = "trace", ret)]
+    pub async fn level_data_size(&self, level_idx: usize) -> usize {
+        self.core.read().await.level_data_sizes[level_idx]
     }
 
-    fn advance(&mut self, watermark: u64) -> Result<()> {
-        if watermark < self.watermark {
-            return Err(ManifestError::InvalidWatermark(self.watermark, watermark).into());
+    #[tracing::instrument(level = "trace", ret)]
+    pub async fn watermark(&self) -> u64 {
+        self.core.read().await.watermark
+    }
+
+    #[tracing::instrument(level = "trace")]
+    pub async fn advance_watermark(&self, watermark: u64) -> Result<()> {
+        let mut core = self.core.write().await;
+        if watermark < core.watermark {
+            return Err(ManifestError::InvalidWatermark(core.watermark, watermark).into());
         }
-        self.watermark = watermark;
+        core.watermark = watermark;
         Ok(())
     }
 
-    fn latest_version_id(&self) -> u64 {
-        self.diffs.back().map_or_else(|| 0, |diff| diff.id)
+    #[tracing::instrument(level = "trace", ret)]
+    pub async fn latest_version_id(&self) -> u64 {
+        self.core
+            .read()
+            .await
+            .diffs
+            .back()
+            .map_or_else(|| 0, |diff| diff.id)
     }
 
-    async fn update(&mut self, mut diff: VersionDiff, sync: bool) -> Result<()> {
+    #[tracing::instrument(
+        level = "trace",
+        fields(old_levels, old_level_data_sizes, new_levels, new_level_data_sizes)
+    )]
+    pub async fn update(&self, mut diff: VersionDiff, sync: bool) -> Result<()> {
+        let mut core = self.core.write().await;
+
+        trace!(
+            "node: {}, old levels: {:?}, old level data sizes: {:?}",
+            self.node,
+            core.levels,
+            core.level_data_sizes
+        );
+
+        // Check version diff id.
+        let current_version_id = core.diffs.back().map(|diff| diff.id).unwrap_or(0);
         if sync {
-            let current_diff_id = self.diffs.back().map(|diff| diff.id).unwrap_or_else(|| 0);
-            if !self.diffs.is_empty() && current_diff_id + 1 != diff.id {
-                return Err(ManifestError::VersionDiffIdNotMatch(current_diff_id, diff.id).into());
+            if !core.diffs.is_empty() && current_version_id + 1 != diff.id {
+                return Err(
+                    ManifestError::VersionDiffIdNotMatch(current_version_id, diff.id).into(),
+                );
             }
         } else {
-            let diff_id = self.diffs.back().map_or_else(|| 1, |diff| diff.id + 1);
-            diff.id = diff_id;
+            diff.id = current_version_id + 1;
         }
 
-        for sstable_diff in &diff.sstable_diffs {
+        // Check sstable diff and update version manager.
+        for sstable_diff in diff.sstable_diffs.iter() {
             let level = sstable_diff.level as usize;
             let compaction_strategy = self
                 .level_options
@@ -108,37 +165,39 @@ impl VersionManagerCore {
                 .compaction_strategy;
             match sstable_diff.op() {
                 SstableOp::Insert => {
-                    // TODO: Should check duplicated sst id globally.
+                    // TODO: Should check duplicated sst id globally. Or encode level into sst id.
 
                     // TODO: Preform async binary search.
                     // Find a position to insert new sst id into.
                     let sst_to_insert = self.sstable_store.sstable(sstable_diff.id).await?;
                     let mut idx = 0;
-                    while idx < self.levels[level].len() {
-                        let sst = self.sstable_store.sstable(self.levels[level][idx]).await?;
+                    while idx < core.levels[level].len() {
+                        let sst = self.sstable_store.sstable(core.levels[level][idx]).await?;
                         if sst_to_insert.first_key() <= sst.first_key() {
                             break;
                         }
                         idx += 1;
                     }
-                    self.levels[level].insert(idx, sstable_diff.id);
-                    self.levels_data_size[level] += sstable_diff.data_size as usize;
+                    core.levels[level].insert(idx, sstable_diff.id);
+                    core.level_data_sizes[level] += sstable_diff.data_size as usize;
                     if compaction_strategy == LevelCompactionStrategy::NonOverlap {
                         // Check overlap.
                         if idx > 0 {
                             let prev_sst = self
                                 .sstable_store
-                                .sstable(self.levels[level][idx - 1])
+                                .sstable(core.levels[level][idx - 1])
                                 .await?;
                             if sst_to_insert.first_key() <= prev_sst.last_key() {
                                 return Err(ManifestError::InvalidVersionDiff(format!(
-                                        "sst overlaps in non-overlap level: [sst: {}, first_key:{:?}, last_key: {:?}] [sst: {}, first_key:{:?}, last_key: {:?}]",
-                                        self.levels[level][idx - 1],
+                                        "sst overlaps in non-overlap level: [node: {}] [sst: {}, first_key:{:?}, last_key: {:?}] [sst: {}, first_key:{:?}, last_key: {:?}] [diff: {:?}]",
+                                        self.node,
+                                        core.levels[level][idx - 1],
                                         prev_sst.first_key(),
                                         prev_sst.last_key(),
-                                        self.levels[level][idx],
+                                        core.levels[level][idx],
                                         sst_to_insert.first_key(),
                                         sst_to_insert.last_key(),
+                                        diff,
                                     ))
                                     .into());
                             }
@@ -146,16 +205,16 @@ impl VersionManagerCore {
                     }
                 }
                 SstableOp::Delete => {
-                    if let Some(idx) = self.levels[level]
+                    if let Some(idx) = core.levels[level]
                         .iter()
                         .position(|&sst_id| sst_id == sstable_diff.id)
                     {
-                        self.levels[level].remove(idx);
-                        self.levels_data_size[level] -= sstable_diff.data_size as usize;
+                        core.levels[level].remove(idx);
+                        core.level_data_sizes[level] -= sstable_diff.data_size as usize;
                     } else {
                         return Err(ManifestError::InvalidVersionDiff(format!(
-                            "sst L{}-{} not exists",
-                            level, sstable_diff.id
+                            "node {} sst L{}-{} not exists, diff: {:?}",
+                            self.node, level, sstable_diff.id, diff
                         ))
                         .into());
                     }
@@ -163,27 +222,32 @@ impl VersionManagerCore {
             }
         }
 
-        self.diffs.push_back(diff);
-        if !sync {
-            trace!("updated levels: {:?}", self.levels);
-            trace!("updated levels size: {:#?}", self.levels_data_size);
-        }
+        core.diffs.push_back(diff);
+
+        trace!(
+            "node: {}, new levels: {:?}, new level data sizes: {:?}",
+            self.node,
+            core.levels,
+            core.level_data_sizes
+        );
+
         Ok(())
     }
 
     /// Revoke all version diffs whose id is smaller than given `diff_id`.
-    fn squash(&mut self, diff_id: u64) {
-        while self
+    pub async fn squash(&self, version_id: u64) {
+        let mut core = self.core.write().await;
+        while core
             .diffs
             .front()
             .as_ref()
-            .map_or_else(|| false, |diff| diff.id < diff_id)
+            .map_or_else(|| false, |diff| diff.id < version_id)
         {
-            self.diffs.pop_front();
+            core.diffs.pop_front();
         }
     }
 
-    fn level_compression_algorithm(&self, level_idx: u64) -> Result<CompressionAlgorithm> {
+    pub fn level_compression_algorithm(&self, level_idx: u64) -> Result<CompressionAlgorithm> {
         let options =
             self.level_options
                 .get(level_idx as usize)
@@ -194,7 +258,7 @@ impl VersionManagerCore {
         Ok(options.compression_algorithm)
     }
 
-    fn level_compaction_strategy(&self, level_idx: u64) -> Result<LevelCompactionStrategy> {
+    pub fn level_compaction_strategy(&self, level_idx: u64) -> Result<LevelCompactionStrategy> {
         let options =
             self.level_options
                 .get(level_idx as usize)
@@ -206,13 +270,18 @@ impl VersionManagerCore {
     }
 
     /// Get at most `max_len` version diffs from given `start_id`.
-    fn version_diffs_from(&self, start_id: u64, max_len: usize) -> Result<Vec<VersionDiff>> {
-        if self.diffs.is_empty() || start_id < self.diffs.front().as_ref().unwrap().id {
-            return Err(ManifestError::VersionDiffExpired(start_id).into());
+    pub async fn version_diffs_from(
+        &self,
+        start_version_id: u64,
+        max_len: usize,
+    ) -> Result<Vec<VersionDiff>> {
+        let core = self.core.read().await;
+        if core.diffs.is_empty() || start_version_id < core.diffs.front().as_ref().unwrap().id {
+            return Err(ManifestError::VersionDiffExpired(start_version_id).into());
         }
         let mut diffs = Vec::with_capacity(std::cmp::min(max_len, 1024));
-        for diff in self.diffs.iter() {
-            if diff.id >= start_id {
+        for diff in core.diffs.iter() {
+            if diff.id >= start_version_id {
                 diffs.push(diff.clone());
             }
             if diffs.len() >= max_len {
@@ -227,11 +296,12 @@ impl VersionManagerCore {
     ///
     /// If the compaction strategy is `NonOverlap`, the retrun sstable ids of the level are
     /// guaranteed sorted in ASC order.
-    async fn pick_overlap_ssts_by_user_key_range(
+    pub async fn pick_overlap_ssts_by_user_key_range(
         &self,
         levels: Range<usize>,
         range: RangeInclusive<&[u8]>,
     ) -> Result<Vec<Vec<u64>>> {
+        let core = self.core.read().await;
         let mut result = vec![vec![]; levels.end - levels.start];
         let level_start = levels.start;
         for level in levels {
@@ -242,7 +312,7 @@ impl VersionManagerCore {
                     ManifestError::InvalidVersionDiff(format!("invalid level idx: {}", level))
                 })?
                 .compaction_strategy;
-            for sst_id in &self.levels[level] {
+            for sst_id in core.levels[level].iter() {
                 let sst = self.sstable_store.sstable(*sst_id).await?;
                 if sst.is_overlap_with_user_key_range(range.clone()) {
                     result[level - level_start].push(*sst_id);
@@ -262,11 +332,12 @@ impl VersionManagerCore {
     ///
     /// If the compaction strategy is `NonOverlap`, the retrun sstable ids of the level are
     /// guaranteed sorted in ASC order.
-    async fn pick_overlap_ssts_by_key(
+    pub async fn pick_overlap_ssts_by_key(
         &self,
         levels: Range<usize>,
         key: &[u8],
     ) -> Result<Vec<Vec<u64>>> {
+        let core = self.core.read().await;
         let mut result = vec![vec![]; levels.end - levels.start];
         let level_start = levels.start;
         for level in levels {
@@ -278,7 +349,7 @@ impl VersionManagerCore {
                 })?
                 .compaction_strategy;
 
-            for sst_id in &self.levels[level] {
+            for sst_id in core.levels[level].iter() {
                 let sst = self.sstable_store.sstable(*sst_id).await?;
                 if sst.may_contain_key(key) && sst.is_overlap_with_user_key_range(key..=key) {
                     result[level - level_start].push(*sst_id);
@@ -293,7 +364,7 @@ impl VersionManagerCore {
         Ok(result)
     }
 
-    async fn pick_overlap_ssts_by_sst_id(
+    pub async fn pick_overlap_ssts_by_sst_id(
         &self,
         levels: Range<usize>,
         sst_id: u64,
@@ -306,7 +377,7 @@ impl VersionManagerCore {
         .await
     }
 
-    async fn pick_overlap_ssts_by_sst_ids(
+    pub async fn pick_overlap_ssts_by_sst_ids(
         &self,
         levels: Range<usize>,
         sst_ids: Vec<u64>,
@@ -331,98 +402,6 @@ impl VersionManagerCore {
             .await
     }
 
-    /// Verify if ASC order and non-overlap is guaranteed with non-overlap levels.
-    ///
-    /// Return `Ok(true)` or `Ok(false)` for verifing, `Err(_)` for other errors.
-    async fn verify_non_overlap(&self) -> Result<bool> {
-        for level in 0..self.level_options.len() {
-            if self.level_compaction_strategy(level as u64).unwrap()
-                == LevelCompactionStrategy::NonOverlap
-                && self.levels[level].len() > 1
-            {
-                let prev_sst = self.sstable_store.sstable(self.levels[level][0]).await?;
-                for sst_id in self.levels[level][1..].iter() {
-                    let sst = self.sstable_store.sstable(*sst_id).await?;
-                    if sst.first_key() <= prev_sst.last_key() {
-                        return Ok(false);
-                    }
-                }
-            }
-        }
-        Ok(true)
-    }
-}
-
-#[derive(Clone)]
-pub struct VersionManager {
-    inner: Arc<RwLock<VersionManagerCore>>,
-}
-
-impl VersionManager {
-    pub fn new(options: VersionManagerOptions) -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(VersionManagerCore::new(options))),
-        }
-    }
-
-    pub async fn levels(&self) -> usize {
-        self.inner.read().await.levels()
-    }
-
-    pub async fn level_data_size(&self, level_idx: usize) -> usize {
-        self.inner.read().await.level_data_size(level_idx)
-    }
-
-    pub async fn watermark(&self) -> u64 {
-        self.inner.read().await.watermark()
-    }
-
-    pub async fn advance(&self, watermark: u64) -> Result<()> {
-        self.inner.write().await.advance(watermark)
-    }
-
-    pub async fn latest_version_id(&self) -> u64 {
-        self.inner.read().await.latest_version_id()
-    }
-
-    pub async fn update(&self, diff: VersionDiff, sync: bool) -> Result<()> {
-        self.inner.write().await.update(diff, sync).await
-    }
-
-    /// Revoke all version diffs whose id is smaller than given `diff_id`.
-    pub async fn squash(&self, diff_id: u64) {
-        self.inner.write().await.squash(diff_id)
-    }
-
-    pub async fn level_compression_algorithm(
-        &self,
-        level_idx: u64,
-    ) -> Result<CompressionAlgorithm> {
-        self.inner
-            .read()
-            .await
-            .level_compression_algorithm(level_idx)
-    }
-
-    pub async fn level_compaction_strategy(
-        &self,
-        level_idx: u64,
-    ) -> Result<LevelCompactionStrategy> {
-        self.inner.read().await.level_compaction_strategy(level_idx)
-    }
-
-    /// Get at most `max_len` version diffs from given `start_id`.
-    pub async fn version_diffs_from(
-        &self,
-        start_id: u64,
-        max_len: usize,
-    ) -> Result<Vec<VersionDiff>> {
-        self.inner
-            .read()
-            .await
-            .version_diffs_from(start_id, max_len)
-    }
-
     /// Pick sstable ids of given `levels` that overlaps with given key `range`.
     /// The length of the retrun vector matches the length of the given levels.
     ///
@@ -433,51 +412,7 @@ impl VersionManager {
         levels: Range<usize>,
         range: RangeInclusive<&[u8]>,
     ) -> Result<Vec<Vec<u64>>> {
-        self.inner
-            .read()
-            .await
-            .pick_overlap_ssts_by_user_key_range(levels, range)
-            .await
-    }
-
-    /// Pick sstable ids of given `levels` that overlaps with given key. Bloom filters are supposed
-    /// to be used. The length of the retrun vector matches the length of the given levels.
-    ///
-    /// If the compaction strategy is `NonOverlap`, the retrun sstable ids of the level are
-    /// guaranteed sorted in ASC order.
-    pub async fn pick_overlap_ssts_by_key(
-        &self,
-        levels: Range<usize>,
-        key: &[u8],
-    ) -> Result<Vec<Vec<u64>>> {
-        self.inner
-            .read()
-            .await
-            .pick_overlap_ssts_by_key(levels, key)
-            .await
-    }
-
-    pub async fn pick_overlap_ssts_by_sst_id(
-        &self,
-        levels: Range<usize>,
-        sst_id: u64,
-    ) -> Result<Vec<Vec<u64>>> {
-        self.inner
-            .read()
-            .await
-            .pick_overlap_ssts_by_sst_id(levels, sst_id)
-            .await
-    }
-
-    pub async fn pick_overlap_ssts_by_sst_ids(
-        &self,
-        levels: Range<usize>,
-        sst_ids: Vec<u64>,
-    ) -> Result<Vec<Vec<u64>>> {
-        self.inner
-            .read()
-            .await
-            .pick_overlap_ssts_by_sst_ids(levels, sst_ids)
+        self.pick_overlap_ssts_by_user_key_range(levels, range)
             .await
     }
 
@@ -485,7 +420,22 @@ impl VersionManager {
     ///
     /// Return `Ok(true)` or `Ok(false)` for verifing, `Err(_)` for other errors.
     pub async fn verify_non_overlap(&self) -> Result<bool> {
-        self.inner.read().await.verify_non_overlap().await
+        let core = self.core.read().await;
+        for level in 0..self.level_options.len() {
+            if self.level_compaction_strategy(level as u64).unwrap()
+                == LevelCompactionStrategy::NonOverlap
+                && core.levels[level].len() > 1
+            {
+                let prev_sst = self.sstable_store.sstable(core.levels[level][0]).await?;
+                for sst_id in core.levels[level][1..].iter() {
+                    let sst = self.sstable_store.sstable(*sst_id).await?;
+                    if sst.first_key() <= prev_sst.last_key() {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+        Ok(true)
     }
 }
 
@@ -509,10 +459,10 @@ mod tests {
     #[test(tokio::test)]
     async fn test_update_squash_version_diffs() {
         let sstable_store = build_sstable_store_for_test();
-        let mut version_manager = build_version_manager_for_test(sstable_store.clone());
+        let version_manager = build_version_manager_for_test(sstable_store.clone());
         // Ingest sst with id {i} into level {i}.
         // All sst key range are: [b"fff"..=b"hhh"].
-        version_manager.levels = (0..7).map(|i| vec![i + 1]).collect_vec();
+        version_manager.core.write().await.levels = (0..7).map(|i| vec![i + 1]).collect_vec();
         for i in 1..=7 {
             ingest_meta(&sstable_store, i, fkey(b"fff"), fkey(b"hhh")).await;
         }
@@ -546,7 +496,7 @@ mod tests {
         }
 
         assert_eq!(
-            version_manager.levels,
+            version_manager.core.read().await.levels,
             vec![
                 vec![1],
                 vec![8, 2],
@@ -584,7 +534,7 @@ mod tests {
         }
 
         assert_eq!(
-            version_manager.levels,
+            version_manager.core.read().await.levels,
             vec![
                 vec![1],
                 vec![8],
@@ -597,16 +547,16 @@ mod tests {
         );
 
         assert_eq!(
-            version_manager.version_diffs_from(1, 10).unwrap(),
+            version_manager.version_diffs_from(1, 10).await.unwrap(),
             [insert_diffs.clone(), delete_diffs.clone()].concat()
         );
 
-        version_manager.squash(3);
+        version_manager.squash(3).await;
 
-        assert!(version_manager.version_diffs_from(1, 10).is_err());
+        assert!(version_manager.version_diffs_from(1, 10).await.is_err());
 
         assert_eq!(
-            version_manager.version_diffs_from(3, 10).unwrap(),
+            version_manager.version_diffs_from(3, 10).await.unwrap(),
             delete_diffs.clone()
         );
 
@@ -627,8 +577,8 @@ mod tests {
             .is_err());
 
         let sstable_store = build_sstable_store_for_test();
-        let mut version_manager = build_version_manager_for_test(sstable_store.clone());
-        version_manager.levels = vec![
+        let version_manager = build_version_manager_for_test(sstable_store.clone());
+        version_manager.core.write().await.levels = vec![
             vec![],
             vec![1, 2, 3],
             vec![],
@@ -665,8 +615,8 @@ mod tests {
     #[test(tokio::test)]
     async fn test_pick_overlap_ssts() {
         let sstable_store = build_sstable_store_for_test();
-        let mut version_manager = build_version_manager_for_test(sstable_store.clone());
-        version_manager.levels = vec![
+        let version_manager = build_version_manager_for_test(sstable_store.clone());
+        version_manager.core.write().await.levels = vec![
             vec![1, 2, 3],
             vec![4],
             vec![],
@@ -694,8 +644,8 @@ mod tests {
     #[test(tokio::test)]
     async fn test_pick_overlap_ssts_by_key() {
         let sstable_store = build_sstable_store_for_test();
-        let mut version_manager = build_version_manager_for_test(sstable_store.clone());
-        version_manager.levels = vec![
+        let version_manager = build_version_manager_for_test(sstable_store.clone());
+        version_manager.core.write().await.levels = vec![
             vec![1, 2, 3],
             vec![],
             vec![],
@@ -759,8 +709,8 @@ mod tests {
     #[test(tokio::test)]
     async fn test_verify_non_overlap() {
         let sstable_store = build_sstable_store_for_test();
-        let mut version_manager = build_version_manager_for_test(sstable_store.clone());
-        version_manager.levels = vec![
+        let version_manager = build_version_manager_for_test(sstable_store.clone());
+        version_manager.core.write().await.levels = vec![
             vec![],
             vec![1, 2, 3],
             vec![],
@@ -775,8 +725,8 @@ mod tests {
         assert!(version_manager.verify_non_overlap().await.unwrap());
 
         let sstable_store = build_sstable_store_for_test();
-        let mut version_manager = build_version_manager_for_test(sstable_store.clone());
-        version_manager.levels = vec![
+        let version_manager = build_version_manager_for_test(sstable_store.clone());
+        version_manager.core.write().await.levels = vec![
             vec![],
             vec![1, 2, 3],
             vec![],
@@ -791,8 +741,8 @@ mod tests {
         assert!(!version_manager.verify_non_overlap().await.unwrap());
 
         let sstable_store = build_sstable_store_for_test();
-        let mut version_manager = build_version_manager_for_test(sstable_store.clone());
-        version_manager.levels = vec![
+        let version_manager = build_version_manager_for_test(sstable_store.clone());
+        version_manager.core.write().await.levels = vec![
             vec![],
             vec![1, 2, 3],
             vec![],
@@ -807,8 +757,8 @@ mod tests {
         assert!(!version_manager.verify_non_overlap().await.unwrap());
 
         let sstable_store = build_sstable_store_for_test();
-        let mut version_manager = build_version_manager_for_test(sstable_store.clone());
-        version_manager.levels = vec![
+        let version_manager = build_version_manager_for_test(sstable_store.clone());
+        version_manager.core.write().await.levels = vec![
             vec![],
             vec![1, 2, 3],
             vec![],
@@ -884,7 +834,7 @@ mod tests {
         Arc::new(SstableStore::new(sstable_store_options))
     }
 
-    fn build_version_manager_for_test(sstable_store: SstableStoreRef) -> VersionManagerCore {
+    fn build_version_manager_for_test(sstable_store: SstableStoreRef) -> VersionManager {
         let level_options = vec![
             LevelOptions {
                 compaction_strategy: LevelCompactionStrategy::Overlap,
@@ -916,11 +866,12 @@ mod tests {
             },
         ];
         let version_manager_options = VersionManagerOptions {
+            node: 0,
             levels_options: level_options,
             levels: vec![vec![]; 7],
             sstable_store,
         };
-        VersionManagerCore::new(version_manager_options)
+        VersionManager::new(version_manager_options)
     }
 
     fn fkey(s: &'static [u8]) -> Vec<u8> {

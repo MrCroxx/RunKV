@@ -25,29 +25,39 @@ fn internal(e: impl Into<Box<dyn std::error::Error>>) -> Status {
 }
 
 pub struct ExhausterOptions {
-    pub node_id: u64,
+    pub node: u64,
     pub sstable_store: SstableStoreRef,
     pub sstable_sequential_id: u64,
 }
 
 pub struct Exhauster {
-    options: ExhausterOptions,
+    node: u64,
     sstable_store: SstableStoreRef,
     sstable_sequential_id: AtomicU64,
+}
+
+impl std::fmt::Debug for Exhauster {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Exhauster")
+            .field("node", &self.node)
+            .finish()
+    }
 }
 
 impl Exhauster {
     pub fn new(options: ExhausterOptions) -> Self {
         Self {
+            node: options.node,
+
             sstable_store: options.sstable_store.clone(),
             sstable_sequential_id: AtomicU64::new(options.sstable_sequential_id),
-            options,
         }
     }
 }
 
 #[async_trait]
 impl ExhausterService for Exhauster {
+    #[tracing::instrument(level = "trace")]
     async fn compaction(
         &self,
         request: Request<CompactionRequest>,
@@ -145,8 +155,7 @@ impl ExhausterService for Exhauster {
 impl Exhauster {
     fn gen_sstable_id(&self) -> u64 {
         let sequential_id = self.sstable_sequential_id.fetch_add(1, Ordering::SeqCst);
-        let node_id = self.options.node_id;
-        (node_id << 32) | sequential_id
+        (self.node << 32) | sequential_id
     }
 
     async fn build_and_upload_sst(
@@ -158,7 +167,7 @@ impl Exhauster {
         let (meta, data) = builder.build()?;
         let data_size = meta.data_size as u64;
         let sst = Sstable::new(sst_id, Arc::new(meta));
-        trace!("build sst: {:#?}", sst);
+        trace!("build sst: {:?}", sst);
         self.sstable_store
             .put(&sst, data, CachePolicy::Fill)
             .await?;

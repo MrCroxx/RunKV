@@ -1,3 +1,5 @@
+#![feature(let_chains)]
+
 pub mod config;
 pub mod error;
 pub mod meta;
@@ -123,6 +125,7 @@ async fn build_version_manager(
     sstable_store: SstableStoreRef,
 ) -> Result<VersionManager> {
     let version_manager_options = VersionManagerOptions {
+        node: config.id,
         levels_options: config.lsm_tree.levels_options.clone(),
         // TODO: Recover from meta or scanning.
         levels: vec![vec![]; config.lsm_tree.levels_options.len()],
@@ -144,6 +147,7 @@ async fn build_version_manager(
 fn build_meta_store(config: &RudderConfig) -> Result<MetaStoreRef> {
     // TODO: Build with storage.
     let meta_store = MemoryMetaStore::new(
+        config.id,
         config
             .lsm_tree
             .compaction_pin_ttl

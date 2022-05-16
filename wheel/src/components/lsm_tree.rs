@@ -128,8 +128,7 @@ impl ObjectStoreLsmTreeCore {
             }
             let compaction_strategy = self
                 .version_manager
-                .level_compaction_strategy(level_idx as u64)
-                .await?;
+                .level_compaction_strategy(level_idx as u64)?;
 
             let mut iter = match compaction_strategy {
                 LevelCompactionStrategy::Overlap => {

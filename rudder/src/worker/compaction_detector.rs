@@ -422,7 +422,7 @@ async fn sub_compaction(
         id: 0,
         sstable_diffs,
     };
-    trace!("compaction version diff:\n{:#?}", version_diff);
+    trace!("compaction version diff: {:?}", version_diff);
     ctx.version_manager.update(version_diff, false).await?;
 
     Ok(())
