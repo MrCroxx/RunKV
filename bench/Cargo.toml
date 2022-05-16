@@ -39,6 +39,8 @@ tikv-jemallocator = "0.4.3"
 
 [features]
 tracing = ["runkv-wheel/tracing"]
+deadlock = ["runkv-tests/deadlock"]
+console = ["tokio/tracing", "runkv-common/console"]
 
 [[bin]]
 name = "bench_kv"

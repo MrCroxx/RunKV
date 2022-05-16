@@ -14,7 +14,7 @@ check:
 	cargo check --tests
 
 test:
-	cargo nextest run
+	cargo nextest run --features deadlock
 
 proto:
 	cd proto/src/proto && prototool format -w && buf lint
