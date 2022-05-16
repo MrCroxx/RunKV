@@ -189,13 +189,15 @@ impl VersionManager {
                                 .await?;
                             if sst_to_insert.first_key() <= prev_sst.last_key() {
                                 return Err(ManifestError::InvalidVersionDiff(format!(
-                                        "sst overlaps in non-overlap level: [sst: {}, first_key:{:?}, last_key: {:?}] [sst: {}, first_key:{:?}, last_key: {:?}]",
+                                        "sst overlaps in non-overlap level: [node: {}] [sst: {}, first_key:{:?}, last_key: {:?}] [sst: {}, first_key:{:?}, last_key: {:?}] [diff: {:?}]",
+                                        self.node,
                                         core.levels[level][idx - 1],
                                         prev_sst.first_key(),
                                         prev_sst.last_key(),
                                         core.levels[level][idx],
                                         sst_to_insert.first_key(),
                                         sst_to_insert.last_key(),
+                                        diff,
                                     ))
                                     .into());
                             }
@@ -211,8 +213,8 @@ impl VersionManager {
                         core.level_data_sizes[level] -= sstable_diff.data_size as usize;
                     } else {
                         return Err(ManifestError::InvalidVersionDiff(format!(
-                            "sst L{}-{} not exists",
-                            level, sstable_diff.id
+                            "node {} sst L{}-{} not exists, diff: {:?}",
+                            self.node, level, sstable_diff.id, diff
                         ))
                         .into());
                     }

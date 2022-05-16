@@ -46,19 +46,32 @@ pub struct MemoryMetaStoreCore {
     raft_states: HashMap<u64, (RaftState, SystemTime)>,
 
     pinned_sstables: BTreeMap<u64, SystemTime>,
-    sstable_pin_ttl: Duration,
 }
 
 pub struct MemoryMetaStore {
+    node: u64,
+    sstable_pin_ttl: Duration,
+
     core: RwLock<MemoryMetaStoreCore>,
     timestamp: AtomicU32,
 }
 
+impl std::fmt::Debug for MemoryMetaStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MemoryMetaStore")
+            .field("node", &self.node)
+            .field("sstable_pin_ttl", &self.sstable_pin_ttl)
+            .finish()
+    }
+}
+
 impl MemoryMetaStore {
-    pub fn new(sstable_pin_ttl: Duration) -> Self {
+    pub fn new(node: u64, sstable_pin_ttl: Duration) -> Self {
         Self {
+            node,
+            sstable_pin_ttl,
+
             core: RwLock::new(MemoryMetaStoreCore {
-                sstable_pin_ttl,
                 ..Default::default()
             }),
             timestamp: AtomicU32::new(1),
@@ -212,12 +225,11 @@ impl MetaStore for MemoryMetaStore {
 
     async fn pin_sstables(&self, sst_ids: &[u64], time: SystemTime) -> Result<bool> {
         let mut guard = self.core.write();
+        trace!("pin - try to pin ssts: {:?}", sst_ids);
         let mut pin = true;
         for sst_id in sst_ids.iter() {
-            if guard.pinned_sstables.get(sst_id).map_or_else(
-                || false,
-                |last_pin_time| *last_pin_time + guard.sstable_pin_ttl < time,
-            ) {
+            // If target sst is already pinned, and doesn't timeout.
+            if let Some(last_pinned_time) = guard.pinned_sstables.get(sst_id) && *last_pinned_time + self.sstable_pin_ttl > time{
                 pin = false;
                 break;
             }
@@ -235,8 +247,10 @@ impl MetaStore for MemoryMetaStore {
         Ok(true)
     }
 
+    #[tracing::instrument(level = "trace")]
     async fn unpin_sstables(&self, sst_ids: &[u64]) -> Result<()> {
         let mut guard = self.core.write();
+        trace!("unpin - try to unpin ssts: {:?}", sst_ids);
         for sst_id in sst_ids.iter() {
             guard.pinned_sstables.remove(sst_id);
         }
@@ -247,14 +261,16 @@ impl MetaStore for MemoryMetaStore {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", ret, err)]
     async fn is_sstables_pinned(&self, sst_ids: &[u64], time: SystemTime) -> Result<Vec<bool>> {
         let mut pinned = Vec::with_capacity(sst_ids.len());
         let guard = self.core.read();
         for sst_id in sst_ids {
-            pinned.push(guard.pinned_sstables.get(sst_id).map_or_else(
-                || false,
-                |last_pin_time| *last_pin_time + guard.sstable_pin_ttl >= time,
-            ));
+            if let Some(last_pinned_time) = guard.pinned_sstables.get(sst_id) && *last_pinned_time + self.sstable_pin_ttl > time{
+                pinned.push(true);
+            }else {
+                pinned.push(false);
+            }
         }
         Ok(pinned)
     }

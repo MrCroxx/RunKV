@@ -1,3 +1,5 @@
+#![feature(let_chains)]
+
 pub mod config;
 pub mod error;
 pub mod meta;
@@ -145,6 +147,7 @@ async fn build_version_manager(
 fn build_meta_store(config: &RudderConfig) -> Result<MetaStoreRef> {
     // TODO: Build with storage.
     let meta_store = MemoryMetaStore::new(
+        config.id,
         config
             .lsm_tree
             .compaction_pin_ttl
