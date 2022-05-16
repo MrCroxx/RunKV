@@ -17,6 +17,7 @@ env_logger = "*"
 futures = "0.3"
 itertools = "0.10.3"
 lazy_static = "1.4.0"
+parking_lot = "0.12"
 rand = "0.8.5"
 runkv-client = { path = "../client" }
 runkv-common = { path = "../common" }
@@ -39,3 +40,4 @@ tracing = "0.1"
 
 [features]
 tracing = ["runkv-wheel/tracing"]
+deadlock = ["parking_lot/deadlock_detection"]

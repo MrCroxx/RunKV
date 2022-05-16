@@ -200,6 +200,28 @@ async fn mkdir_if_not_exists(path: &str) {
 }
 
 pub async fn run(args: Args, options: Options) {
+    #[cfg(feature = "deadlock")]
+    {
+        // Create a background thread which checks for deadlocks every 10s
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_secs(10));
+            let deadlocks = parking_lot::deadlock::check_deadlock();
+            if deadlocks.is_empty() {
+                continue;
+            }
+
+            println!("{} deadlocks detected", deadlocks.len());
+            for (i, threads) in deadlocks.iter().enumerate() {
+                println!("Deadlock #{}", i);
+                for t in threads {
+                    println!("Thread Id {:#?}", t.thread_id());
+                    println!("{:#?}", t.backtrace());
+                }
+            }
+            panic!("Deadlocks detected!");
+        });
+    }
+
     // Prepare directories.
     println!("Prepare directories...");
     let ts = timestamp();

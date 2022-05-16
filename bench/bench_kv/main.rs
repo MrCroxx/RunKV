@@ -24,6 +24,9 @@ const EXHAUSTER_PORT_BASE: u16 = 12400;
 
 #[tokio::main]
 async fn main() {
+    let args = Args::parse();
+    println!("{:#?}", args);
+
     let options = Options {
         log: true,
         rudder_config_path: RUDDER_CONFIG_PATH.to_string(),
@@ -39,9 +42,6 @@ async fn main() {
         exhauster_port_base: EXHAUSTER_PORT_BASE,
     };
     println!("{:#?}", options);
-
-    let args = Args::parse();
-    println!("{:#?}", args);
 
     run(args, options).await;
 }
