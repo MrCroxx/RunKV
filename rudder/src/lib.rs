@@ -123,6 +123,7 @@ async fn build_version_manager(
     sstable_store: SstableStoreRef,
 ) -> Result<VersionManager> {
     let version_manager_options = VersionManagerOptions {
+        node: config.id,
         levels_options: config.lsm_tree.levels_options.clone(),
         // TODO: Recover from meta or scanning.
         levels: vec![vec![]; config.lsm_tree.levels_options.len()],
