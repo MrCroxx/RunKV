@@ -4,7 +4,7 @@
 
 ## Which issues is this PR related to?
 
-(Please list the issues related. Hint: use markdown list for better look)
+(Please list the issues related. Hint: use markdown list for better looking)
 
 ## How was this patch tested?
 
