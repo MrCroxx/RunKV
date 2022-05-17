@@ -13,4 +13,4 @@
 
 ## Will this help MrCroxx run or graduate?
 
-(Run is OK, but graduate is better)
+(Run is OK, but better say graduate)
