@@ -3,6 +3,8 @@
 
 use tracing::trace;
 
+// parking_lot
+
 pub struct TracedParkingLogRawMutex<const H: &'static str, const N: &'static str> {
     inner: parking_lot::RawMutex,
 }
@@ -93,6 +95,28 @@ unsafe impl<const H: &'static str, const N: &'static str> parking_lot::lock_api:
 
 pub type TracedParkingLotRwLock<T, const H: &'static str, const N: &'static str> =
     parking_lot::lock_api::RwLock<TracedParkingLogRawRwLock<H, N>, T>;
+
+// tokio
+
+pub struct TracedTokioMutexGuard<'a, T> {
+    inner: tokio::sync::MutexGuard<'a, T>,
+}
+
+pub struct TracedTokioMutex<T> {
+    inner: tokio::sync::Mutex<T>,
+}
+
+impl<T> TracedTokioMutex<T> {
+    pub fn new(data: T) -> Self {
+        Self {
+            inner: tokio::sync::Mutex::new(data),
+        }
+    }
+
+    pub async fn lock() -> TracedTokioMutexGuard<'_, T> {
+        todo!()
+    }
+}
 
 #[cfg(test)]
 mod tests {

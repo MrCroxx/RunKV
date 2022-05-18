@@ -22,15 +22,15 @@ type Result<T> = core::result::Result<T, Error>;
 enum LockFamily {
     None,
     ParkingLot,
-    Std,
+    Tokio,
 }
 
 #[derive(Debug)]
 enum LockType {
     ParkingLotMutex,
     ParkingLotRwLock,
-    StdMutex,
-    StdRwLock,
+    TokioMutex,
+    TokioRwLock,
 }
 
 impl std::str::FromStr for LockType {
