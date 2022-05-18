@@ -205,6 +205,9 @@ pub async fn run(args: Args, options: Options) {
         // Create a background thread which checks for deadlocks every 10s
         std::thread::spawn(move || loop {
             std::thread::sleep(Duration::from_secs(10));
+
+            println!("Detect deadlock...");
+
             let deadlocks = parking_lot::deadlock::check_deadlock();
             if deadlocks.is_empty() {
                 continue;
@@ -273,6 +276,13 @@ pub async fn run(args: Args, options: Options) {
         config.host = LOCALHOST.to_string();
         config
     };
+
+    println!("rudder config template: {:#?}", rudder_config);
+    println!("wheel config template: {:#?}", wheel_config_template);
+    println!(
+        "exhauster config template: {:#?}",
+        exhauster_config_template
+    );
 
     // Connect object store.
     // TODO: Support S3.

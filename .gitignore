@@ -9,4 +9,4 @@
 .DS_Store
 
 perf.data*
-flamegrapg.svg
+flamegraph.svg

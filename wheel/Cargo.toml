@@ -57,3 +57,4 @@ test-log = "0.2.10"
 
 [features]
 tracing = []
+deadlock = ["parking_lot/deadlock_detection"]

@@ -32,6 +32,7 @@ ouroboros = "0.15.0"
 parking_lot = "0.12"
 prometheus = "0.13.0"
 rand = "0.8.5"
+runkv-proc = { path = "../proc" }
 serde = "1.0"
 serde_derive = "1.0"
 slog = "2.7"
@@ -50,6 +51,7 @@ test-log = "0.2.10"
 
 [features]
 console = ["console-subscriber"]
+deadlock = ["parking_lot/deadlock_detection"]
 
 [[bench]]
 name = "bench_sharded_hash_map"

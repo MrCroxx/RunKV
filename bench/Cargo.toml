@@ -39,7 +39,16 @@ tikv-jemallocator = "0.4.3"
 
 [features]
 tracing = ["runkv-wheel/tracing"]
-deadlock = ["runkv-tests/deadlock"]
+deadlock = [
+    "runkv-tests/deadlock",
+    "runkv-client/deadlock",
+    "runkv-common/deadlock",
+    "runkv-exhauster/deadlock",
+    "runkv-rudder/deadlock",
+    "runkv-storage/deadlock",
+    "runkv-client/deadlock",
+    "runkv-wheel/deadlock",
+]
 console = ["tokio/tracing", "runkv-common/console"]
 
 [[bin]]

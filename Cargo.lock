@@ -2536,6 +2536,7 @@ dependencies = [
  "parking_lot 0.12.0",
  "prometheus",
  "rand",
+ "runkv-proc",
  "serde",
  "serde_derive",
  "slog",
@@ -2577,6 +2578,15 @@ dependencies = [
  "tonic 0.6.2",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "runkv-proc"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

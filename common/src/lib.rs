@@ -1,3 +1,6 @@
+#![allow(incomplete_features)]
+#![feature(adt_const_params)]
+
 pub mod atomic;
 pub mod channel_pool;
 pub mod coding;

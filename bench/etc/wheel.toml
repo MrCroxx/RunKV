@@ -27,7 +27,7 @@ meta_cache_capacity = "1 KiB"
 
 [raft_log_store]
 log_dir_path = "{/path/to/log/dir}"
-log_file_capacity = "64 MiB"
+log_file_capacity = "256 MiB"
 block_cache_capacity = "256 MiB"
 persist = "{persist}"
 

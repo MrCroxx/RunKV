@@ -4,6 +4,7 @@ members = [
     "client",
     "common",
     "exhauster",
+    "proc",
     "proto",
     "rudder",
     "storage",
@@ -16,4 +17,5 @@ members = [
 debug = true
 
 [profile.release]
+# Uncomment this line if you are generating flame graph.
 debug = true

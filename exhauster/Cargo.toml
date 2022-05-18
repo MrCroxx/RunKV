@@ -38,3 +38,6 @@ tikv-jemallocator = "0.4.3"
 [dev-dependencies]
 env_logger = "*"
 test-log = "0.2.10"
+
+[features]
+deadlock = ["parking_lot/deadlock_detection"]
