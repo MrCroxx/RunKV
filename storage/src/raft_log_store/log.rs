@@ -1,22 +1,21 @@
-use std::path::Path;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use runkv_common::packer::{Item, Packer};
-use tokio::fs::{create_dir_all, read_dir, File, OpenOptions};
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::{oneshot, RwLock as AsyncRwLock};
+use tokio::fs::{create_dir_all, read_dir};
+use tokio::sync::{oneshot, RwLock};
 use tracing::{trace, trace_span, Instrument};
 
 use super::entry::Entry;
 use super::error::RaftLogStoreError;
+use super::file::{ActiveFile, FrozenFile};
 use super::metrics::RaftLogStoreMetricsRef;
-use super::DEFAULT_LOG_BATCH_SIZE;
 use crate::error::{Error, Result};
+use crate::raft_log_store::file::sync_dir;
 
 const DEFAULT_BUFFER_SIZE: usize = 64 << 10;
 
@@ -44,18 +43,7 @@ fn filename(id: u64) -> String {
     format!("{:08}", id)
 }
 
-async fn new_active_file(path: impl AsRef<Path>, active_file_id: u64) -> Result<File> {
-    let mut active_file_open_options = OpenOptions::new();
-    active_file_open_options.create(true);
-    active_file_open_options.read(true);
-    active_file_open_options.append(true);
-    let file = active_file_open_options
-        .open(path.as_ref().join(filename(active_file_id)))
-        .await?;
-    Ok(file)
-}
-
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct WriteHandle {
     pub file_id: u64,
     pub offset: usize,
@@ -73,10 +61,9 @@ pub struct LogOptions {
 }
 
 struct LogCore {
-    active_file: Arc<AsyncRwLock<File>>,
-    frozen_files: Arc<AsyncRwLock<Vec<File>>>,
+    active_file: RwLock<ActiveFile>,
+    frozen_files: RwLock<Vec<FrozenFile>>,
     first_log_file_id: AtomicU64,
-    active_file_len: AtomicUsize,
 
     writer_packer: Packer<Vec<Entry>, Vec<WriteHandle>>,
 }
@@ -107,20 +94,19 @@ impl Log {
             let mut frozen_files = vec![];
             let mut r = read_dir(&options.path).await?;
             while let Some(entry) = r.next_entry().await? {
-                let file = File::open(entry.path()).await?;
-                frozen_files.push((
-                    entry
-                        .file_name()
-                        .into_string()
-                        .map_err(|s| {
-                            RaftLogStoreError::Other(format!("invalid file name: {:?}", s))
-                        })?
-                        .parse::<u64>()
-                        .map_err(|e| {
-                            RaftLogStoreError::Other(format!("invalid file name: {}", e))
-                        })?,
-                    file,
-                ));
+                let raw_filename = entry.file_name();
+                let id = raw_filename
+                    .to_str()
+                    .ok_or_else(|| {
+                        RaftLogStoreError::Other(format!("invalid file name: {:?}", raw_filename))
+                    })?
+                    .parse()
+                    .map_err(|_| {
+                        RaftLogStoreError::Other(format!("invalid file name: {:?}", raw_filename))
+                    })?;
+
+                let frozen_file = FrozenFile::open(&options.path, id).await?;
+                frozen_files.push((id, frozen_file));
             }
             if frozen_files.is_empty() {
                 (vec![], 1)
@@ -143,7 +129,7 @@ impl Log {
             }
         };
         let active_file_id = first_log_file_id + frozen_files.len() as u64;
-        let active_file = new_active_file(&options.path, active_file_id).await?;
+        let active_file = ActiveFile::open(&options.path, active_file_id).await?;
 
         Ok(Self {
             node: options.node,
@@ -151,10 +137,9 @@ impl Log {
             log_file_capacity: options.log_file_capacity,
             persist: options.persist,
             core: Arc::new(LogCore {
-                active_file: Arc::new(AsyncRwLock::new(active_file)),
-                frozen_files: Arc::new(AsyncRwLock::new(frozen_files)),
+                active_file: RwLock::new(active_file),
+                frozen_files: RwLock::new(frozen_files),
                 first_log_file_id: AtomicU64::new(first_log_file_id),
-                active_file_len: AtomicUsize::new(0),
 
                 writer_packer: Packer::new(64),
             }),
@@ -163,12 +148,13 @@ impl Log {
         })
     }
 
+    #[tracing::instrument(level = "trace", ret)]
     pub async fn frozen_file_count(&self) -> usize {
         self.core.frozen_files.read().await.len()
     }
 
     /// Append [`entries`] to log file.
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = "trace", ret, err)]
     pub async fn append(&self, entries: Vec<Entry>) -> Result<Vec<WriteHandle>> {
         let start = Instant::now();
         let mut total_size = 0;
@@ -178,13 +164,15 @@ impl Log {
         let is_leader = self.core.writer_packer.append(entries, Some(tx));
 
         if is_leader {
-            let mut file = self
+            // Get exclusive lock to prevent next batch write concurrently.
+            let mut active_file = self
                 .core
                 .active_file
                 .write()
                 .instrument(trace_span!("wait_queue"))
                 .await;
-            let mut offset = self.core.active_file_len.load(Ordering::Acquire);
+            let mut offset = active_file.offset().await as usize;
+
             let mut buf = Vec::with_capacity(DEFAULT_BUFFER_SIZE);
 
             // Take writer batch.
@@ -220,32 +208,25 @@ impl Log {
 
                 if offset + buf.len() >= self.log_file_capacity {
                     // Force write buffer.
-                    file.write_all(&buf)
-                        .instrument(trace_span!("write_all"))
-                        .await?;
+                    active_file.append(&buf).await?;
                     self.metrics.sync_size_histogram.observe(buf.len() as f64);
                     buf.clear();
 
                     // Sync old active file.
                     let now = Instant::now();
-                    file.sync_all().instrument(trace_span!("sync_all")).await?;
+                    active_file.sync_all().await?;
                     self.metrics
                         .sync_latency_histogram
                         .observe(now.elapsed().as_secs_f64());
 
                     // Rotate active file.
                     let new_active_file_id = file_id + 1;
-                    *file = new_active_file(&self.path, new_active_file_id).await?;
-                    self.core.active_file_len.store(0, Ordering::Release);
+                    *active_file = ActiveFile::open(&self.path, new_active_file_id).await?;
                     offset = 0;
 
                     // Sync dir.
                     let start_sync = Instant::now();
-                    File::open(&self.path)
-                        .await?
-                        .sync_all()
-                        .instrument(trace_span!("sync_all"))
-                        .await?;
+                    sync_dir(&self.path).await?;
                     self.metrics
                         .sync_latency_histogram
                         .observe(start_sync.elapsed().as_secs_f64());
@@ -257,8 +238,7 @@ impl Log {
                     );
 
                     // Add old active file to frozen file list.
-                    let frozen_file =
-                        File::open(Path::new(&self.path).join(filename(file_id))).await?;
+                    let frozen_file = FrozenFile::open(&self.path, file_id).await?;
                     self.core.frozen_files.write().await.push(frozen_file);
                 }
 
@@ -267,22 +247,17 @@ impl Log {
             }
 
             if !buf.is_empty() {
-                self.core
-                    .active_file_len
-                    .store(offset + buf.len(), Ordering::Release);
-                file.write_all(&buf)
-                    .instrument(trace_span!("write_all"))
-                    .await?;
+                active_file.append(&buf).await?;
                 self.metrics.sync_size_histogram.observe(buf.len() as f64);
                 buf.clear();
 
                 let start_sync = Instant::now();
                 match self.persist {
                     Persist::Flush => {
-                        file.flush().await?;
+                        active_file.flush().await?;
                     }
                     Persist::Sync => {
-                        file.sync_data().await?;
+                        active_file.sync_data().await?;
                     }
                     _ => {}
                 }
@@ -296,10 +271,10 @@ impl Log {
                     Error::Other(format!("failed to send write handle: {:?}", handle))
                 })?;
             }
-            drop(file);
+            drop(active_file);
         }
 
-        let handle = rx.await.map_err(Error::err)?;
+        let handles = rx.await.map_err(Error::err)?;
 
         self.metrics
             .append_log_latency_histogram
@@ -308,31 +283,61 @@ impl Log {
             .append_log_throughput_guage
             .add(total_size as f64);
 
-        Ok(handle)
+        Ok(handles)
     }
 
-    #[tracing::instrument(level = "trace")]
-    pub async fn read(&self, log_file_id: u64, offset: u64, len: usize) -> Result<Vec<u8>> {
+    #[tracing::instrument(level = "trace", ret, err)]
+    pub async fn read(
+        &self,
+        log_file_id: u64,
+        block_offset: u64,
+        block_len: usize,
+    ) -> Result<Vec<u8>> {
         // NOTE: Be careful with the lock order between `active_file` and `frozen_files`!!!
 
-        {
-            let mut frozen_files = self.core.frozen_files.write().await;
-            let first_log_file_id = self.core.first_log_file_id.load(Ordering::Acquire);
-            let log_file_index = (log_file_id - first_log_file_id) as usize;
-            if log_file_index < frozen_files.len() {
-                frozen_files[log_file_index]
-                    .seek(std::io::SeekFrom::Start(offset))
-                    .await?;
-                let mut buf = vec![0; len];
-                frozen_files[log_file_index].read_exact(&mut buf).await?;
-                return Ok(buf);
-            }
+        enum File {
+            Active(ActiveFile),
+            Frozen(FrozenFile),
         }
 
-        let mut active_file = self.core.active_file.write().await;
-        active_file.seek(std::io::SeekFrom::Start(offset)).await?;
-        let mut buf = vec![0; len];
-        active_file.read_exact(&mut buf).await?;
+        let file = {
+            let frozen_files = self.core.frozen_files.read().await;
+            let first_log_file_id = self.core.first_log_file_id.load(Ordering::Acquire);
+            let index = (log_file_id - first_log_file_id) as usize;
+            if index < frozen_files.len() {
+                File::Frozen(frozen_files[index].clone())
+            } else {
+                drop(frozen_files);
+                let active_file = self.core.active_file.read().await.clone();
+                // FIXME: A workaround here. Active file rotation and frozen file vec mutation
+                // should be combined.
+                if active_file.id() == log_file_id {
+                    File::Active(active_file)
+                } else {
+                    let frozen_files = self.core.frozen_files.read().await;
+                    let first_log_file_id = self.core.first_log_file_id.load(Ordering::Acquire);
+                    let index = (log_file_id - first_log_file_id) as usize;
+                    assert!(
+                        index < frozen_files.len(),
+                        "index: {}, frozen_file len: {}",
+                        index,
+                        frozen_files.len(),
+                    );
+                    File::Frozen(frozen_files[index].clone())
+                }
+            }
+        };
+
+        let buf = match file {
+            File::Active(file) => {
+                assert_eq!(file.id(), log_file_id);
+                file.read(block_offset, block_len).await?
+            }
+            File::Frozen(file) => {
+                assert_eq!(file.id(), log_file_id);
+                file.read(block_offset, block_len).await?
+            }
+        };
         Ok(buf)
     }
 
@@ -342,17 +347,14 @@ impl Log {
     #[allow(clippy::needless_lifetimes)]
     #[try_stream(ok = (u64,usize, Entry), error = RaftLogStoreError)]
     pub async fn replay(&self) {
-        let mut frozen_files = self.core.frozen_files.write().await;
+        let frozen_files = self.core.frozen_files.read().await;
 
         let begin_log_file_id = self.core.first_log_file_id.load(Ordering::Acquire);
         let end_log_file_id = begin_log_file_id + frozen_files.len() as u64;
 
-        let mut buf = Vec::with_capacity(DEFAULT_LOG_BATCH_SIZE);
         for (i, current_log_file_id) in (begin_log_file_id..end_log_file_id).enumerate() {
             trace!("replay index: {} file id: {}", i, current_log_file_id);
-            frozen_files[i].seek(std::io::SeekFrom::Start(0)).await?;
-            buf.clear();
-            frozen_files[i].read_to_end(&mut buf).await?;
+            let buf = frozen_files[i].read_all().await.unwrap();
             let cursor = &mut &buf[..];
             while !cursor.is_empty() {
                 let offset = buf.len() - cursor.len();
@@ -404,10 +406,12 @@ mod tests {
         assert_eq!(log.frozen_file_count().await, 4);
         let mut buf = vec![];
         for i in 0..4 {
-            log.core.frozen_files.write().await[i]
-                .read_to_end(&mut buf)
-                .await
-                .unwrap();
+            buf.append(
+                &mut log.core.frozen_files.read().await[i]
+                    .read_all()
+                    .await
+                    .unwrap(),
+            );
         }
         let mut buf = &buf[..];
         let decoded_entries = (0..4)
@@ -423,10 +427,12 @@ mod tests {
         assert_eq!(log.frozen_file_count().await, 5);
         let mut buf = vec![];
         for i in 0..4 {
-            log.core.frozen_files.write().await[i]
-                .read_to_end(&mut buf)
-                .await
-                .unwrap();
+            buf.append(
+                &mut log.core.frozen_files.read().await[i]
+                    .read_all()
+                    .await
+                    .unwrap(),
+            );
         }
         let mut buf = &buf[..];
         let decoded_entries = (0..4)

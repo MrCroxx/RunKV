@@ -53,20 +53,30 @@ pub struct MemState {
 }
 
 pub struct MemStates {
+    node: u64,
+
     /// Mapping [`group`] to [`MemState`].
     states: RwLock<BTreeMap<u64, RwLock<MemState>>>,
 }
 
-impl Default for MemStates {
-    fn default() -> Self {
-        Self {
-            states: RwLock::new(BTreeMap::default()),
-        }
+impl std::fmt::Debug for MemStates {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MemStates")
+            .field("node", &self.node)
+            .finish()
     }
 }
 
 impl MemStates {
-    #[tracing::instrument(level = "trace", skip(self))]
+    pub fn new(node: u64) -> Self {
+        Self {
+            node,
+
+            states: RwLock::new(BTreeMap::default()),
+        }
+    }
+
+    #[tracing::instrument(level = "trace", ret, err)]
     pub async fn add_group(&self, group: u64) -> Result<()> {
         let mut guard = self.states.write().await;
         match guard.entry(group) {
@@ -84,7 +94,7 @@ impl MemStates {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", ret)]
     pub async fn may_add_group(&self, group: u64) -> bool {
         let mut guard = self.states.write().await;
         match guard.entry(group) {
@@ -105,7 +115,7 @@ impl MemStates {
     /// # Safety
     ///
     /// Removed group needs to be guaranteed never be used again.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", ret, err)]
     pub async fn remove_group(&self, group: u64) -> Result<()> {
         let mut guard = self.states.write().await;
         match guard.entry(group) {
@@ -120,7 +130,7 @@ impl MemStates {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", ret, err)]
     pub async fn term(&self, group: u64, index: u64) -> Result<Option<u64>> {
         state!(self.states, group, guard, state);
 
@@ -137,7 +147,7 @@ impl MemStates {
         }
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", ret, err)]
     pub async fn ctx(&self, group: u64, index: u64) -> Result<Option<Vec<u8>>> {
         state!(self.states, group, guard, state);
 
@@ -150,14 +160,14 @@ impl MemStates {
         }
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", ret, err)]
     pub async fn first_index(&self, group: u64) -> Result<u64> {
         state!(self.states, group, guard, state);
 
         Ok(state.first_index)
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", ret, err)]
     pub async fn last_index(&self, group: u64) -> Result<u64> {
         state!(self.states, group, guard, state);
 
@@ -165,14 +175,14 @@ impl MemStates {
         Ok(last_index)
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", ret, err)]
     pub async fn masked_first_index(&self, group: u64) -> Result<u64> {
         state!(self.states, group, guard, state);
 
         Ok(state.mask_index)
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", ret, err)]
     pub async fn masked_last_index(&self, group: u64) -> Result<u64> {
         state!(self.states, group, guard, state);
 
@@ -185,7 +195,7 @@ impl MemStates {
     }
 
     /// Append raft log indices.
-    #[tracing::instrument(level = "trace", skip(self, indices))]
+    #[tracing::instrument(level = "trace", ret, err)]
     pub async fn append(
         &self,
         group: u64,
@@ -240,7 +250,7 @@ impl MemStates {
     }
 
     /// Truncate raft log of given `group` since given `index`.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", ret, err)]
     pub async fn truncate(&self, group: u64, index: u64) -> Result<()> {
         state_mut!(self.states, group, guard, state);
 
@@ -267,7 +277,7 @@ impl MemStates {
     }
 
     /// Compact any indices before the given index.
-    // #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", ret, err)]
     pub async fn compact(&self, group: u64, index: u64) -> Result<()> {
         state_mut!(self.states, group, guard, state);
 
@@ -302,7 +312,7 @@ impl MemStates {
     ///
     /// Masked indices are not deleted from the state, they should not be accessed by raft
     /// algorithm.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", ret, err)]
     pub async fn mask(&self, group: u64, index: u64) -> Result<()> {
         state_mut!(self.states, group, guard, state);
 
@@ -318,6 +328,7 @@ impl MemStates {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", ret, err)]
     pub async fn may_entries(
         &self,
         group: u64,
@@ -361,6 +372,7 @@ impl MemStates {
         Ok((start_index, indices))
     }
 
+    #[tracing::instrument(level = "trace", ret, err)]
     pub async fn entries(&self, group: u64, index: u64, max_len: usize) -> Result<Vec<EntryIndex>> {
         state!(self.states, group, guard, state);
 
@@ -387,6 +399,7 @@ impl MemStates {
         Ok(indices)
     }
 
+    #[tracing::instrument(level = "trace", ret, err)]
     pub async fn put(&self, group: u64, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
         state_mut!(self.states, group, guard, state);
 
@@ -394,6 +407,7 @@ impl MemStates {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", ret, err)]
     pub async fn delete(&self, group: u64, key: Vec<u8>) -> Result<()> {
         state_mut!(self.states, group, guard, state);
 
@@ -401,6 +415,7 @@ impl MemStates {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", ret, err)]
     pub async fn get(&self, group: u64, key: Vec<u8>) -> Result<Option<Vec<u8>>> {
         state!(self.states, group, guard, state);
 
@@ -419,7 +434,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_raft_log() {
-        let states = MemStates::default();
+        let states = MemStates::new(0);
 
         states.add_group(1).await.unwrap();
 
@@ -469,7 +484,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_kv() {
-        let states = MemStates::default();
+        let states = MemStates::new(0);
         states.add_group(1).await.unwrap();
         states.put(1, b"k1".to_vec(), b"v1".to_vec()).await.unwrap();
         assert_eq!(

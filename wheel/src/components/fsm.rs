@@ -40,6 +40,7 @@ fn gap(range: Range<u64>) -> Error {
 }
 
 /// Note: Range of `entries` shoule be smaller than `range`.
+#[tracing::instrument(level = "trace", ret, err)]
 fn check_log_gap(entries: &[raft::prelude::Entry], range: Range<u64>) -> Result<()> {
     if range.end - range.start == 0 && entries.is_empty() {
         return Ok(());
