@@ -113,7 +113,7 @@ impl ObjectStoreLsmTreeCore {
         let levels = {
             let levels = self
                 .version_manager
-                .pick_overlap_ssts_by_key(0..self.version_manager.levels().await, key)
+                .pick_overlap_ssts_by_key(0..self.version_manager.levels(), key)
                 .await
                 .unwrap();
             levels
@@ -233,13 +233,11 @@ impl ObjectStoreLsmTreeCore {
     }
 
     fn drop_oldest_immutable_memtable(&self) -> MemtableWithCtx {
-        let imm = self
-            .memtables
+        self.memtables
             .write()
             .immutable_memtables
             .pop_back()
-            .unwrap();
-        imm
+            .unwrap()
     }
 }
 

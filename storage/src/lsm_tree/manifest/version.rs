@@ -88,8 +88,8 @@ impl VersionManager {
     }
 
     #[tracing::instrument(level = "trace", ret)]
-    pub async fn levels(&self) -> usize {
-        self.core.read().await.levels.len()
+    pub fn levels(&self) -> usize {
+        self.level_options.len()
     }
 
     #[tracing::instrument(level = "trace", ret)]
@@ -383,7 +383,7 @@ impl VersionManager {
         sst_ids: Vec<u64>,
     ) -> Result<Vec<Vec<u64>>> {
         if sst_ids.is_empty() {
-            return Ok(vec![]);
+            return Ok(vec![vec![]; levels.len()]);
         }
         let mut first_user_key = Vec::default();
         let mut last_user_key = Vec::default();

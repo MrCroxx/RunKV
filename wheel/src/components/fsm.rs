@@ -289,8 +289,12 @@ impl Fsm for ObjectLsmTreeFsm {
         // Update `available index`.
         let mut available_index = None;
         if let Some(last_entry) = entries.last() {
+            #[cfg(feature = "deadlock")]
+            tracing::info!("{} store enter", self.raft_node);
             self.store_index(AVAILABLE_INDEX_KEY, last_entry.index)
                 .await?;
+            #[cfg(feature = "deadlock")]
+            tracing::info!("{} store exit", self.raft_node);
             available_index = Some(last_entry.index);
         }
 
@@ -302,9 +306,20 @@ impl Fsm for ObjectLsmTreeFsm {
         // Get apply progress.
         let avaiable_index = match available_index {
             Some(index) => index,
-            None => self.load_index(AVAILABLE_INDEX_KEY).await?,
+            None => {
+                #[cfg(feature = "deadlock")]
+                tracing::info!("{} load enter", self.raft_node);
+                let index = self.load_index(AVAILABLE_INDEX_KEY).await?;
+                #[cfg(feature = "deadlock")]
+                tracing::info!("{} load exit", self.raft_node);
+                index
+            }
         };
+        #[cfg(feature = "deadlock")]
+        tracing::info!("{} load enter", self.raft_node);
         let last_done_index = self.load_index(DONE_INDEX_KEY).await?;
+        #[cfg(feature = "deadlock")]
+        tracing::info!("{} load exit", self.raft_node);
 
         // Entries to apply: [ first apply index ..= last apply index].
         let first_apply_index = last_done_index + 1;
@@ -318,28 +333,52 @@ impl Fsm for ObjectLsmTreeFsm {
         // Load entries [ first apply index .. first carried index ] from raft log store then apply.
         let load_len = (first_carried_index - first_apply_index) as usize;
         if load_len > 0 {
+            #[cfg(feature = "deadlock")]
+            tracing::info!("{} entries enter", self.raft_node);
             let loaded_entries = self
                 .raft_log_store
                 .entries(first_apply_index, load_len)
                 .await?;
+            #[cfg(feature = "deadlock")]
+            tracing::info!("{} entries exit", self.raft_node);
             check_log_gap(&entries, first_apply_index..first_carried_index)?;
             for entry in loaded_entries {
+                #[cfg(feature = "deadlock")]
+                tracing::info!("{} mutable enter", self.raft_node);
                 self.apply_entry(entry).await?;
+                #[cfg(feature = "deadlock")]
+                tracing::info!("{} mutable exit", self.raft_node);
             }
         }
 
         // Apply carried entries.
         for entry in entries {
             let index = entry.index;
+            #[cfg(feature = "deadlock")]
+            tracing::info!("{} mutable enter", self.raft_node);
             self.apply_entry(entry).await?;
+            #[cfg(feature = "deadlock")]
+            tracing::info!("{} mutable exit", self.raft_node);
+            #[cfg(feature = "deadlock")]
+            tracing::info!("{} immutable enter", self.raft_node);
             self.apply_read_only_until(index).await?;
+            #[cfg(feature = "deadlock")]
+            tracing::info!("{} immutable exit", self.raft_node);
         }
+        #[cfg(feature = "deadlock")]
+        tracing::info!("{} immutable enter", self.raft_node);
         self.apply_read_only_until(last_apply_index).await?;
+        #[cfg(feature = "deadlock")]
+        tracing::info!("{} immutable exit", self.raft_node);
 
         // Update `done index`.
         let done_index = last_apply_index;
         if last_done_index != done_index {
+            #[cfg(feature = "deadlock")]
+            tracing::info!("{} store enter", self.raft_node);
             self.store_index(DONE_INDEX_KEY, done_index).await?;
+            #[cfg(feature = "deadlock")]
+            tracing::info!("{} store exit", self.raft_node);
         }
 
         Ok(())

@@ -252,7 +252,7 @@ async fn check_levels_size(
     l1_capacity: usize,
     level_multiplier: usize,
 ) -> Result<Vec<bool>> {
-    let levels = version_manager.levels().await;
+    let levels = version_manager.levels();
     let mut overstep = Vec::with_capacity(levels);
     overstep.push(false);
     let mut limit = l1_capacity;
@@ -502,6 +502,10 @@ async fn pick_ssts(
             // Skip if not enough sstable involved for L0 compaction.
             continue;
         }
+
+        // FIXME: `base_level_ssts` seems can be empty with
+        // `base_level_ssts.iter().cloned().collect_vec()`?
+
         // Pick overlapping sstable in `level + 1` iff compaction strategy of `level + 1` is
         // `NonOverlap`.
         if ctx.level as usize + 1 < ctx.lsm_tree_config.levels_options.len()
