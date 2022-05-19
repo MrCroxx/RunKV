@@ -256,6 +256,7 @@ impl RaftLogBatch {
         }
     }
 
+    #[tracing::instrument(level = "trace", err)]
     pub fn extract_data_segment(buf: &[u8]) -> Result<Vec<u8>> {
         let checksum = (&buf[buf.len() - 4..]).get_u32_le();
         let buf = &buf[..buf.len() - 4];

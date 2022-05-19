@@ -1,9 +1,6 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use futures_async_stream::for_await;
-use tracing::trace;
-
 use super::block_cache::BlockCache;
 use super::entry::{Compact, Entry as LogEntry, Kv, Mask, RaftLogBatch, Truncate};
 use super::log::{Log, LogOptions, Persist};
@@ -55,12 +52,22 @@ struct RaftLogStoreCore {
 /// a same raft group MUST be performed in order.
 #[derive(Clone)]
 pub struct RaftLogStore {
+    node: u64,
+
     core: Arc<RaftLogStoreCore>,
+}
+
+impl std::fmt::Debug for RaftLogStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RaftLogStore")
+            .field("node", &self.node)
+            .finish()
+    }
 }
 
 impl RaftLogStore {
     pub async fn open(options: RaftLogStoreOptions) -> Result<Self> {
-        let states = MemStates::default();
+        let states = MemStates::new(options.node);
 
         let metrics = Arc::new(RaftLogStoreMetrics::new(options.node));
 
@@ -75,7 +82,7 @@ impl RaftLogStore {
 
         let log = Log::open(log_options).await?;
 
-        #[for_await]
+        #[futures_async_stream::for_await]
         for item in log.replay() {
             let (file_id, write_offset, entry) = item?;
             match entry {
@@ -127,6 +134,8 @@ impl RaftLogStore {
         }
 
         Ok(Self {
+            node: options.node,
+
             core: Arc::new(RaftLogStoreCore {
                 log,
                 states,
@@ -372,8 +381,8 @@ impl RaftLogStore {
 }
 
 impl RaftLogStore {
+    #[tracing::instrument(level = "trace")]
     async fn entry_data(&self, index: &EntryIndex) -> Result<Vec<u8>> {
-        trace!("read entry: {:?}", index);
         let log = self.core.log.clone();
         let index_clone = index.clone();
         let read_file = async move {
@@ -415,24 +424,39 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn test_raft_log() {
+    async fn test_raft_log_with_cache() {
+        test_raft_log(true).await;
+    }
+
+    #[test(tokio::test)]
+    async fn test_raft_log_without_cache() {
+        test_raft_log(false).await;
+    }
+
+    async fn test_raft_log(with_cache: bool) {
         // Prepare data.
-        let mut builder = RaftLogBatchBuilder::default();
-        for group in 1..=4 {
-            for index in 1..=16 {
-                builder.add(group, 1, index, b"some-ctx", &data(group, 1, index));
+        let mut dataset = vec![];
+
+        for r#loop in 0..4 {
+            let mut builder = RaftLogBatchBuilder::default();
+            for group in 1..=4 {
+                let base = r#loop * 16;
+                for index in base + 1..=base + 16 {
+                    builder.add(group, 1, index, b"some-ctx", &data(group, 1, index));
+                }
             }
+            let batches = builder.build();
+            assert_eq!(batches.len(), 4);
+            dataset.push(batches);
         }
-        let batches = builder.build();
-        assert_eq!(batches.len(), 4);
 
         let tempdir = tempfile::tempdir().unwrap();
         let options = RaftLogStoreOptions {
             node: 0,
             log_dir_path: tempdir.path().to_str().unwrap().to_string(),
-            // Estimated size of each compressed entry is 111.
-            log_file_capacity: 100,
-            block_cache_capacity: 1024,
+            // Make sure each loop can exceed the capacity.
+            log_file_capacity: 256,
+            block_cache_capacity: if with_cache { 1024 } else { 0 },
             persist: Persist::Sync,
         };
 
@@ -441,17 +465,15 @@ mod tests {
         store.add_group(2).await.unwrap();
         store.add_group(3).await.unwrap();
         store.add_group(4).await.unwrap();
-        for batch in batches {
-            // FIXME: Currently one log writer cannot rotate log file internally, so we need to
-            // append batch one by one.
-            store.append(vec![batch]).await.unwrap();
+        for batches in dataset {
+            store.append(batches).await.unwrap();
         }
         assert_eq!(store.core.log.frozen_file_count().await, 4);
         for group in 1..=4 {
             let entries = store.entries(group, 1, usize::MAX).await.unwrap();
             assert_eq!(
                 entries.into_iter().map(|entry| entry.data).collect_vec(),
-                (1..=16)
+                (1..=64)
                     .into_iter()
                     .map(|index| data(group, 1, index))
                     .collect_vec()
@@ -465,7 +487,7 @@ mod tests {
             let entries = store.entries(group, 1, usize::MAX).await.unwrap();
             assert_eq!(
                 entries.into_iter().map(|entry| entry.data).collect_vec(),
-                (1..=16)
+                (1..=64)
                     .into_iter()
                     .map(|index| data(group, 1, index))
                     .collect_vec()
@@ -480,7 +502,7 @@ mod tests {
             let entries = store.entries(group, 9, usize::MAX).await.unwrap();
             assert_eq!(
                 entries.into_iter().map(|entry| entry.data).collect_vec(),
-                (9..=16)
+                (9..=64)
                     .into_iter()
                     .map(|index| data(group, 1, index))
                     .collect_vec()
@@ -495,7 +517,7 @@ mod tests {
             let entries = store.entries(group, 9, usize::MAX).await.unwrap();
             assert_eq!(
                 entries.into_iter().map(|entry| entry.data).collect_vec(),
-                (9..=16)
+                (9..=64)
                     .into_iter()
                     .map(|index| data(group, 1, index))
                     .collect_vec()
@@ -535,14 +557,23 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn test_kv() {
+    async fn test_kv_with_cache() {
+        test_kv(true).await;
+    }
+
+    #[test(tokio::test)]
+    async fn test_kv_without_cache() {
+        test_kv(false).await;
+    }
+
+    async fn test_kv(with_cache: bool) {
         let tempdir = tempfile::tempdir().unwrap();
         let options = RaftLogStoreOptions {
             node: 0,
             log_dir_path: tempdir.path().to_str().unwrap().to_string(),
-            // Estimated size of each compressed entry is 111.
+            // Make sure each loop can exceed the capacity.
             log_file_capacity: 100,
-            block_cache_capacity: 1024,
+            block_cache_capacity: if with_cache { 1024 } else { 0 },
             persist: Persist::Sync,
         };
 
