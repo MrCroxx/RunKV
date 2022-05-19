@@ -334,6 +334,8 @@ impl RaftLogStore {
     }
 
     pub async fn put(&self, group: u64, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+        #[cfg(feature = "deadlock")]
+        tracing::info!("{} logappend enter", group);
         self.core
             .log
             .append(vec![LogEntry::Kv(Kv::Put {
@@ -342,7 +344,13 @@ impl RaftLogStore {
                 value: value.clone(),
             })])
             .await?;
+        #[cfg(feature = "deadlock")]
+        tracing::info!("{} logappend exit", group);
+        #[cfg(feature = "deadlock")]
+        tracing::info!("{} stateput enter", group);
         self.core.states.put(group, key, value).await?;
+        #[cfg(feature = "deadlock")]
+        tracing::info!("{} stateput exit", group);
         Ok(())
     }
 

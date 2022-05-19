@@ -69,8 +69,11 @@ where
         }
     }
 
-    pub fn append(&self, data: T, notifier: Option<oneshot::Sender<R>>) {
-        self.core.queue.lock().push(Item { data, notifier });
+    pub fn append(&self, data: T, notifier: Option<oneshot::Sender<R>>) -> bool {
+        let mut queue = self.core.queue.lock();
+        let is_leader = queue.is_empty();
+        queue.push(Item { data, notifier });
+        is_leader
     }
 
     pub fn package(&self) -> Vec<Item<T, R>> {

@@ -552,7 +552,11 @@ where
 
     #[tracing::instrument(level = "trace")]
     async fn send_messages(&mut self, messages: Vec<raft::prelude::Message>) -> Result<()> {
+        #[cfg(feature = "deadlock")]
+        tracing::info!("{} send enter", self.raft_node);
         if messages.is_empty() {
+            #[cfg(feature = "deadlock")]
+            tracing::info!("{} send exit empty", self.raft_node);
             return Ok(());
         }
 
@@ -622,6 +626,8 @@ where
         self.metrics
             .send_messages_throughput_gauge
             .add(bytes as f64);
+        #[cfg(feature = "deadlock")]
+        tracing::info!("{} send exit", self.raft_node);
         Ok(())
     }
 
@@ -640,6 +646,8 @@ where
         read_states: Vec<raft::ReadState>,
         entries: Vec<raft::prelude::Entry>,
     ) -> Result<()> {
+        #[cfg(feature = "deadlock")]
+        tracing::info!("{} apply enter", self.raft_node);
         let is_leader = match &self.raft_soft_state {
             None => false,
             Some(ss) => ss.raft_state == raft::StateRole::Leader,
@@ -655,22 +663,36 @@ where
             // TODO: Clear stale read-onlt proposals.
             // Only leader can get read-only proposals at the same term.
             let id = (&mut &ctx[..]).get_u64();
+            #[cfg(feature = "deadlock")]
+            tracing::info!("{} pool enter", self.raft_node);
             self.read_only_cmd_pool.ready(id, index);
+            #[cfg(feature = "deadlock")]
+            tracing::info!("{} pool exit", self.raft_node);
         }
 
+        #[cfg(feature = "deadlock")]
+        tracing::info!("{} fsmapply enter", self.raft_node);
         self.fsm.apply(self.group, is_leader, entries).await?;
+        #[cfg(feature = "deadlock")]
+        tracing::info!("{} fsmapply exit", self.raft_node);
 
         let elapsed = start.elapsed();
 
         self.metrics
             .apply_log_entries_latency_histogram
             .observe(elapsed.as_secs_f64());
+        #[cfg(feature = "deadlock")]
+        tracing::info!("{} apply exit", self.raft_node);
         Ok(())
     }
 
     #[tracing::instrument(level = "trace")]
     async fn append_log_entries(&mut self, entries: Vec<raft::prelude::Entry>) -> Result<()> {
+        #[cfg(feature = "deadlock")]
+        tracing::info!("{} append enter", self.raft_node);
         if entries.is_empty() {
+            #[cfg(feature = "deadlock")]
+            tracing::info!("{} append exit empty", self.raft_node);
             return Ok(());
         }
 
@@ -733,6 +755,8 @@ where
         self.metrics
             .append_log_entries_throughput_gauge
             .add(bytes as f64);
+        #[cfg(feature = "deadlock")]
+        tracing::info!("{} append exit", self.raft_node);
         Ok(())
     }
 

@@ -4,13 +4,12 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-use futures::channel::oneshot;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use parking_lot::RwLock;
+use runkv_common::packer::{Item, Packer};
 use tokio::fs::{create_dir_all, read_dir, File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::RwLock as AsyncRwLock;
+use tokio::sync::{oneshot, RwLock as AsyncRwLock};
 use tracing::{trace, trace_span, Instrument};
 
 use super::entry::Entry;
@@ -63,17 +62,6 @@ pub struct WriteHandle {
     pub len: usize,
 }
 
-struct Writer {
-    entries: Vec<Entry>,
-    tx: oneshot::Sender<Vec<WriteHandle>>,
-}
-
-impl Writer {
-    fn new(entries: Vec<Entry>, tx: oneshot::Sender<Vec<WriteHandle>>) -> Self {
-        Self { entries, tx }
-    }
-}
-
 #[derive(Clone)]
 pub struct LogOptions {
     pub node: u64,
@@ -90,7 +78,7 @@ struct LogCore {
     first_log_file_id: AtomicU64,
     active_file_len: AtomicUsize,
 
-    queue: Arc<RwLock<Vec<Writer>>>,
+    writer_packer: Packer<Vec<Entry>, Vec<WriteHandle>>,
 }
 
 #[derive(Clone)]
@@ -168,7 +156,7 @@ impl Log {
                 first_log_file_id: AtomicU64::new(first_log_file_id),
                 active_file_len: AtomicUsize::new(0),
 
-                queue: Arc::new(RwLock::new(vec![])),
+                writer_packer: Packer::new(64),
             }),
 
             metrics: options.metrics,
@@ -186,14 +174,8 @@ impl Log {
         let mut total_size = 0;
 
         let (tx, rx) = oneshot::channel();
-        let writer = Writer::new(entries, tx);
         // Append entries to queue.
-        let is_leader = {
-            let mut queue = self.core.queue.write();
-            let is_leader = queue.is_empty();
-            queue.push(writer);
-            is_leader
-        };
+        let is_leader = self.core.writer_packer.append(entries, Some(tx));
 
         if is_leader {
             let mut file = self
@@ -206,10 +188,7 @@ impl Log {
             let mut buf = Vec::with_capacity(DEFAULT_BUFFER_SIZE);
 
             // Take writer batch.
-            let writers = {
-                let mut queue = self.core.queue.write();
-                std::mem::take(&mut (*queue))
-            };
+            let writers = self.core.writer_packer.package();
             self.metrics
                 .batch_writers_histogram
                 .observe(writers.len() as f64);
@@ -217,13 +196,17 @@ impl Log {
             let mut txs = Vec::with_capacity(writers.len());
             let mut handles = Vec::with_capacity(writers.len());
 
-            for writer in writers {
-                let mut entry_handles = Vec::with_capacity(writer.entries.len());
+            for Item {
+                data: entries,
+                notifier,
+            } in writers
+            {
+                let mut entry_handles = Vec::with_capacity(entries.len());
 
                 let file_id = self.core.first_log_file_id.load(Ordering::Acquire)
                     + self.core.frozen_files.read().await.len() as u64;
 
-                for entry in writer.entries {
+                for entry in entries {
                     let entry_offset = offset + buf.len();
                     entry.encode(&mut buf);
                     let entry_len = offset + buf.len() - entry_offset;
@@ -279,7 +262,7 @@ impl Log {
                     self.core.frozen_files.write().await.push(frozen_file);
                 }
 
-                txs.push(writer.tx);
+                txs.push(notifier.unwrap());
                 handles.push(entry_handles);
             }
 
@@ -330,23 +313,26 @@ impl Log {
 
     #[tracing::instrument(level = "trace")]
     pub async fn read(&self, log_file_id: u64, offset: u64, len: usize) -> Result<Vec<u8>> {
-        let mut frozen_files = self.core.frozen_files.write().await;
-        let first_log_file_id = self.core.first_log_file_id.load(Ordering::Acquire);
-        let log_file_index = (log_file_id - first_log_file_id) as usize;
-        let buf = if log_file_index < frozen_files.len() {
-            frozen_files[log_file_index]
-                .seek(std::io::SeekFrom::Start(offset))
-                .await?;
-            let mut buf = vec![0; len];
-            frozen_files[log_file_index].read_exact(&mut buf).await?;
-            buf
-        } else {
-            let mut active_file = self.core.active_file.write().await;
-            active_file.seek(std::io::SeekFrom::Start(offset)).await?;
-            let mut buf = vec![0; len];
-            active_file.read_exact(&mut buf).await?;
-            buf
-        };
+        // NOTE: Be careful with the lock order between `active_file` and `frozen_files`!!!
+
+        {
+            let mut frozen_files = self.core.frozen_files.write().await;
+            let first_log_file_id = self.core.first_log_file_id.load(Ordering::Acquire);
+            let log_file_index = (log_file_id - first_log_file_id) as usize;
+            if log_file_index < frozen_files.len() {
+                frozen_files[log_file_index]
+                    .seek(std::io::SeekFrom::Start(offset))
+                    .await?;
+                let mut buf = vec![0; len];
+                frozen_files[log_file_index].read_exact(&mut buf).await?;
+                return Ok(buf);
+            }
+        }
+
+        let mut active_file = self.core.active_file.write().await;
+        active_file.seek(std::io::SeekFrom::Start(offset)).await?;
+        let mut buf = vec![0; len];
+        active_file.read_exact(&mut buf).await?;
         Ok(buf)
     }
 

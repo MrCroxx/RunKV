@@ -51,6 +51,9 @@ criterion = { version = "0.3", features = ["async", "async_tokio"] }
 env_logger = "*"
 test-log = "0.2.10"
 
+[features]
+deadlock = []
+
 [[bench]]
 name = "bench_block_iter"
 harness = false

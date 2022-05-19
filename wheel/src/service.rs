@@ -18,7 +18,7 @@ use runkv_proto::wheel::raft_service_server::RaftService;
 use runkv_proto::wheel::wheel_service_server::WheelService;
 use runkv_proto::wheel::*;
 use tonic::{Request, Response, Status};
-use tracing::{trace_span, Instrument};
+use tracing::{trace, trace_span, Instrument};
 
 use crate::components::command::Command;
 use crate::components::raft_manager::RaftManager;
@@ -174,6 +174,7 @@ impl Wheel {
 
             // Register request.
             let request_id = self.inner.request_id.fetch_add(1, Ordering::SeqCst) + 1;
+            trace!("id: {} request: {:?}", request_id, request);
             let rx = self
                 .inner
                 .txn_notify_pool

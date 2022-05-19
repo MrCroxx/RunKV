@@ -1,5 +1,5 @@
 use std::collections::hash_map::{DefaultHasher, Entry, HashMap};
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -8,14 +8,16 @@ use tokio::sync::oneshot;
 
 pub struct NotifyPoolCore<I, R>
 where
-    I: Eq + Hash + Copy + Clone + Display,
+    I: Eq + Hash + Copy + Clone + Send + Sync + Debug + Display + 'static,
+    R: Send + Sync + 'static,
 {
     inner: Arc<Mutex<HashMap<I, oneshot::Sender<R>>>>,
 }
 
 impl<I, R> Clone for NotifyPoolCore<I, R>
 where
-    I: Eq + Hash + Copy + Clone + Display,
+    I: Eq + Hash + Copy + Clone + Send + Sync + Debug + Display + 'static,
+    R: Send + Sync + 'static,
 {
     fn clone(&self) -> Self {
         Self {
@@ -26,7 +28,8 @@ where
 
 impl<I, R> Default for NotifyPoolCore<I, R>
 where
-    I: Eq + Hash + Copy + Clone + Display,
+    I: Eq + Hash + Copy + Clone + Send + Sync + Debug + Display + 'static,
+    R: Send + Sync + 'static,
 {
     fn default() -> Self {
         Self {
@@ -37,7 +40,8 @@ where
 
 pub struct NotifyPool<I, R>
 where
-    I: Eq + Hash + Copy + Clone + Display,
+    I: Eq + Hash + Copy + Clone + Send + Sync + Debug + Display + 'static,
+    R: Send + Sync + 'static,
 {
     shards: u16,
     buckets: HashMap<u16, NotifyPoolCore<I, R>>,
@@ -45,7 +49,8 @@ where
 
 impl<I, R> Clone for NotifyPool<I, R>
 where
-    I: Eq + Hash + Copy + Clone + Display,
+    I: Eq + Hash + Copy + Clone + Send + Sync + Debug + Display + 'static,
+    R: Send + Sync + 'static,
 {
     fn clone(&self) -> Self {
         Self {
@@ -57,14 +62,24 @@ where
 
 impl<I, R> NotifyPool<I, R>
 where
-    I: Eq + Hash + Copy + Clone + Display,
+    I: Eq + Hash + Copy + Clone + Send + Sync + Debug + Display + 'static,
+    R: Send + Sync + 'static,
 {
+    #[allow(clippy::let_and_return)]
     pub fn new(shards: u16) -> Self {
         let mut buckets = HashMap::default();
         for i in 0..shards {
             buckets.insert(i, NotifyPoolCore::default());
         }
-        Self { shards, buckets }
+        let pool = Self { shards, buckets };
+        #[cfg(feature = "trace-notify-pool")]
+        {
+            let pool_clone = pool.clone();
+            tokio::spawn(async move {
+                pool_clone.trace().await;
+            });
+        }
+        pool
     }
 
     pub fn register(&self, id: I) -> anyhow::Result<oneshot::Receiver<R>> {
@@ -102,6 +117,43 @@ where
         tx.send(result)
             .map_err(|_| anyhow::anyhow!("error raised to send result to notifier {}", id))?;
         Ok(())
+    }
+}
+
+#[cfg(feature = "trace-notify-pool")]
+#[derive(Default, Debug)]
+struct TraceOutput<I>
+where
+    I: Eq + Hash + Copy + Clone + Send + Sync + Debug + Display + 'static,
+{
+    total: usize,
+    ids: Vec<I>,
+}
+
+#[cfg(feature = "trace-notify-pool")]
+impl<I, R> NotifyPool<I, R>
+where
+    I: Eq + Hash + Copy + Clone + Send + Sync + Debug + Display + 'static,
+    R: Send + Sync + 'static,
+{
+    async fn trace(&self) {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+            let mut output = TraceOutput {
+                total: 0,
+                ids: vec![],
+            };
+
+            for (_, bucket) in self.buckets.iter() {
+                let guard = bucket.inner.lock();
+                for (id, _) in guard.iter() {
+                    output.total += 1;
+                    output.ids.push(*id);
+                }
+            }
+            tracing::trace!("notofy pool: {:?}", output);
+        }
     }
 }
 
