@@ -2,6 +2,7 @@ pub mod block_cache;
 pub mod entry;
 pub mod error;
 pub mod file;
+pub mod file_v2;
 pub mod log;
 pub mod mem;
 pub mod metrics;
