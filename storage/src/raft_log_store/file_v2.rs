@@ -6,6 +6,26 @@ use tokio::sync::oneshot;
 
 use crate::error::Result;
 
+pub async fn sync_dir(dir: impl AsRef<Path>) -> Result<()> {
+    let path = dir.as_ref().to_path_buf();
+
+    let (tx, rx) = oneshot::channel();
+    tokio::task::spawn_blocking(move || {
+        let dir = match std::fs::File::open(path) {
+            Ok(dir) => dir,
+            Err(e) => {
+                tx.send(Err(e)).unwrap();
+                return;
+            }
+        };
+        tx.send(dir.sync_all()).unwrap();
+    });
+
+    rx.await.unwrap()?;
+
+    Ok(())
+}
+
 fn filename(id: u64) -> String {
     format!("{:08}", id)
 }
@@ -46,6 +66,38 @@ impl ActiveFile {
         })
     }
 
+    #[tracing::instrument(level = "trace", ret)]
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    #[tracing::instrument(level = "trace", ret)]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    #[tracing::instrument(level = "trace", ret)]
+    pub fn len(&self) -> usize {
+        self.len.load(Ordering::Acquire)
+    }
+
+    #[tracing::instrument(level = "trace", err)]
+    pub async fn read(&self, offset: u64, len: usize) -> Result<Vec<u8>> {
+        let (tx, rx) = oneshot::channel();
+        let f = self.file.clone();
+
+        tokio::task::spawn_blocking(move || {
+            use std::os::unix::prelude::FileExt;
+            let mut buf = vec![0; len];
+            let result = f.read_exact_at(&mut buf, offset).map(|_| buf);
+            tx.send(result).unwrap();
+        });
+
+        let buf = rx.await.unwrap()?;
+
+        Ok(buf)
+    }
+
     // TODO: Replace `buf: Vec<u8>` with `buf: Bytes` or `buf: &[u8]` (but 'static is needed).
     #[tracing::instrument(level = "trace", err)]
     pub async fn append(&self, buf: Vec<u8>) -> Result<()> {
@@ -61,6 +113,25 @@ impl ActiveFile {
 
         rx.await.unwrap()?;
         self.len.fetch_add(buf_len, Ordering::Release);
+
+        Ok(())
+    }
+
+    /// # Safety
+    /// Concurrent `flush` call leads to panics.
+    #[tracing::instrument(level = "trace", err)]
+    pub async fn flush(&self) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        let mut f = self.file.clone();
+
+        tokio::task::spawn_blocking(move || {
+            use std::io::Write;
+            let fmut = Arc::get_mut(&mut f).unwrap();
+            let result = fmut.flush();
+            tx.send(result).unwrap();
+        });
+
+        rx.await.unwrap()?;
 
         Ok(())
     }
@@ -129,6 +200,11 @@ impl FrozenFile {
         })
     }
 
+    #[tracing::instrument(level = "trace", ret)]
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
     #[tracing::instrument(level = "trace", err)]
     pub async fn read(&self, offset: u64, len: usize) -> Result<Vec<u8>> {
         let (tx, rx) = oneshot::channel();
@@ -138,6 +214,30 @@ impl FrozenFile {
             use std::os::unix::prelude::FileExt;
             let mut buf = vec![0; len];
             let result = f.read_exact_at(&mut buf, offset).map(|_| buf);
+            tx.send(result).unwrap();
+        });
+
+        let buf = rx.await.unwrap()?;
+
+        Ok(buf)
+    }
+
+    #[tracing::instrument(level = "trace", err)]
+    pub async fn read_all(&self) -> Result<Vec<u8>> {
+        let (tx, rx) = oneshot::channel();
+        let f = self.file.clone();
+
+        tokio::task::spawn_blocking(move || {
+            use std::os::unix::prelude::FileExt;
+            let len = match f.metadata() {
+                Ok(metadata) => metadata.len() as usize,
+                Err(e) => {
+                    tx.send(Err(e)).unwrap();
+                    return;
+                }
+            };
+            let mut buf = vec![0; len];
+            let result = f.read_exact_at(&mut buf, 0).map(|_| buf);
             tx.send(result).unwrap();
         });
 
