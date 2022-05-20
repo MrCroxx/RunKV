@@ -5,6 +5,7 @@ pub mod file;
 pub mod log;
 pub mod mem;
 pub mod metrics;
+pub mod queue;
 pub mod store;
 
 const DEFAULT_LOG_BATCH_SIZE: usize = 8 << 10;

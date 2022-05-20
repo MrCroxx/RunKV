@@ -14,6 +14,10 @@ pub enum RaftLogStoreError {
     IoError(#[from] std::io::Error),
     #[error("raft log gap exists: [{start}, {end})")]
     RaftLogGap { start: u64, end: u64 },
+    #[error("raft log file gap: [{start}, {end})")]
+    RaftLogFileGap { start: u64, end: u64 },
+    #[error("raft log file not found: {0}")]
+    RaftLogFileNotFound(u64),
     #[error("other: {0}")]
     Other(String),
 }
