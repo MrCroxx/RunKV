@@ -53,6 +53,7 @@ impl ActiveFile {
             let mut options = std::fs::OpenOptions::new();
             options.create(true);
             options.append(true);
+            options.read(true);
             let result = options.open(path);
             tx.send(result).unwrap();
         });
