@@ -201,12 +201,11 @@ impl Log {
 
                 if offset + buffer.len() >= self.log_file_capacity {
                     // Force write buffer.
+                    active_file.append(&buffer).await?;
                     self.metrics
                         .sync_size_histogram
                         .observe(buffer.len() as f64);
-                    let mut buf = Vec::with_capacity(DEFAULT_BUFFER_SIZE);
-                    std::mem::swap(&mut buf, &mut buffer);
-                    active_file.append(buf).await?;
+                    buffer.clear();
 
                     // Sync old active file.
                     let now = Instant::now();
@@ -240,12 +239,11 @@ impl Log {
             }
 
             if !buffer.is_empty() {
+                active_file.append(&buffer).await?;
                 self.metrics
                     .sync_size_histogram
                     .observe(buffer.len() as f64);
-                let mut buf = Vec::with_capacity(DEFAULT_BUFFER_SIZE);
-                std::mem::swap(&mut buf, &mut buffer);
-                active_file.append(buf).await?;
+                buffer.clear();
 
                 let start_sync = Instant::now();
                 match self.persist {
@@ -267,6 +265,7 @@ impl Log {
                     Error::Other(format!("failed to send write handle: {:?}", handle))
                 })?;
             }
+
             drop(guard);
         }
 

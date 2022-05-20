@@ -1,8 +1,9 @@
+// TODO: Replace `Mutex<tokio::fs::File>` with `tokio::fs::File` directly after `write_at` and
+// `read_at` are supported.
+
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-
-use tokio::sync::oneshot;
 
 use crate::error::Result;
 
@@ -75,9 +76,8 @@ impl ActiveFile {
         Ok(buf)
     }
 
-    // TODO: Replace `buf: Vec<u8>` with `buf: Bytes` or `buf: &[u8]` (but 'static is needed).
     #[tracing::instrument(level = "trace", err)]
-    pub async fn append(&self, buf: Vec<u8>) -> Result<()> {
+    pub async fn append(&self, buf: &[u8]) -> Result<()> {
         use tokio::io::AsyncWriteExt;
 
         let mut file = self.file.lock().await;
@@ -112,7 +112,7 @@ impl ActiveFile {
 #[derive(Clone)]
 pub struct FrozenFile {
     id: u64,
-    file: Arc<std::fs::File>,
+    file: Arc<tokio::sync::Mutex<tokio::fs::File>>,
 }
 
 impl std::fmt::Debug for FrozenFile {
@@ -124,21 +124,14 @@ impl std::fmt::Debug for FrozenFile {
 impl FrozenFile {
     #[tracing::instrument(level = "trace", skip(dir), err)]
     pub async fn open(dir: impl AsRef<Path>, id: u64) -> Result<Self> {
-        let (tx, rx) = oneshot::channel();
         let path = dir.as_ref().join(filename(id));
-
-        tokio::task::spawn_blocking(move || {
-            let mut options = std::fs::OpenOptions::new();
-            options.read(true);
-            let result = options.open(path);
-            tx.send(result).unwrap();
-        });
-
-        let file = rx.await.unwrap()?;
+        let mut options = tokio::fs::OpenOptions::new();
+        options.read(true);
+        let file = options.open(path).await?;
 
         Ok(Self {
             id,
-            file: Arc::new(file),
+            file: Arc::new(tokio::sync::Mutex::new(file)),
         })
     }
 
@@ -149,41 +142,26 @@ impl FrozenFile {
 
     #[tracing::instrument(level = "trace", err)]
     pub async fn read(&self, offset: u64, len: usize) -> Result<Vec<u8>> {
-        let (tx, rx) = oneshot::channel();
-        let f = self.file.clone();
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
-        tokio::task::spawn_blocking(move || {
-            use std::os::unix::prelude::FileExt;
-            let mut buf = vec![0; len];
-            let result = f.read_exact_at(&mut buf, offset).map(|_| buf);
-            tx.send(result).unwrap();
-        });
+        let mut file = self.file.lock().await;
 
-        let buf = rx.await.unwrap()?;
+        let mut buf = vec![0; len];
+        file.seek(std::io::SeekFrom::Start(offset)).await?;
+        file.read_exact(&mut buf).await?;
 
         Ok(buf)
     }
 
     #[tracing::instrument(level = "trace", err)]
     pub async fn read_all(&self) -> Result<Vec<u8>> {
-        let (tx, rx) = oneshot::channel();
-        let f = self.file.clone();
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
-        tokio::task::spawn_blocking(move || {
-            use std::os::unix::prelude::FileExt;
-            let len = match f.metadata() {
-                Ok(metadata) => metadata.len() as usize,
-                Err(e) => {
-                    tx.send(Err(e)).unwrap();
-                    return;
-                }
-            };
-            let mut buf = vec![0; len];
-            let result = f.read_exact_at(&mut buf, 0).map(|_| buf);
-            tx.send(result).unwrap();
-        });
+        let mut file = self.file.lock().await;
 
-        let buf = rx.await.unwrap()?;
+        let mut buf = Vec::new();
+        file.seek(std::io::SeekFrom::Start(0)).await?;
+        file.read_to_end(&mut buf).await?;
 
         Ok(buf)
     }
