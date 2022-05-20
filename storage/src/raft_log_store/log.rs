@@ -12,7 +12,7 @@ use tracing::trace;
 
 use super::entry::Entry;
 use super::error::RaftLogStoreError;
-use super::file_v2::{ActiveFile, FrozenFile};
+use super::file::{ActiveFile, FrozenFile};
 use super::metrics::RaftLogStoreMetricsRef;
 use super::queue::{LogFile, LogQueue};
 use crate::error::{Error, Result};

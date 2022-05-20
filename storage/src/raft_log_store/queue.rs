@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 
-use super::file_v2::{ActiveFile, FrozenFile};
+use super::file::{ActiveFile, FrozenFile};
 use crate::error::Result;
 use crate::raft_log_store::error::RaftLogStoreError;
 
