@@ -81,7 +81,7 @@ impl ActiveFile {
         use tokio::io::AsyncWriteExt;
 
         let mut file = self.file.lock().await;
-        file.write_all(&buf).await?;
+        file.write_all(buf).await?;
         self.len.fetch_add(buf.len(), Ordering::Release);
 
         Ok(())
