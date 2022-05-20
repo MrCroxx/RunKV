@@ -8,21 +8,8 @@ use crate::error::Result;
 
 pub async fn sync_dir(dir: impl AsRef<Path>) -> Result<()> {
     let path = dir.as_ref().to_path_buf();
-
-    let (tx, rx) = oneshot::channel();
-    tokio::task::spawn_blocking(move || {
-        let dir = match std::fs::File::open(path) {
-            Ok(dir) => dir,
-            Err(e) => {
-                tx.send(Err(e)).unwrap();
-                return;
-            }
-        };
-        tx.send(dir.sync_all()).unwrap();
-    });
-
-    rx.await.unwrap()?;
-
+    let dir = tokio::fs::File::open(path).await?;
+    dir.sync_all().await?;
     Ok(())
 }
 
@@ -33,7 +20,7 @@ fn filename(id: u64) -> String {
 #[derive(Clone)]
 pub struct ActiveFile {
     id: u64,
-    file: Arc<std::fs::File>,
+    file: Arc<tokio::sync::Mutex<tokio::fs::File>>,
     len: Arc<AtomicUsize>,
 }
 
@@ -46,23 +33,16 @@ impl std::fmt::Debug for ActiveFile {
 impl ActiveFile {
     #[tracing::instrument(level = "trace", skip(dir), err)]
     pub async fn open(dir: impl AsRef<Path>, id: u64) -> Result<Self> {
-        let (tx, rx) = oneshot::channel();
         let path = dir.as_ref().join(filename(id));
-
-        tokio::task::spawn_blocking(move || {
-            let mut options = std::fs::OpenOptions::new();
-            options.create(true);
-            options.append(true);
-            options.read(true);
-            let result = options.open(path);
-            tx.send(result).unwrap();
-        });
-
-        let file = rx.await.unwrap()?;
+        let mut options = tokio::fs::OpenOptions::new();
+        options.create(true);
+        options.append(true);
+        options.read(true);
+        let file = options.open(path).await?;
 
         Ok(Self {
             id,
-            file: Arc::new(file),
+            file: Arc::new(tokio::sync::Mutex::new(file)),
             len: Arc::new(AtomicUsize::new(0)),
         })
     }
@@ -84,17 +64,13 @@ impl ActiveFile {
 
     #[tracing::instrument(level = "trace", err)]
     pub async fn read(&self, offset: u64, len: usize) -> Result<Vec<u8>> {
-        let (tx, rx) = oneshot::channel();
-        let f = self.file.clone();
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
-        tokio::task::spawn_blocking(move || {
-            use std::os::unix::prelude::FileExt;
-            let mut buf = vec![0; len];
-            let result = f.read_exact_at(&mut buf, offset).map(|_| buf);
-            tx.send(result).unwrap();
-        });
+        let mut file = self.file.lock().await;
 
-        let buf = rx.await.unwrap()?;
+        let mut buf = vec![0; len];
+        file.seek(std::io::SeekFrom::Start(offset)).await?;
+        file.read_exact(&mut buf).await?;
 
         Ok(buf)
     }
@@ -102,68 +78,33 @@ impl ActiveFile {
     // TODO: Replace `buf: Vec<u8>` with `buf: Bytes` or `buf: &[u8]` (but 'static is needed).
     #[tracing::instrument(level = "trace", err)]
     pub async fn append(&self, buf: Vec<u8>) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        let f = self.file.clone();
-        let buf_len = buf.len();
+        use tokio::io::AsyncWriteExt;
 
-        tokio::task::spawn_blocking(move || {
-            use std::os::unix::prelude::FileExt;
-            let result = f.write_all_at(&buf, 0);
-            tx.send(result).unwrap();
-        });
-
-        rx.await.unwrap()?;
-        self.len.fetch_add(buf_len, Ordering::Release);
+        let mut file = self.file.lock().await;
+        file.write_all(&buf).await?;
+        self.len.fetch_add(buf.len(), Ordering::Release);
 
         Ok(())
     }
 
-    /// # Safety
-    /// Concurrent `flush` call leads to panics.
     #[tracing::instrument(level = "trace", err)]
     pub async fn flush(&self) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        let mut f = self.file.clone();
+        use tokio::io::AsyncWriteExt;
 
-        tokio::task::spawn_blocking(move || {
-            use std::io::Write;
-            let fmut = Arc::get_mut(&mut f).unwrap();
-            let result = fmut.flush();
-            tx.send(result).unwrap();
-        });
-
-        rx.await.unwrap()?;
+        self.file.lock().await.flush().await?;
 
         Ok(())
     }
 
     #[tracing::instrument(level = "trace", err)]
     pub async fn sync_data(&self) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        let f = self.file.clone();
-
-        tokio::task::spawn_blocking(move || {
-            let result = f.sync_data();
-            tx.send(result).unwrap();
-        });
-
-        rx.await.unwrap()?;
-
+        self.file.lock().await.sync_data().await?;
         Ok(())
     }
 
     #[tracing::instrument(level = "trace", err)]
     pub async fn sync_all(&self) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        let f = self.file.clone();
-
-        tokio::task::spawn_blocking(move || {
-            let result = f.sync_all();
-            tx.send(result).unwrap();
-        });
-
-        rx.await.unwrap()?;
-
+        self.file.lock().await.sync_all().await?;
         Ok(())
     }
 }
