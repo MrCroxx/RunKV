@@ -41,13 +41,13 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_dio() {
-        let cf = CacheFile::open("/home/mrcroxx/test", 1).unwrap();
+    // #[test]
+    // fn test_dio() {
+    //     let cf = CacheFile::open("/home/mrcroxx/test", 1).unwrap();
 
-        let mut buf = CacheFileBuffer::default();
-        buf.append(&[b'x'; 4096]);
+    //     let mut buf = CacheFileBuffer::default();
+    //     buf.append(&[b'x'; 4096]);
 
-        cf.file.write_all_at(&buf[0..4096], 0).unwrap();
-    }
+    //     cf.file.write_all_at(&buf[0..4096], 0).unwrap();
+    // }
 }
