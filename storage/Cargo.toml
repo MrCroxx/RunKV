@@ -27,6 +27,7 @@ lazy_static = "1.4.0"
 libc = "0.2"
 lz4 = "1.23.1"
 moka = { version = "0.7", features = ["future"] }
+nix = { version = "0.24.1", features = ["fs", "aio"] }
 parking_lot = "0.12"
 prometheus = "0.13.0"
 rand = "0.8.5"

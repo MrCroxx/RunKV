@@ -45,7 +45,7 @@ async fn test_concurrent_put_get() {
         concurrency: 1000,
         r#loop: 3,
         raft_log_store_data_dir,
-        persist: "sync".to_string(),
+        persist: "none".to_string(),
         log_dir,
     };
 
