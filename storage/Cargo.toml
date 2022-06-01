@@ -15,6 +15,7 @@ aws-sdk-s3 = "0.8"
 aws-smithy-http = "0.38"
 aws-smithy-types = "0.38"
 aws-types = { version = "0.8", features = ["hardcoded-credentials"] }
+bitvec = "1"
 bytes = "1"
 bytesize = "1.1.0"
 clap = { version = "3.1.6", features = ["derive"] }
@@ -27,7 +28,7 @@ lazy_static = "1.4.0"
 libc = "0.2"
 lz4 = "1.23.1"
 moka = { version = "0.7", features = ["future"] }
-nix = { version = "0.24.1", features = ["fs", "aio"] }
+nix = { version = "0.24.1", features = ["fs", "aio", "uio"] }
 parking_lot = "0.12"
 prometheus = "0.13.0"
 rand = "0.8.5"
