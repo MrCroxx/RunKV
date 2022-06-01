@@ -50,7 +50,7 @@ impl CacheFileMeta {
         let mut valid = bitvec![usize, Lsb0; 0; Self::blocks(slots)];
 
         for (slot, cursor) in (0..buffer.len()).step_by(SLOT_META_SIZE).enumerate() {
-            if (&buffer[cursor..cursor + 4]).get_u32() != 0 {
+            if (&buffer[cursor..cursor + 8]).get_u64() != 0 {
                 valid.set(slot, true);
             }
         }
