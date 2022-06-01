@@ -68,6 +68,19 @@ impl<const ALIGN: usize, const SMOOTH: usize, const DEFAULT: usize>
         self.write_at(src, self.len)
     }
 
+    pub fn reserve(&mut self, capacity: usize) {
+        if capacity > self.capacity {
+            self.grow_at(capacity);
+        }
+    }
+
+    pub fn resize(&mut self, len: usize) {
+        if len > self.capacity {
+            self.grow_at(len);
+        }
+        self.len = len;
+    }
+
     pub fn slice(&self, range: impl RangeBounds<usize>) -> &[u8] {
         let (start, end) = self.bounds(range);
         let slice = unsafe { std::slice::from_raw_parts(self.ptr.add(start), end - start) };
