@@ -62,6 +62,10 @@ harness = false
 # Uncomment this line if you are generating flame graph.
 # debug = true
 
+[[bench]]
+name = "bench_compression"
+harness = false
+
 [[bin]]
 name = "bench_raft_log_store"
 path = "bench/bench_raft_log_store.rs"
