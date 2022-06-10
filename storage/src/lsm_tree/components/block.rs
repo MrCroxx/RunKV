@@ -1,10 +1,11 @@
 use std::cmp::Ordering;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::ops::Range;
 
 use bytes::{Buf, BufMut};
 use lz4::Decoder;
 use runkv_common::coding::CompressionAlgorithm;
+use runkv_common::compression_buffer::CompressionBuffer;
 
 use crate::lsm_tree::{
     DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, TEST_DEFAULT_RESTART_INTERVAL,
@@ -190,8 +191,8 @@ impl Default for BlockBuilderOptions {
 
 /// [`BlockWriter`] encode and append block to a buffer.
 pub struct BlockBuilder {
-    /// Write buffer.
-    buf: Vec<u8>,
+    /// Compression buffer.
+    buffer: CompressionBuffer,
     /// Entry interval between restart points.
     restart_count: usize,
     /// Restart points.
@@ -200,21 +201,21 @@ pub struct BlockBuilder {
     last_key: Vec<u8>,
     /// Count of entries in current block.
     entry_count: usize,
-    /// Compression algorithm.
-    compression_algorithm: CompressionAlgorithm,
 }
 
 impl BlockBuilder {
     pub fn new(options: BlockBuilderOptions) -> Self {
         Self {
-            buf: Vec::with_capacity(options.capacity),
+            buffer: CompressionBuffer::with_capacity(
+                options.compression_algorithm,
+                options.capacity,
+            ),
             restart_count: options.restart_interval,
             restart_points: Vec::with_capacity(
                 options.capacity / DEFAULT_ENTRY_SIZE / options.restart_interval + 1,
             ),
             last_key: Vec::default(),
             entry_count: 0,
-            compression_algorithm: options.compression_algorithm,
         }
     }
 
@@ -237,7 +238,7 @@ impl BlockBuilder {
         }
         // Update restart point if needed and calculate diff key.
         let diff_key = if self.entry_count % self.restart_count == 0 {
-            self.restart_points.push(self.buf.len() as u32);
+            self.restart_points.push(self.buffer.raw_len() as u32);
             self.last_key = key.to_vec();
             key
         } else {
@@ -248,12 +249,14 @@ impl BlockBuilder {
             overlap: key.len() - diff_key.len(),
             diff: diff_key.len(),
             value: value.len(),
-            offset: self.buf.len(),
+            offset: self.buffer.raw_len(),
         };
 
-        prefix.encode(&mut self.buf);
-        self.buf.put_slice(diff_key);
-        self.buf.put_slice(value);
+        let mut data = Vec::with_capacity(/* max prefix */ 12 + diff_key.len() + value.len());
+        prefix.encode(&mut data);
+        data.put_slice(diff_key);
+        data.put_slice(value);
+        self.buffer.encode(&data);
 
         self.last_key = key.to_vec();
         self.entry_count += 1;
@@ -274,33 +277,17 @@ impl BlockBuilder {
     pub fn build(mut self) -> Vec<u8> {
         assert!(self.entry_count > 0);
         for restart_point in &self.restart_points {
-            self.buf.put_u32_le(*restart_point);
+            self.buffer.encode(&restart_point.to_le_bytes());
         }
-        self.buf.put_u32_le(self.restart_points.len() as u32);
-        let mut buf = match self.compression_algorithm {
-            CompressionAlgorithm::None => self.buf,
-            CompressionAlgorithm::Lz4 => {
-                let mut encoder = lz4::EncoderBuilder::new()
-                    .level(4)
-                    .build(Vec::with_capacity(self.buf.len()).writer())
-                    .map_err(Error::encode_error)
-                    .unwrap();
-                encoder
-                    .write(&self.buf[..])
-                    .map_err(Error::encode_error)
-                    .unwrap();
-                let (writer, result) = encoder.finish();
-                result.map_err(Error::encode_error).unwrap();
-                writer.into_inner()
-            }
-        };
-        self.compression_algorithm.encode(&mut buf);
+        self.buffer
+            .encode(&(self.restart_points.len() as u32).to_le_bytes());
+        let mut buf = self.buffer.finish();
         let checksum = crc32sum(&buf);
         buf.put_u32_le(checksum);
         buf
     }
 
-    /// Approximate block len (uncompressed).
+    /// Approximate block len, for check if the block needs to be truncated.
     pub fn approximate_len(&self) -> usize {
         self.buf.len() + 4 * self.restart_points.len() + 4 + 1 + 4
     }

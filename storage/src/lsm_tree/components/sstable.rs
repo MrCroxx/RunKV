@@ -305,6 +305,8 @@ impl SstableBuilder {
         }
         self.last_full_key = full_key;
 
+        println!("approximate len: {}", block_builder.approximate_len());
+
         if block_builder.approximate_len() >= self.options.block_capacity {
             self.build_block();
         }
@@ -435,33 +437,33 @@ mod tests {
     fn test_compressed_sstable_enc_dec() {
         let options = SstableBuilderOptions {
             capacity: 1024,
-            block_capacity: 32,
+            block_capacity: 9,
             restart_interval: TEST_DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::Lz4,
         };
         let mut builder = SstableBuilder::new(options);
-        builder.add(b"k01", 1, Some(b"v01")).unwrap();
-        builder.add(b"k02", 2, None).unwrap();
-        builder.add(b"k04", 4, Some(b"v04")).unwrap();
-        builder.add(b"k05", 5, None).unwrap();
+        builder.add(b"k001", 1, Some(b"v001")).unwrap();
+        builder.add(b"k002", 2, None).unwrap();
+        builder.add(b"k004", 4, Some(b"v004")).unwrap();
+        builder.add(b"k005", 5, None).unwrap();
         let (meta, data) = builder.build().unwrap();
         assert_eq!(2, meta.block_metas.len());
-        assert_eq!(&full_key(b"k01", 1), &meta.block_metas[0].first_key);
-        assert_eq!(&full_key(b"k02", 2), &meta.block_metas[0].last_key);
-        assert_eq!(&full_key(b"k04", 4), &meta.block_metas[1].first_key);
-        assert_eq!(&full_key(b"k05", 5), &meta.block_metas[1].last_key);
+        assert_eq!(&full_key(b"k001", 1), &meta.block_metas[0].first_key);
+        assert_eq!(&full_key(b"k002", 2), &meta.block_metas[0].last_key);
+        assert_eq!(&full_key(b"k004", 4), &meta.block_metas[1].first_key);
+        assert_eq!(&full_key(b"k005", 5), &meta.block_metas[1].last_key);
 
         let begin = meta.block_metas[0].offset;
         let end = meta.block_metas[0].offset + meta.block_metas[0].len;
         let mut bi = BlockIterator::new(Arc::new(Block::decode(&data[begin..end]).unwrap()));
         bi.seek(Seek::First).unwrap();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k01", 1)[..], bi.key());
-        assert_eq!(raw_value(Some(b"v01")), bi.value());
+        assert_eq!(&full_key(b"k001", 1)[..], bi.key());
+        assert_eq!(raw_value(Some(b"v001")), bi.value());
         bi.next().unwrap();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k02", 2)[..], bi.key());
+        assert_eq!(&full_key(b"k002", 2)[..], bi.key());
         assert_eq!(raw_value(None), bi.value());
         bi.next().unwrap();
         assert!(!bi.is_valid());
@@ -471,11 +473,11 @@ mod tests {
         let mut bi = BlockIterator::new(Arc::new(Block::decode(&data[begin..end]).unwrap()));
         bi.seek(Seek::First).unwrap();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k04", 4)[..], bi.key());
-        assert_eq!(raw_value(Some(b"v04")), bi.value());
+        assert_eq!(&full_key(b"k004", 4)[..], bi.key());
+        assert_eq!(raw_value(Some(b"v004")), bi.value());
         bi.next().unwrap();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k05", 5)[..], bi.key());
+        assert_eq!(&full_key(b"k005", 5)[..], bi.key());
         assert_eq!(raw_value(None), bi.value());
         bi.next().unwrap();
         assert!(!bi.is_valid());

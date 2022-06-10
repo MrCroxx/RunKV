@@ -46,6 +46,7 @@ fn stream_compression(dataset: Vec<Vec<u8>>) -> Vec<u8> {
     let mut encoder = lz4::EncoderBuilder::new().level(4).build(buf).unwrap();
     for entry in dataset {
         encoder.write_all(&entry).unwrap();
+        // encoder.flush().unwrap();
     }
     let (buf, result) = encoder.finish();
     result.unwrap();

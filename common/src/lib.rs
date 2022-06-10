@@ -1,6 +1,7 @@
 pub mod atomic;
 pub mod channel_pool;
 pub mod coding;
+pub mod compression_buffer;
 pub mod config;
 pub mod context;
 pub mod log;
