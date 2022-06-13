@@ -1,389 +1,204 @@
-use std::os::unix::prelude::{FileExt, OpenOptionsExt};
-use std::path::Path;
-
-use bitvec::prelude::*;
-use bitvec::slice::BitSlice;
-use bytes::{Buf, BufMut};
+use std::fs::{File, OpenOptions};
+use std::os::unix::prelude::{AsRawFd, FileExt, OpenOptionsExt};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::buffer::AlignedBuffer;
-use super::error::{Error, Result};
+use super::error::Result;
+use super::fs::FsInfo;
 
-const MAGIC: &[u8] = b"singularity-data-inc";
-const VERSION: u32 = 1;
-
-// TODO: Get logical block size at `/sys/block/{device}/queue/logical_block_size`.
+// Get logical block size by ioctl(2) BLKSSZGET or shell command `blockdev --getss`, see open(2) man
+// page for more details.
 const LOGICAL_BLOCK_SIZE: usize = 512;
 const SMOOTH_GROWTH_SIZE: usize = 64 * 1024 * 1024; // 64 MiB
-const DEFAULT_BUFFER_SIZE: usize = 128 * 1024; // 128 KiB
+const DEFAULT_BUFFER_SIZE: usize = 64 * 1024; // 64 KiB
 
-/// Each [`CacheFileSlot`] uses 24B.
-const SLOT_META_SIZE: usize = 20;
-const SLOT_METAS_PER_LOGICAL_BLOCK: usize = LOGICAL_BLOCK_SIZE / SLOT_META_SIZE;
+const FSTAT_BLOCK_SIZE: usize = 512;
 
 pub type CacheFileBuffer =
     AlignedBuffer<LOGICAL_BLOCK_SIZE, SMOOTH_GROWTH_SIZE, DEFAULT_BUFFER_SIZE>;
 
-#[derive(PartialEq, Eq, Debug)]
-pub struct CacheFileSlot {
-    pub sst: u64,
-    pub idx: u32,
-    pub offset: u32,
-    pub len: u32,
+pub struct CacheFileOptions {
+    /// Cache file id.
+    pub id: u64,
+    /// Cache file directory.
+    pub dir: String,
+    /// Cache file block size, which must be a multiple of `fs_info.block_size` and
+    /// `LOGICAL_BLOCK_SIZE`.
+    pub block_size: usize,
+    /// File system info.
+    pub fs_info: FsInfo,
 }
 
-pub struct CacheFileMeta {
-    slots: u64,
-    buffer: CacheFileBuffer,
-    valid: BitVec,
-    dirty: BitVec,
-}
-
-impl CacheFileMeta {
-    fn with_buffer(slots: u64, buffer: CacheFileBuffer) -> Self {
-        let blocks = Self::blocks(slots);
-        let capacity = blocks * LOGICAL_BLOCK_SIZE;
-
-        assert_eq!(buffer.capacity(), capacity);
-        assert_eq!(buffer.len(), capacity);
-
-        let dirty = bitvec![usize, Lsb0; 0; Self::blocks(slots)];
-        let mut valid = bitvec![usize, Lsb0; 0; Self::blocks(slots)];
-
-        for (slot, cursor) in (0..buffer.len()).step_by(SLOT_META_SIZE).enumerate() {
-            if (&buffer[cursor..cursor + 8]).get_u64() != 0 {
-                valid.set(slot, true);
-            }
-        }
-
-        Self {
-            slots,
-            buffer,
-            valid,
-            dirty,
-        }
-    }
-
-    fn slots(&self) -> u64 {
-        self.slots
-    }
-
-    fn get(&self, slot: u64) -> CacheFileSlot {
-        if slot >= self.slots {
-            panic!("out of range: [slots: {}] [given: {}]", self.slots, slot);
-        }
-        let buf = &mut &self.buffer[Self::range(slot)];
-        let sst = buf.get_u64();
-        let idx = buf.get_u32();
-        let offset = buf.get_u32();
-        let len = buf.get_u32();
-        CacheFileSlot {
-            sst,
-            idx,
-            offset,
-            len,
-        }
-    }
-
-    fn set(&mut self, slot: u64, data: &CacheFileSlot) {
-        if slot >= self.slots {
-            panic!("out of range: [slots: {}] [given: {}]", self.slots, slot);
-        }
-        let mut buf = &mut self.buffer[Self::range(slot)];
-        buf.put_u64(data.sst);
-        buf.put_u32(data.idx);
-        buf.put_u32(data.offset);
-        buf.put_u32(data.len);
-        self.dirty.set(Self::block(slot), true);
-    }
-
-    fn flush(&mut self, file: &std::fs::File) -> Result<()> {
-        let mut flushed = -1isize;
-        for (block, mut dirty) in self.dirty.iter_mut().enumerate() {
-            if *dirty {
-                if block as isize != flushed {
-                    let offset = block * LOGICAL_BLOCK_SIZE;
-                    file.write_all_at(
-                        &self.buffer[offset..offset + LOGICAL_BLOCK_SIZE],
-                        offset as u64,
-                    )?;
-                    flushed = block as isize;
-                }
-                *dirty = false;
-            }
-        }
-        Ok(())
-    }
-
-    #[inline(always)]
-    fn blocks(slots: u64) -> usize {
-        (slots as usize + SLOT_METAS_PER_LOGICAL_BLOCK - 1) / SLOT_METAS_PER_LOGICAL_BLOCK
-    }
-
-    #[inline(always)]
-    fn range(slot: u64) -> core::ops::Range<usize> {
-        let offset = slot as usize / SLOT_METAS_PER_LOGICAL_BLOCK * LOGICAL_BLOCK_SIZE
-            + slot as usize % SLOT_METAS_PER_LOGICAL_BLOCK * SLOT_META_SIZE;
-        offset..offset + SLOT_META_SIZE
-    }
-
-    #[inline(always)]
-    fn block(slot: u64) -> usize {
-        slot as usize / SLOT_METAS_PER_LOGICAL_BLOCK
-    }
-}
-
+/// [`CacheFile`] is a wrapper of a O_DIRECT file.
+/// I/O requests to [`CacheFile`] are aligned to file system block size.
 pub struct CacheFile {
-    slots: u64,
-    file: std::fs::File,
-    meta: CacheFileMeta,
+    id: u64,
+
+    file: File,
+
+    block_size: usize,
+    _fs_info: FsInfo,
+
+    cursor: AtomicUsize,
 }
 
-impl CacheFile {
-    pub fn create(dir: impl AsRef<Path>, id: u64, slots: u64) -> Result<Self> {
-        let path = dir.as_ref().join(format!("cache-{:08}", id));
-        let mut options = std::fs::OpenOptions::new();
-        options.create(true);
-        options.read(true);
-        options.write(true);
-        options.custom_flags(libc::O_DIRECT);
-        let file = options.open(path)?;
-
-        Self::write_header(&file, slots)?;
-
-        let meta_buffer = {
-            let capacity = CacheFileMeta::blocks(slots) * LOGICAL_BLOCK_SIZE;
-            let mut buffer = CacheFileBuffer::with_capacity(capacity);
-            buffer.resize(capacity);
-            buffer
-        };
-        file.write_all_at(&meta_buffer[..], LOGICAL_BLOCK_SIZE as u64)?;
-
-        let meta = CacheFileMeta::with_buffer(slots, meta_buffer);
-        Ok(Self { slots, file, meta })
-    }
-
-    pub fn open(dir: impl AsRef<Path>, id: u64) -> Result<Self> {
-        let path = dir.as_ref().join(format!("cache-{:08}", id));
-        let mut options = std::fs::OpenOptions::new();
-        options.read(true);
-        options.write(true);
-        options.custom_flags(libc::O_DIRECT);
-        let file = options.open(path)?;
-
-        let slots = Self::read_header(&file)?;
-        let mut meta_buffer = {
-            let capacity = CacheFileMeta::blocks(slots) * LOGICAL_BLOCK_SIZE;
-            let mut buffer = CacheFileBuffer::with_capacity(capacity);
-            buffer.resize(capacity);
-            buffer
-        };
-        file.read_exact_at(&mut meta_buffer[..], LOGICAL_BLOCK_SIZE as u64)?;
-
-        let meta = CacheFileMeta::with_buffer(slots, meta_buffer);
-        Ok(Self { slots, file, meta })
-    }
-
-    #[inline(always)]
-    pub fn slots(&self) -> u64 {
-        self.slots
-    }
-
-    pub fn flush_meta(&mut self) -> Result<()> {
-        self.meta.flush(&self.file)
-    }
-
-    pub fn sync_data(&self) -> Result<()> {
-        self.file.sync_data()?;
-        Ok(())
-    }
-
-    pub fn sync_all(&self) -> Result<()> {
-        self.file.sync_all()?;
-        Ok(())
+impl std::fmt::Debug for CacheFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CacheFile").field("id", &self.id).finish()
     }
 }
 
 impl CacheFile {
-    fn write_header(file: &std::fs::File, slots: u64) -> Result<()> {
-        let mut buf = CacheFileBuffer::with_capacity(LOGICAL_BLOCK_SIZE);
-        buf.resize(LOGICAL_BLOCK_SIZE);
+    pub fn open(options: CacheFileOptions) -> Result<Self> {
+        assert_eq!(options.block_size % LOGICAL_BLOCK_SIZE, 0);
+        assert_eq!(options.block_size % options.fs_info.block_size, 0);
 
-        let mut cursor = 0;
+        let mut opts = OpenOptions::new();
+        opts.create(true);
+        opts.read(true);
+        opts.write(true);
+        opts.custom_flags(libc::O_DIRECT);
 
-        (&mut buf[cursor..MAGIC.len()]).put_slice(MAGIC);
-        cursor += MAGIC.len();
+        let file = opts.open(PathBuf::from(options.dir).join(Self::filename(options.id)))?;
+        let cursor = AtomicUsize::new(file.metadata()?.len() as usize);
 
-        (&mut buf[cursor..cursor + 4]).put_u32(VERSION);
-        cursor += 4;
-
-        (&mut buf[cursor..cursor + 8]).put_u64(slots);
-        cursor += 8;
-
-        assert!(
-            cursor < LOGICAL_BLOCK_SIZE,
-            "cursor={}, logical block size={}",
+        Ok(Self {
+            id: options.id,
+            file,
+            block_size: options.block_size,
+            _fs_info: options.fs_info,
             cursor,
-            LOGICAL_BLOCK_SIZE
-        );
+        })
+    }
 
-        file.write_all_at(&buf[..], 0)?;
-
+    /// Append data to the cache file.
+    ///
+    /// Given `buf` must be aligned to the logical block size, and the size of `buf` must be
+    /// multiple of block size.
+    ///
+    /// # Panics
+    ///
+    /// * Panic if given `buf` is not aligned to the logical block size or the size of `buf` is not
+    ///   multiple of block size.
+    pub fn append(&self, buf: &[u8]) -> Result<()> {
+        assert_eq!(buf.len() % self.block_size, 0);
+        let cursor = self.cursor.fetch_add(buf.len(), Ordering::SeqCst) as u64;
+        self.file.write_all_at(buf, cursor)?;
         Ok(())
     }
 
-    fn read_header(file: &std::fs::File) -> Result<u64> {
-        let mut buf = CacheFileBuffer::with_capacity(LOGICAL_BLOCK_SIZE);
-        buf.resize(LOGICAL_BLOCK_SIZE);
-        file.read_exact_at(&mut buf[..], 0)?;
+    /// Write data at the given `offset`.
+    ///
+    /// Written position must not exceed the file end position.
+    ///
+    /// Given `buf` must be aligned to the logical block size, and the size of `buf` must be
+    /// multiple of block size.
+    ///
+    /// # Panics
+    ///
+    /// * Panic if given `buf` is not aligned to the logical block size or the size of `buf` is not
+    ///   multiple of block size.
+    pub fn write_at(&self, buf: &[u8], block_offset: u64) -> Result<()> {
+        assert_eq!(buf.len() % self.block_size, 0);
+        let offset = block_offset * self.block_size as u64;
+        let cursor = self.cursor.load(Ordering::Acquire);
+        assert!(
+            offset as usize + buf.len() <= cursor,
+            "offset + len: {}, cursor: {}",
+            offset as usize + buf.len(),
+            cursor
+        );
+        self.file.write_all_at(buf, offset)?;
+        Ok(())
+    }
 
-        let mut cursor = 0;
+    /// Read data by blocks.
+    pub fn read(&self, block_offset: u64, block_len: usize) -> Result<CacheFileBuffer> {
+        let offset = block_offset * self.block_size as u64;
+        let len = block_len * self.block_size;
+        let mut buf = CacheFileBuffer::with_capacity(len);
+        buf.resize(len);
+        self.file.read_exact_at(&mut buf[..], offset)?;
+        Ok(buf)
+    }
 
-        if MAGIC != &buf[cursor..cursor + MAGIC.len()] {
-            return Err(Error::MagicNotMatch);
-        }
-        cursor += MAGIC.len();
+    /// Reclaim disk space by blocks.
+    pub fn reclaim(&self, block_offset: u64, block_len: usize) -> Result<()> {
+        let fd = self.file.as_raw_fd();
+        let mode = nix::fcntl::FallocateFlags::FALLOC_FL_PUNCH_HOLE
+            | nix::fcntl::FallocateFlags::FALLOC_FL_KEEP_SIZE;
+        let offset = block_offset * self.block_size as u64;
+        let len = block_len * self.block_size;
+        nix::fcntl::fallocate(fd, mode, offset as i64, len as i64)?;
+        Ok(())
+    }
 
-        let version = (&buf[cursor..cursor + 4]).get_u32();
-        if version != VERSION {
-            return Err(Error::InvalidVersion(version));
-        }
-        cursor += 4;
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 
-        let slots = (&buf[cursor..cursor + 8]).get_u64();
+    /// Actually occupied disk space.
+    pub fn len(&self) -> usize {
+        let fd = self.file.as_raw_fd();
+        let stat = nix::sys::stat::fstat(fd).unwrap();
+        stat.st_blocks as usize * FSTAT_BLOCK_SIZE
+    }
 
-        Ok(slots)
+    pub fn filename(id: u64) -> String {
+        format!("cf-{:024}", id)
     }
 }
 
 #[cfg(test)]
 mod tests {
 
-    use std::io::{IoSlice, Seek, SeekFrom, Write};
-    use std::os::unix::prelude::{AsRawFd, FileExt};
-
-    use nix::sys::uio::pwrite;
-    use nix::unistd::write;
     use test_log::test;
 
     use super::*;
-
-    fn new_meta_buffer(slots: u64) -> CacheFileBuffer {
-        let capacity = CacheFileMeta::blocks(slots) * LOGICAL_BLOCK_SIZE;
-        let mut buffer = CacheFileBuffer::with_capacity(capacity);
-        buffer.resize(capacity);
-        buffer
-    }
-
-    #[test]
-    fn test_slot_meta_ranges() {
-        let meta = CacheFileMeta::with_buffer(4096, new_meta_buffer(4096));
-        let mut range = 0..0;
-        for i in 0..4096 {
-            let r = CacheFileMeta::range(i);
-            if i > 0 {
-                assert!(
-                    r.start >= range.end,
-                    "r.start={}, range.end={}",
-                    r.start,
-                    range.end
-                );
-            }
-            assert_eq!(
-                r.start / LOGICAL_BLOCK_SIZE,
-                (r.end - 1) / LOGICAL_BLOCK_SIZE
-            );
-            assert_eq!(r.start / LOGICAL_BLOCK_SIZE, CacheFileMeta::block(i));
-            range = r;
-        }
-    }
-
-    #[test]
-    fn test_cache_file_meta() {
-        let tempdir = tempfile::tempdir().unwrap();
-        let mut options = std::fs::OpenOptions::new();
-        options.create(true);
-        options.read(true);
-        options.write(true);
-        options.custom_flags(libc::O_DIRECT);
-        let file = options.open(tempdir.path().join("test-file-001")).unwrap();
-
-        let mut meta0 = CacheFileMeta::with_buffer(4096, new_meta_buffer(4096));
-        file.write_all_at(&meta0.buffer[..], 0).unwrap();
-
-        for slot in 0..meta0.slots() {
-            assert_eq!(
-                meta0.get(slot),
-                CacheFileSlot {
-                    sst: 0,
-                    idx: 0,
-                    offset: 0,
-                    len: 0
-                }
-            );
-        }
-        meta0.flush(&file).unwrap();
-        file.sync_all().unwrap();
-
-        let data = CacheFileSlot {
-            sst: 1,
-            idx: 1,
-            offset: 1,
-            len: 1,
-        };
-        meta0.set(0, &data);
-        assert_eq!(meta0.get(0), data);
-
-        meta0.flush(&file).unwrap();
-        file.sync_all().unwrap();
-        let mut buffer1 = new_meta_buffer(4096);
-        file.read_exact_at(&mut buffer1[..], 0).unwrap();
-        let meta1 = CacheFileMeta::with_buffer(4096, buffer1);
-        assert_eq!(meta1.get(0), data);
-        assert!(meta1.valid.get(0).unwrap());
-    }
+    use crate::file_cache::fs::fs_info;
 
     #[test]
     fn test_cache_file() {
-        let tempdir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
 
-        let cf = CacheFile::create(tempdir.path(), 1, 4096).unwrap();
-        cf.sync_all().unwrap();
-        drop(cf);
+        let fs_info = fs_info(dir.path()).unwrap();
+        let bs = fs_info.block_size;
 
-        let cf = CacheFile::open(tempdir.path(), 1).unwrap();
-        assert_eq!(cf.slots(), 4096);
-    }
-
-    #[test]
-    fn test_dio() {
-        let tempdir = tempfile::tempdir().unwrap();
-        let mut options = std::fs::OpenOptions::new();
-        options.create(true);
-        options.read(true);
-        options.write(true);
-        options.custom_flags(libc::O_DIRECT);
-        let file = options.open(tempdir.path().join("test-file-001")).unwrap();
+        let cf = CacheFile::open(CacheFileOptions {
+            id: 1,
+            dir: dir.path().to_str().unwrap().to_string(),
+            block_size: fs_info.block_size,
+            fs_info,
+        })
+        .unwrap();
+        assert_eq!(cf.len(), 0);
 
         let mut buf = CacheFileBuffer::default();
-        buf.append(&[b'x'; 4096]);
-        file.write_all_at(&buf[0..4096], 0).unwrap();
+        buf.append(&vec![b'x'; bs * 10]);
+        buf.align_up_to(fs_info.block_size);
+        assert_eq!(buf.len(), bs * 10);
 
-        buf.write_at(&[b'a'; 512], 0);
-        nix::sys::uio::pwritev(
-            file.as_raw_fd(),
-            &[
-                IoSlice::new(&buf[0..512]),
-                IoSlice::new(&buf[0..512]),
-                IoSlice::new(&buf[0..512]),
-                IoSlice::new(&buf[0..512]),
-            ],
-            0,
-        )
-        .unwrap();
+        cf.append(&buf[..]).unwrap();
+        assert_eq!(cf.len(), bs * 10);
 
-        let mut read = CacheFileBuffer::default();
-        read.resize(2048);
-        file.read_exact_at(&mut read[0..2048], 0).unwrap();
-        assert_eq!(read[0..2048], [b'a'; 2048]);
+        assert_eq!(&cf.read(0, 2).unwrap()[..], &buf[0..2 * fs_info.block_size]);
+
+        cf.reclaim(0, 2).unwrap();
+        assert_eq!(cf.len(), bs * 8);
+        assert_eq!(&cf.read(0, 2).unwrap()[..], &vec![0; bs * 2]);
+
+        let mut buf2 = CacheFileBuffer::default();
+        buf2.append(&vec![b'z'; bs * 2]);
+        buf2.align_up_to(fs_info.block_size);
+        cf.write_at(&buf2[..], 8).unwrap();
+        assert_eq!(cf.len(), bs * 8);
+        assert_eq!(&cf.read(8, 2).unwrap()[..], &buf2[..]);
+
+        // Test rewrite holes.
+        assert_eq!(&cf.read(0, 2).unwrap()[..], &vec![0; bs * 2]);
+        cf.write_at(&buf[0..bs * 2], 0).unwrap();
+        assert_eq!(&cf.read(0, 2).unwrap()[..], &buf[0..2 * fs_info.block_size]);
+        assert_eq!(cf.len(), bs * 10);
     }
 }

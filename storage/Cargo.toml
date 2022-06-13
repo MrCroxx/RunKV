@@ -28,11 +28,12 @@ lazy_static = "1.4.0"
 libc = "0.2"
 lz4 = "1.23.1"
 moka = { version = "0.7", features = ["future"] }
-nix = { version = "0.24.1", features = ["fs", "aio", "uio"] }
+nix = { version = "0.24.1", features = ["fs"] }
 parking_lot = "0.12"
 prometheus = "0.13.0"
 rand = "0.8.5"
 rand_chacha = "0.3.1"
+rangemap = "1.0.2"
 runkv-common = { path = "../common" }
 runkv-proto = { path = "../proto" }
 serde = "1.0"

@@ -5,6 +5,7 @@
 #![feature(proc_macro_hygiene)]
 
 mod error;
+#[cfg(target_os = "linux")]
 pub mod file_cache;
 mod lsm_tree;
 mod object_store;

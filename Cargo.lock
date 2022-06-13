@@ -2395,6 +2395,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "rangemap"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "878e18abd39c846fc1f343e66ec56b4139ca521d8aad6a3150a19c22b8376006"
+
+[[package]]
 name = "raw-cpuid"
 version = "10.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2697,6 +2703,7 @@ dependencies = [
  "prometheus",
  "rand",
  "rand_chacha",
+ "rangemap",
  "runkv-common",
  "runkv-proto",
  "serde",
