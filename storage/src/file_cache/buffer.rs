@@ -1,9 +1,11 @@
 use std::ops::RangeBounds;
 
+#[inline(always)]
 pub fn align_up(v: usize, align: usize) -> usize {
     (v + align - 1) & !(align - 1)
 }
 
+#[inline(always)]
 pub fn align_down(v: usize, align: usize) -> usize {
     v & !(align - 1)
 }
@@ -18,7 +20,7 @@ impl<const ALIGN: usize, const SMOOTH: usize, const DEFAULT: usize>
     AlignedBuffer<ALIGN, SMOOTH, DEFAULT>
 {
     pub fn with_capacity(capacity: usize) -> Self {
-        let capacity = Self::align_up(capacity);
+        let capacity = Self::align_v_up(capacity);
         let buffer = unsafe {
             std::alloc::alloc_zeroed(std::alloc::Layout::from_size_align_unchecked(
                 capacity, ALIGN,
@@ -32,22 +34,37 @@ impl<const ALIGN: usize, const SMOOTH: usize, const DEFAULT: usize>
         }
     }
 
+    #[inline(always)]
     pub fn align(&self) -> usize {
         ALIGN
     }
 
+    #[inline(always)]
     pub fn capacity(&self) -> usize {
         self.capacity
     }
 
+    #[inline(always)]
     pub fn len(&self) -> usize {
         self.len
     }
 
+    #[inline(always)]
+    pub fn aligned_len(&self) -> usize {
+        align_up(self.len, ALIGN)
+    }
+
+    #[inline(always)]
+    pub fn alignments(&self) -> usize {
+        self.aligned_len() / ALIGN
+    }
+
+    #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
+    #[inline(always)]
     pub fn remains(&self) -> usize {
         self.capacity - self.len
     }
@@ -81,6 +98,24 @@ impl<const ALIGN: usize, const SMOOTH: usize, const DEFAULT: usize>
         self.len = len;
     }
 
+    pub fn align_up(&mut self) {
+        let len = Self::align_v_up(self.len);
+        self.resize(len);
+    }
+
+    pub fn align_up_to(&mut self, align: usize) {
+        let len = align_up(self.len, align);
+        self.resize(len);
+    }
+
+    pub fn is_aligend(&self) -> bool {
+        self.len % ALIGN == 0
+    }
+
+    pub fn is_aligend_to(&self, align: usize) -> bool {
+        self.len % align == 0
+    }
+
     pub fn slice(&self, range: impl RangeBounds<usize>) -> &[u8] {
         let (start, end) = self.bounds(range);
         let slice = unsafe { std::slice::from_raw_parts(self.ptr.add(start), end - start) };
@@ -97,12 +132,12 @@ impl<const ALIGN: usize, const SMOOTH: usize, const DEFAULT: usize>
 impl<const ALIGN: usize, const SMOOTH: usize, const DEFAULT: usize>
     AlignedBuffer<ALIGN, SMOOTH, DEFAULT>
 {
-    fn align_up(v: usize) -> usize {
+    fn align_v_up(v: usize) -> usize {
         align_up(v, ALIGN)
     }
 
     #[allow(dead_code)]
-    fn align_down(v: usize) -> usize {
+    fn align_v_down(v: usize) -> usize {
         align_down(v, ALIGN)
     }
 
@@ -149,7 +184,7 @@ impl<const ALIGN: usize, const SMOOTH: usize, const DEFAULT: usize>
     }
 
     fn grow_size_at(origin: usize, size: usize) -> usize {
-        let size = Self::align_up(size);
+        let size = Self::align_v_up(size);
         let mut capacity = origin;
         while capacity < size {
             if capacity > SMOOTH {

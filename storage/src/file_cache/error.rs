@@ -8,8 +8,16 @@ pub enum Error {
     JoinError(#[from] tokio::task::JoinError),
     #[error("magic not match")]
     MagicNotMatch,
+    #[error("magic file not found")]
+    MagicFileNotFound,
     #[error("invalid version")]
     InvalidVersion(u32),
+    #[error("cache file full")]
+    Full,
+    #[error("unsupported fs: [super block magic: {0}]")]
+    UnsupportedFs(u64),
+    #[error("other: {0}")]
+    Other(String),
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
