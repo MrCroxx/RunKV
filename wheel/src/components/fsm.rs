@@ -310,6 +310,7 @@ impl Fsm for ObjectLsmTreeFsm {
             None => {
                 #[cfg(feature = "deadlock")]
                 tracing::info!("{} load enter", self.raft_node);
+                #[allow(clippy::let_and_return)]
                 let index = self.load_index(AVAILABLE_INDEX_KEY).await?;
                 #[cfg(feature = "deadlock")]
                 tracing::info!("{} load exit", self.raft_node);

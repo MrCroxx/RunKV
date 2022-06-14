@@ -2,6 +2,8 @@ use std::path::Path;
 
 use super::error::{Error, Result};
 
+pub const LOGICAL_BLOCK_SIZE: usize = 512;
+
 #[derive(Clone, Copy, Debug)]
 pub enum FsType {
     Ext4,

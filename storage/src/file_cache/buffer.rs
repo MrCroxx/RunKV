@@ -34,6 +34,12 @@ impl<const ALIGN: usize, const SMOOTH: usize, const DEFAULT: usize>
         }
     }
 
+    pub fn with_size(len: usize) -> Self {
+        let mut ret = Self::with_capacity(len);
+        ret.resize(len);
+        ret
+    }
+
     #[inline(always)]
     pub fn align(&self) -> usize {
         ALIGN
@@ -253,6 +259,16 @@ impl<const ALIGN: usize, const SMOOTH: usize, const DEFAULT: usize> Drop
             )
         }
     }
+}
+
+unsafe impl<const ALIGN: usize, const SMOOTH: usize, const DEFAULT: usize> Send
+    for AlignedBuffer<ALIGN, SMOOTH, DEFAULT>
+{
+}
+
+unsafe impl<const ALIGN: usize, const SMOOTH: usize, const DEFAULT: usize> Sync
+    for AlignedBuffer<ALIGN, SMOOTH, DEFAULT>
+{
 }
 
 #[cfg(test)]

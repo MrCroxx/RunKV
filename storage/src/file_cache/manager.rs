@@ -17,15 +17,13 @@ struct IndexKey {
 struct Index {
     /// cache file id
     cache_file_id: u64,
-    /// logical block offset after header and meta segment
-    logical_block_offset: u32,
-    /// length in bytes
-    len: u32,
+    /// slot idx
+    slot_idx: u64,
 }
 
 pub struct FileCacheOptions<J: Judge> {
     pub node: u64,
-    pub path: String,
+    pub dir: String,
     pub capacity: usize,
     pub judge: J,
 }
@@ -33,7 +31,7 @@ pub struct FileCacheOptions<J: Judge> {
 #[derive(Clone)]
 pub struct FileCacheManager<J: Judge> {
     node: u64,
-    path: String,
+    dir: String,
     capacity: usize,
 
     _judge: J,
@@ -50,19 +48,19 @@ impl<J: Judge> std::fmt::Debug for FileCacheManager<J> {
 
 impl<J: Judge> FileCacheManager<J> {
     pub async fn open(options: FileCacheOptions<J>) -> Result<Self> {
-        let exists = tokio::fs::metadata(&options.path).await.is_ok();
-        let magic_file_path = PathBuf::from(&options.path).join(MAGIC_FILENAME);
+        let exists = tokio::fs::metadata(&options.dir).await.is_ok();
+        let magic_file_path = PathBuf::from(&options.dir).join(MAGIC_FILENAME);
         let indices = if exists {
             if tokio::fs::metadata(&magic_file_path).await.is_err() {
                 return Err(Error::MagicFileNotFound);
             }
             ShardedHashMap::new(64)
         } else {
-            tokio::fs::create_dir_all(&options.path).await?;
+            tokio::fs::create_dir_all(&options.dir).await?;
             tokio::fs::File::create(&magic_file_path).await?;
             let indices = ShardedHashMap::new(64);
 
-            let mut r = tokio::fs::read_dir(&options.path).await?;
+            let mut r = tokio::fs::read_dir(&options.dir).await?;
             while let Some(entry) = r.next_entry().await? {
                 let raw_filename = entry.file_name();
                 let _id: u64 = match raw_filename
@@ -83,7 +81,7 @@ impl<J: Judge> FileCacheManager<J> {
 
         Ok(Self {
             node: options.node,
-            path: options.path,
+            dir: options.dir,
             capacity: options.capacity,
             _judge: options.judge,
             _indices: indices,

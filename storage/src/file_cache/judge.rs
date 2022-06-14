@@ -15,6 +15,9 @@ pub struct DefaultJudge {}
 
 impl Judge for DefaultJudge {
     fn judge(&self, _stats: &Stats, _level: u64, _sst: u64, _block_idx: u32, _len: u32) -> bool {
-        todo!()
+        // TODO: IMPL ME!!!
+        // TODO: IMPL ME!!!
+        // TODO: IMPL ME!!!
+        true
     }
 }

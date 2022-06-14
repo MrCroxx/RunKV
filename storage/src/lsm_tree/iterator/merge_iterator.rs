@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use super::{BoxedIterator, Iterator, Seek};
 use crate::Result;
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug)]
 enum Direction {
     Forward,
     Backward,
