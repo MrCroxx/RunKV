@@ -110,14 +110,11 @@ impl ObjectStoreLsmTreeCore {
         }
 
         // Pick overlap ssts.
-        let levels = {
-            let levels = self
-                .version_manager
-                .pick_overlap_ssts_by_key(0..self.version_manager.levels(), key)
-                .await
-                .unwrap();
-            levels
-        };
+        let levels = self
+            .version_manager
+            .pick_overlap_ssts_by_key(0..self.version_manager.levels(), key)
+            .await
+            .unwrap();
 
         trace!("find key {:?} in ssts:\n{:?}", key, levels);
 

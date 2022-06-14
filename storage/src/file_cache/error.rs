@@ -11,7 +11,7 @@ pub enum Error {
     #[error("magic file not found")]
     MagicFileNotFound,
     #[error("invalid version")]
-    InvalidVersion(u32),
+    InvalidVersion(u64),
     #[error("cache file full")]
     Full,
     #[error("unsupported fs: [super block magic: {0}]")]
