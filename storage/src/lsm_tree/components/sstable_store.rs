@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use moka::future::Cache;
 
-use super::{Block, BlockCache, Sstable, SstableMeta};
+use super::{Block, BlockCache, BlockHolder, Sstable, SstableMeta};
 use crate::object_store::ObjectStoreRef;
 use crate::{Error, ObjectStoreError, Result};
 
@@ -54,8 +54,8 @@ impl SstableStore {
 
         if let CachePolicy::Fill = policy {
             for (block_idx, meta) in sst.block_metas_iter().enumerate() {
-                let block = Arc::new(Block::decode(&data[meta.data_range()])?);
-                self.block_cache.insert(sst.id(), block_idx, block).await
+                let block = Box::new(Block::decode(&data[meta.data_range()])?);
+                self.block_cache.insert(sst.id(), block_idx, block).await;
             }
         }
 
@@ -67,25 +67,28 @@ impl SstableStore {
         sst: &Sstable,
         block_index: usize,
         policy: CachePolicy,
-    ) -> Result<Arc<Block>> {
-        let fetch_block = async move {
-            let block_meta = sst.block_meta(block_index).ok_or_else(|| {
-                Error::Other(format!(
-                    "invalid block idx: [sst: {}], [block: {}]",
-                    sst.id(),
-                    block_index
-                ))
-            })?;
+    ) -> Result<BlockHolder> {
+        let fetch_block = || {
             let data_path = self.data_path(sst.id());
-            let block_data = self
-                .object_store
-                .get_range(&data_path, block_meta.data_range())
-                .await?
-                .ok_or_else(|| {
-                    Error::ObjectStoreError(ObjectStoreError::ObjectNotFound(data_path))
+            let object_store = self.object_store.clone();
+            let sst = sst.clone();
+            async move {
+                let block_meta = sst.block_meta(block_index).ok_or_else(|| {
+                    Error::Other(format!(
+                        "invalid block idx: [sst: {}], [block: {}]",
+                        sst.id(),
+                        block_index
+                    ))
                 })?;
-            let block = Block::decode(&block_data)?;
-            Ok(Arc::new(block))
+                let block_data = object_store
+                    .get_range(&data_path, block_meta.data_range())
+                    .await?
+                    .ok_or_else(|| {
+                        Error::ObjectStoreError(ObjectStoreError::ObjectNotFound(data_path))
+                    })?;
+                let block = Block::decode(&block_data)?;
+                Ok(Box::new(block))
+            }
         };
 
         match policy {
@@ -96,9 +99,9 @@ impl SstableStore {
             }
             CachePolicy::NotFill => match self.block_cache.get(sst.id(), block_index) {
                 Some(block) => Ok(block),
-                None => fetch_block.await,
+                None => fetch_block().await.map(BlockHolder::from_owned_block),
             },
-            CachePolicy::Disable => fetch_block.await,
+            CachePolicy::Disable => fetch_block().await.map(BlockHolder::from_owned_block),
         }
     }
 

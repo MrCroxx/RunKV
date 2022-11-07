@@ -184,13 +184,12 @@ impl Iterator for MergeIterator {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use bytes::Bytes;
     use test_log::test;
 
     use super::*;
-    use crate::components::{Block, BlockBuilder, BlockBuilderOptions};
+    use crate::components::{Block, BlockBuilder, BlockBuilderOptions, BlockHolder};
     use crate::iterator::tests::AsyncBlockIterator;
     use crate::utils::full_key;
 
@@ -202,7 +201,7 @@ mod tests {
         ])
     }
 
-    fn build_block_for_test(range: &[usize]) -> Arc<Block> {
+    fn build_block_for_test(range: &[usize]) -> BlockHolder {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
         for i in range {
@@ -212,7 +211,7 @@ mod tests {
             );
         }
         let buf = builder.build();
-        Arc::new(Block::decode(&buf).unwrap())
+        BlockHolder::from_owned_block(Box::new(Block::decode(&buf).unwrap()))
     }
 
     #[test(tokio::test)]

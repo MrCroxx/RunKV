@@ -16,6 +16,8 @@ pub enum Error {
     IoError(#[from] std::io::Error),
     #[error("raft log store error: {0}")]
     RaftLogStoreError(#[from] RaftLogStoreError),
+    #[error("tokio onshot recv error: {0}")]
+    TokioOneshotRecvError(#[from] tokio::sync::oneshot::error::RecvError),
     #[error("other: {0}")]
     Other(String),
 }
