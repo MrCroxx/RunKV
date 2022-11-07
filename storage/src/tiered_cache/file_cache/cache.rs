@@ -369,12 +369,12 @@ where
 
     #[tracing::instrument(skip(self))]
     pub async fn get(&self, key: &K) -> Result<Option<TieredCacheEntryHolder<K, V>>> {
-        let shard = self.hasher.hash_one(&key) as usize;
+        let shard = self.hasher.hash_one(key) as usize;
         self.shards[shard].get(key).await
     }
 
     pub fn erase(&self, key: &K) -> Result<()> {
-        let shard = self.hasher.hash_one(&key) as usize;
+        let shard = self.hasher.hash_one(key) as usize;
         self.shards[shard].erase(key)
     }
 

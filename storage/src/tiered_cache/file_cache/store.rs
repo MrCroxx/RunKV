@@ -428,8 +428,8 @@ pub type StoreRef<K, V> = Arc<Store<K, V>>;
 #[cfg(test)]
 mod tests {
 
-    use super::*;
     use super::super::test_utils::{TestCacheKey, TestCacheValue};
+    use super::*;
 
     fn is_send_sync_clone<T: Send + Sync + Clone + 'static>() {}
 

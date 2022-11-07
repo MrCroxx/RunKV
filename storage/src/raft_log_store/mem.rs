@@ -368,7 +368,7 @@ impl MemStates {
         let start = (start_index - state.first_index) as usize;
         let end = start + (end_index - start_index) as usize;
 
-        let indices = (&state.indices[start..end]).iter().cloned().collect_vec();
+        let indices = (state.indices[start..end]).iter().cloned().collect_vec();
         Ok((start_index, indices))
     }
 
@@ -395,7 +395,7 @@ impl MemStates {
         let start = (index - state.first_index) as usize;
         let end = std::cmp::min(start + max_len, state.indices.len());
 
-        let indices = (&state.indices[start..end]).iter().cloned().collect_vec();
+        let indices = (state.indices[start..end]).iter().cloned().collect_vec();
         Ok(indices)
     }
 

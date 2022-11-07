@@ -1,3 +1,5 @@
+#![allow(clippy::box_default)]
+
 pub mod compaction_filter;
 pub mod config;
 pub mod error;
