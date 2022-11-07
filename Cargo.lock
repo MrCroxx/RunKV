@@ -1053,6 +1053,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fiemap"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "084632422a59165633e28f8436545a6694b3d659405ceb3be0a441d4bfbf25d1"
+dependencies = [
+ "bitflags",
+]
+
+[[package]]
 name = "fixedbitset"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2691,6 +2700,7 @@ dependencies = [
  "criterion",
  "env_logger",
  "farmhash",
+ "fiemap",
  "futures",
  "futures-async-stream",
  "itertools",

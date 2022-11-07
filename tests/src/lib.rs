@@ -345,15 +345,15 @@ pub async fn run(args: Args, options: Options) {
         let raft_nodes = HashMap::from_iter([
             (
                 (i as u64) * 3 + 1,
-                (((i as u64) * 3) % args.wheels as u64) + 1 + options.wheel_node_id_base,
+                (((i as u64) * 3) % args.wheels) + 1 + options.wheel_node_id_base,
             ),
             (
                 (i as u64) * 3 + 2,
-                (((i as u64) * 3 + 1) % args.wheels as u64) + 1 + options.wheel_node_id_base,
+                (((i as u64) * 3 + 1) % args.wheels) + 1 + options.wheel_node_id_base,
             ),
             (
                 (i as u64) * 3 + 3,
-                (((i as u64) * 3 + 2) % args.wheels as u64) + 1 + options.wheel_node_id_base,
+                (((i as u64) * 3 + 2) % args.wheels) + 1 + options.wheel_node_id_base,
             ),
         ]);
         let start_key = start_key(group);

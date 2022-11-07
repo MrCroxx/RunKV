@@ -403,7 +403,7 @@ impl RaftLogStore {
             .get_or_insert_with(index.file_id, index.block_offset, read_file)
             .await?;
 
-        Ok((&block[index.offset..index.offset + index.len]).to_vec())
+        Ok((block[index.offset..index.offset + index.len]).to_vec())
     }
 }
 

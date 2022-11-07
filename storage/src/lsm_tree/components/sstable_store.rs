@@ -69,7 +69,7 @@ impl SstableStore {
         policy: CachePolicy,
     ) -> Result<Arc<Block>> {
         let fetch_block = async move {
-            let block_meta = sst.block_meta(block_index as usize).ok_or_else(|| {
+            let block_meta = sst.block_meta(block_index).ok_or_else(|| {
                 Error::Other(format!(
                     "invalid block idx: [sst: {}], [block: {}]",
                     sst.id(),
@@ -81,9 +81,9 @@ impl SstableStore {
                 .object_store
                 .get_range(&data_path, block_meta.data_range())
                 .await?
-                .ok_or(Error::ObjectStoreError(ObjectStoreError::ObjectNotFound(
-                    data_path,
-                )))?;
+                .ok_or_else(|| {
+                    Error::ObjectStoreError(ObjectStoreError::ObjectNotFound(data_path))
+                })?;
             let block = Block::decode(&block_data)?;
             Ok(Arc::new(block))
         };
@@ -116,9 +116,7 @@ impl SstableStore {
             .object_store
             .get(&path)
             .await?
-            .ok_or(Error::ObjectStoreError(ObjectStoreError::ObjectNotFound(
-                path,
-            )))?;
+            .ok_or_else(|| Error::ObjectStoreError(ObjectStoreError::ObjectNotFound(path)))?;
         let meta = Arc::new(SstableMeta::decode(&mut &buf[..]));
         self.meta_cache.insert(sst_id, meta.clone()).await;
         Ok(meta)

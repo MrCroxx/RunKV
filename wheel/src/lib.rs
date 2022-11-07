@@ -1,6 +1,5 @@
 #![feature(is_sorted)]
 #![feature(let_chains)]
-#![feature(map_first_last)]
 
 pub mod components;
 pub mod config;
