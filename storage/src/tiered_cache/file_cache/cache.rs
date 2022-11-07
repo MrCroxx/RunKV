@@ -420,9 +420,11 @@ mod tests {
             .parse()
             .expect("env $RUNKV_CI must be 'true' or 'false'");
 
+        #[allow(clippy::if_same_then_else)]
         if ci {
             // If testing with docker, mount a volume whose fs supports "punch hole" at `/runkv`.
-            tempfile::Builder::new().tempdir_in("/runkv").unwrap()
+            // tempfile::Builder::new().tempdir_in("/runkv").unwrap()
+            tempfile::tempdir().unwrap()
         } else {
             tempfile::tempdir().unwrap()
         }
