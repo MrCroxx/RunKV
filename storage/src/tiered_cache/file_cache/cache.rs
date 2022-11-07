@@ -415,13 +415,14 @@ mod tests {
     }
 
     fn tempdir() -> tempfile::TempDir {
-        let ci: bool = std::env::var("RISINGWAVE_CI")
+        let ci: bool = std::env::var("RUNKV_CI")
             .unwrap_or_else(|_| "false".to_string())
             .parse()
-            .expect("env $RISINGWAVE_CI must be 'true' or 'false'");
+            .expect("env $RUNKV_CI must be 'true' or 'false'");
 
         if ci {
-            tempfile::Builder::new().tempdir_in("/risingwave").unwrap()
+            // If testing with docker, mount a volume whose fs supports "punch hole" at `/runkv`.
+            tempfile::Builder::new().tempdir_in("/runkv").unwrap()
         } else {
             tempfile::tempdir().unwrap()
         }

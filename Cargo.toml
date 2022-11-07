@@ -12,7 +12,6 @@ members = [
 ]
 
 [profile.bench]
-# Uncomment this line if you are generating flame graph.
 debug = true
 
 [profile.release]

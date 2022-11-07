@@ -86,7 +86,7 @@ macro_rules! bpf_buffer_trace {
 
                 const BPF_BUFFER_TRACE_MAGIC: u64 = 0xdeadbeefdeadbeef;
 
-                $span.record("sid", id.into_u64());
+                $span.record("sid", &id.into_u64());
 
                 (&mut $buf[0..8]).put_u64_le(BPF_BUFFER_TRACE_MAGIC);
                 (&mut $buf[8..16]).put_u64_le(id.into_u64());
