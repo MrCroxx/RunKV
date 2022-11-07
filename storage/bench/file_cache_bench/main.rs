@@ -99,10 +99,7 @@ async fn main_okk() {
         // Hint: Uncomment commented codes to debug tracing output.
 
         let filter = tracing_subscriber::filter::Targets::new()
-            .with_target(
-                "runkv_storage::tiered_cache",
-                tracing::Level::TRACE,
-            )
+            .with_target("runkv_storage::tiered_cache", tracing::Level::TRACE)
             .with_target("file_cache_bench", tracing::Level::TRACE)
             .with_default(tracing::Level::WARN);
         // let fmt_layer = tracing_subscriber::fmt::layer()
