@@ -118,11 +118,11 @@ pub enum TieredCacheError {
 
 pub type Result<T> = core::result::Result<T, TieredCacheError>;
 
-pub struct TieredCacheMetricsBuilder(Option<prometheus::Registry>);
+pub struct TieredCacheMetricsBuilder(Option<u64>);
 
 impl TieredCacheMetricsBuilder {
-    pub fn new(registry: prometheus::Registry) -> Self {
-        Self(Some(registry))
+    pub fn new(node: u64) -> Self {
+        Self(Some(node))
     }
 
     pub fn unused() -> Self {

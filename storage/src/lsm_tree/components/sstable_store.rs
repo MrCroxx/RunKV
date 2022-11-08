@@ -1,14 +1,72 @@
 use std::mem::size_of;
 use std::sync::Arc;
 
+use bytes::{Buf, BufMut};
 use moka::future::Cache;
 
 use super::{Block, BlockCache, BlockHolder, Sstable, SstableMeta};
 use crate::object_store::ObjectStoreRef;
+use crate::tiered_cache::{TieredCache, TieredCacheKey, TieredCacheValue};
+use crate::utils::lru_cache::LruCacheEventListener;
 use crate::{Error, ObjectStoreError, Result};
 
+impl TieredCacheKey for (u64, usize) {
+    fn encoded_len() -> usize {
+        16
+    }
+
+    fn encode(&self, mut buf: &mut [u8]) {
+        buf.put_u64(self.0);
+        buf.put_u64(self.1 as u64);
+    }
+
+    fn decode(mut buf: &[u8]) -> Self {
+        let sst_id = buf.get_u64();
+        let block_idx = buf.get_u64() as usize;
+        (sst_id, block_idx)
+    }
+}
+
+impl TieredCacheValue for Box<Block> {
+    fn len(&self) -> usize {
+        self.raw().len()
+    }
+
+    fn encoded_len(&self) -> usize {
+        self.raw().len()
+    }
+
+    fn encode(&self, mut buf: &mut [u8]) {
+        buf.put_slice(self.raw());
+    }
+
+    fn decode(buf: Vec<u8>) -> Self {
+        Box::new(Block::from_raw(buf))
+    }
+}
+
+pub struct BlockCacheEventListener {
+    tiered_cache: TieredCache<(u64, usize), Box<Block>>,
+}
+
+impl BlockCacheEventListener {
+    pub fn new(tiered_cache: TieredCache<(u64, usize), Box<Block>>) -> Self {
+        Self { tiered_cache }
+    }
+}
+
+impl LruCacheEventListener for BlockCacheEventListener {
+    type K = (u64, usize);
+    type T = Box<Block>;
+
+    fn on_release(&self, key: Self::K, value: Self::T) {
+        // TODO(MrCroxx): handle error?
+        self.tiered_cache.insert(key, value).unwrap();
+    }
+}
+
 // TODO: Define policy based on use cases (read / comapction / ...).
-#[derive(Clone, Copy)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum CachePolicy {
     Disable,
     Fill,
@@ -20,6 +78,7 @@ pub struct SstableStoreOptions {
     pub object_store: ObjectStoreRef,
     pub block_cache: BlockCache,
     pub meta_cache_capacity: usize,
+    pub tiered_cache: TieredCache<(u64, usize), Box<Block>>,
 }
 
 pub struct SstableStore {
@@ -27,6 +86,7 @@ pub struct SstableStore {
     object_store: ObjectStoreRef,
     block_cache: BlockCache,
     meta_cache: Cache<u64, Arc<SstableMeta>>,
+    tiered_cache: TieredCache<(u64, usize), Box<Block>>,
 }
 
 impl SstableStore {
@@ -38,6 +98,7 @@ impl SstableStore {
             meta_cache: Cache::new(
                 (options.meta_cache_capacity / size_of::<SstableMeta>() + 1) as u64,
             ),
+            tiered_cache: options.tiered_cache,
         }
     }
 
@@ -72,7 +133,16 @@ impl SstableStore {
             let data_path = self.data_path(sst.id());
             let object_store = self.object_store.clone();
             let sst = sst.clone();
+            let tiered_cache = if policy == CachePolicy::Disable {
+                TieredCache::none()
+            } else {
+                self.tiered_cache.clone()
+            };
             async move {
+                if let Some(block) = tiered_cache.get(&(sst.id(), block_index)).await? {
+                    return Ok(block.into_owned());
+                }
+
                 let block_meta = sst.block_meta(block_index).ok_or_else(|| {
                     Error::Other(format!(
                         "invalid block idx: [sst: {}], [block: {}]",
@@ -87,6 +157,7 @@ impl SstableStore {
                         Error::ObjectStoreError(ObjectStoreError::ObjectNotFound(data_path))
                     })?;
                 let block = Block::decode(&block_data)?;
+
                 Ok(Box::new(block))
             }
         };
@@ -176,6 +247,7 @@ mod tests {
             object_store,
             block_cache,
             meta_cache_capacity: 1024,
+            tiered_cache: TieredCache::none(),
         };
         let sstable_store = SstableStore::new(options);
         let (meta, data) = build_sstable_for_test();

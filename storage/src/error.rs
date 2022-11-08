@@ -1,6 +1,7 @@
 use crate::manifest::ManifestError;
 use crate::object_store::ObjectStoreError;
 use crate::raft_log_store::error::RaftLogStoreError;
+use crate::tiered_cache::TieredCacheError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -16,8 +17,8 @@ pub enum Error {
     IoError(#[from] std::io::Error),
     #[error("raft log store error: {0}")]
     RaftLogStoreError(#[from] RaftLogStoreError),
-    #[error("tokio onshot recv error: {0}")]
-    TokioOneshotRecvError(#[from] tokio::sync::oneshot::error::RecvError),
+    #[error("tiered cache error: {0}")]
+    TieredCacheError(#[from] TieredCacheError),
     #[error("other: {0}")]
     Other(String),
 }

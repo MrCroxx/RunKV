@@ -173,6 +173,7 @@ mod tests {
         SstableMeta, SstableStore, SstableStoreOptions,
     };
     use crate::iterator::SstableIterator;
+    use crate::tiered_cache::TieredCache;
     use crate::MemObjectStore;
 
     async fn build_iterator_for_test(sequence: u64) -> UserKeyIterator {
@@ -183,6 +184,7 @@ mod tests {
             object_store,
             block_cache,
             meta_cache_capacity: 1024,
+            tiered_cache: TieredCache::none(),
         };
         let sstable_store = Arc::new(SstableStore::new(options));
 

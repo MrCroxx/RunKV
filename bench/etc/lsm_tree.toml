@@ -8,7 +8,7 @@ trigger_lmax_compaction_interval = "5 s"
 trigger_compaction_interval = "2 s"
 
 sstable_capacity = "4 MiB"
-block_capacity = "8 KiB"
+block_capacity = "1 MiB"
 restart_interval = 2
 bloom_false_positive = 0.1
 

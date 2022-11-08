@@ -14,110 +14,100 @@
 
 use std::sync::Arc;
 
-use prometheus::{
-    register_counter_vec_with_registry, register_histogram_vec_with_registry,
-    register_int_counter_with_registry, Counter, Histogram, IntCounter, Registry,
-};
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref FILE_CACHE_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
+        prometheus::register_histogram_vec!(
+            "file_cache_latency_histogram_vec",
+            "file cache latency histogram vec",
+            &["op", "node"],
+            vec![
+                0.0001, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75,
+                1.0
+            ],
+        )
+        .unwrap();
+    static ref FILE_CACHE_MISS_COUNTER: prometheus::IntCounterVec =
+        prometheus::register_int_counter_vec!("file_cache_miss", "file cache miss", &["node"])
+            .unwrap();
+    static ref FILE_CACHE_DISK_LATENCY_HISTOGRAM_VEC: prometheus::HistogramVec =
+        prometheus::register_histogram_vec!(
+            "file_cache_disk_latency_histogram_vec",
+            "file cache disk latency histogram vec",
+            &["op", "node"],
+            vec![
+                0.0001, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75,
+                1.0
+            ],
+        )
+        .unwrap();
+    static ref FILE_CACHE_DISK_COUNTER_VEC: prometheus::CounterVec =
+        prometheus::register_counter_vec!(
+            "file_cache_disk_counter_vec",
+            "file cache disk counter vec",
+            &["op", "node"],
+        )
+        .unwrap();
+    static ref FILE_CACHE_DISK_IO_HISTOGRAM_VEC: prometheus::HistogramVec =
+        prometheus::register_histogram_vec!(
+            "file_cache_disk_io_histogram_vec",
+            "file cache disk io histogram vec",
+            &["op", "node"],
+        )
+        .unwrap();
+}
 
 pub struct FileCacheMetrics {
-    pub cache_miss: IntCounter,
+    pub cache_miss: prometheus::IntCounter,
 
-    pub disk_read_bytes: Counter,
-    pub disk_read_latency: Histogram,
-    pub disk_write_bytes: Counter,
-    pub disk_write_latency: Histogram,
-    pub disk_read_io_size: Histogram,
-    pub disk_write_io_size: Histogram,
+    pub insert_latency: prometheus::Histogram,
+    pub erase_latency: prometheus::Histogram,
+    pub get_latency: prometheus::Histogram,
 
-    pub insert_latency: Histogram,
-    pub erase_latency: Histogram,
-    pub get_latency: Histogram,
+    pub disk_read_bytes: prometheus::Counter,
+    pub disk_read_latency: prometheus::Histogram,
+    pub disk_write_bytes: prometheus::Counter,
+    pub disk_write_latency: prometheus::Histogram,
+    pub disk_read_io_size: prometheus::Histogram,
+    pub disk_write_io_size: prometheus::Histogram,
 }
 
 impl FileCacheMetrics {
-    pub fn new(registry: Registry) -> Self {
-        let latency = register_histogram_vec_with_registry!(
-            "file_cache_latency",
-            "file cache latency",
-            &["op"],
-            vec![
-                0.0001, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75,
-                1.0
-            ],
-            registry,
-        )
-        .unwrap();
-        let disk_throughput = register_counter_vec_with_registry!(
-            "file_cache_disk_bytes",
-            "file cache disk bytes",
-            &["op"],
-            registry,
-        )
-        .unwrap();
-        let disk_latency = register_histogram_vec_with_registry!(
-            "file_cache_disk_latency",
-            "file cache disk latency",
-            &["op"],
-            vec![
-                0.0001, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75,
-                1.0
-            ],
-            registry,
-        )
-        .unwrap();
-        let disk_io_size = register_histogram_vec_with_registry!(
-            "file_cache_disk_io_size",
-            "file cache disk io size",
-            &["op"],
-            vec![
-                0.1 * 1024.0 * 1024.0,
-                0.5 * 1024.0 * 1024.0,
-                1.0 * 1024.0 * 1024.0,
-                2.0 * 1024.0 * 1024.0,
-                4.0 * 1024.0 * 1024.0,
-                8.0 * 1024.0 * 1024.0,
-                16.0 * 1024.0 * 1024.0,
-                64.0 * 1024.0 * 1024.0,
-            ],
-            registry,
-        )
-        .unwrap();
-        let cache_miss =
-            register_int_counter_with_registry!("file_cache_miss", "file cache miss", registry)
-                .unwrap();
-        let disk_read_throughput = disk_throughput
-            .get_metric_with_label_values(&["read"])
-            .unwrap();
-        let disk_read_latency = disk_latency
-            .get_metric_with_label_values(&["read"])
-            .unwrap();
-        let disk_write_throughput = disk_throughput
-            .get_metric_with_label_values(&["write"])
-            .unwrap();
-        let disk_write_latency = disk_latency
-            .get_metric_with_label_values(&["write"])
-            .unwrap();
-        let disk_read_io_size = disk_io_size
-            .get_metric_with_label_values(&["read"])
-            .unwrap();
-        let disk_write_io_size = disk_io_size
-            .get_metric_with_label_values(&["write"])
-            .unwrap();
-        let insert_latency = latency.get_metric_with_label_values(&["insert"]).unwrap();
-        let erase_latency = latency.get_metric_with_label_values(&["erase"]).unwrap();
-        let get_latency = latency.get_metric_with_label_values(&["get"]).unwrap();
-
+    pub fn new(node: u64) -> Self {
         Self {
-            cache_miss,
-            disk_read_bytes: disk_read_throughput,
-            disk_read_latency,
-            disk_write_bytes: disk_write_throughput,
-            disk_write_latency,
-            disk_read_io_size,
-            disk_write_io_size,
-            insert_latency,
-            erase_latency,
-            get_latency,
+            cache_miss: FILE_CACHE_MISS_COUNTER
+                .get_metric_with_label_values(&[&node.to_string()])
+                .unwrap(),
+
+            insert_latency: FILE_CACHE_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&["insert", &node.to_string()])
+                .unwrap(),
+            erase_latency: FILE_CACHE_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&["erase", &node.to_string()])
+                .unwrap(),
+            get_latency: FILE_CACHE_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&["get", &node.to_string()])
+                .unwrap(),
+
+            disk_read_bytes: FILE_CACHE_DISK_COUNTER_VEC
+                .get_metric_with_label_values(&["read", &node.to_string()])
+                .unwrap(),
+            disk_read_latency: FILE_CACHE_DISK_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&["read", &node.to_string()])
+                .unwrap(),
+            disk_write_bytes: FILE_CACHE_DISK_COUNTER_VEC
+                .get_metric_with_label_values(&["write", &node.to_string()])
+                .unwrap(),
+            disk_write_latency: FILE_CACHE_DISK_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&["write", &node.to_string()])
+                .unwrap(),
+            disk_read_io_size: FILE_CACHE_DISK_IO_HISTOGRAM_VEC
+                .get_metric_with_label_values(&["read", &node.to_string()])
+                .unwrap(),
+            disk_write_io_size: FILE_CACHE_DISK_IO_HISTOGRAM_VEC
+                .get_metric_with_label_values(&["write", &node.to_string()])
+                .unwrap(),
         }
     }
 }

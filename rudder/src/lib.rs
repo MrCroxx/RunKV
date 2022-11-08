@@ -22,6 +22,7 @@ use runkv_storage::components::{
     SstableStoreRef,
 };
 use runkv_storage::manifest::{VersionManager, VersionManagerOptions};
+use runkv_storage::tiered_cache::TieredCache;
 use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
 use service::{Rudder, RudderOptions};
 use tonic::transport::Server;
@@ -115,6 +116,7 @@ fn build_sstable_store(
             .parse::<ByteSize>()
             .map_err(Error::config_err)?
             .0 as usize,
+        tiered_cache: TieredCache::none(),
     };
     let sstable_store = SstableStore::new(sstable_store_options);
     Ok(Arc::new(sstable_store))

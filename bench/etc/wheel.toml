@@ -34,3 +34,13 @@ persist = "{persist}"
 [prometheus]
 host = "127.0.0.1"
 port = 0
+
+[tiered_cache]
+type = "FileCache"
+[tiered_cache.args]
+dir = "/path/to/file/cache/dir"
+capacity = "1 GiB"
+total_buffer_capacity = "1 GiB"
+cache_file_fallocate_unit = "256 MiB"
+cache_meta_fallocate_unit = "64 MiB"
+cache_file_max_write_size = "4 MiB"

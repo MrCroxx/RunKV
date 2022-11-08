@@ -1,5 +1,5 @@
 [lsm_tree]
-l1_capacity = "256 KiB"
+l1_capacity = "20 MiB"
 level_multiplier = 2
 
 trigger_l0_compaction_ssts = 4
@@ -7,8 +7,8 @@ trigger_l0_compaction_interval = "500 ms"
 trigger_lmax_compaction_interval = "5 s"
 trigger_compaction_interval = "2 s"
 
-sstable_capacity = "64 KiB"
-block_capacity = "4 KiB"
+sstable_capacity = "4 MiB"
+block_capacity = "1 MiB"
 restart_interval = 2
 bloom_false_positive = 0.1
 

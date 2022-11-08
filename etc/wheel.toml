@@ -73,3 +73,13 @@ compression_algorithm = "Lz4"
 [[lsm_tree.levels_options]]
 compaction_strategy = "NonOverlap"
 compression_algorithm = "Lz4"
+
+[tiered_cache]
+type = "FileCache"
+[tiered_cache.args]
+dir = "/path/to/file/cache/dir"
+capacity = "256 MiB"
+total_buffer_capacity = "64 MiB"
+cache_file_fallocate_unit = "64 MiB"
+cache_meta_fallocate_unit = "16 MiB"
+cache_file_max_write_size = "2 MiB"

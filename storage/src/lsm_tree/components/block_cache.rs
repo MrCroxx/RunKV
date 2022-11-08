@@ -4,51 +4,15 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Instant;
 
-use bytes::{Buf, BufMut};
 use futures::Future;
 
 use super::metrics::LsmTreeMetricsRef;
 use super::Block;
-use crate::tiered_cache::{TieredCacheEntry, TieredCacheKey, TieredCacheValue};
+use crate::tiered_cache::{TieredCacheEntry, TieredCacheValue};
 use crate::utils::lru_cache::{CacheableEntry, LruCache, LruCacheEventListener};
-use crate::Result;
+use crate::{Error, Result};
 
 const SHARD_BITS: usize = 5;
-
-impl TieredCacheKey for (u64, usize) {
-    fn encoded_len() -> usize {
-        16
-    }
-
-    fn encode(&self, mut buf: &mut [u8]) {
-        buf.put_u64(self.0);
-        buf.put_u64(self.1 as u64);
-    }
-
-    fn decode(mut buf: &[u8]) -> Self {
-        let sst_id = buf.get_u64();
-        let block_idx = buf.get_u64() as usize;
-        (sst_id, block_idx)
-    }
-}
-
-impl TieredCacheValue for Box<Block> {
-    fn len(&self) -> usize {
-        self.raw().len()
-    }
-
-    fn encoded_len(&self) -> usize {
-        self.raw().len()
-    }
-
-    fn encode(&self, mut buf: &mut [u8]) {
-        buf.put_slice(self.raw());
-    }
-
-    fn decode(buf: Vec<u8>) -> Self {
-        Box::new(Block::from_raw(buf))
-    }
-}
 
 enum BlockEntry {
     Cache(CacheableEntry<(u64, usize), Box<Block>>),
@@ -198,7 +162,8 @@ impl BlockCache {
                     Ok((block, len))
                 }
             })
-            .await?
+            .await
+            .map_err(Error::err)?
             .map(BlockHolder::from_cached_block);
 
         self.metrics

@@ -20,7 +20,7 @@ use runkv_proto::rudder::{AddKeyRangesRequest, AddWheelsRequest};
 use runkv_rudder::config::RudderConfig;
 use runkv_rudder::{bootstrap_rudder, build_rudder_with_object_store};
 use runkv_storage::MemObjectStore;
-use runkv_wheel::config::WheelConfig;
+use runkv_wheel::config::{TieredCacheConfig, WheelConfig};
 use runkv_wheel::{bootstrap_wheel, build_wheel_with_object_store};
 use tonic::transport::Channel;
 use tonic::Request;
@@ -81,6 +81,9 @@ pub struct Args {
 
     #[clap(long, default_value = ".run/tmp/bench-kv/log")]
     pub log_dir: String,
+
+    #[clap(long, default_value = ".run/tmp/bench-kv/filecache")]
+    pub file_cache_dir: String,
 }
 
 fn concat_toml(path1: &str, path2: &str) -> String {
@@ -227,8 +230,10 @@ pub async fn run(args: Args, options: Options) {
     let ts = timestamp();
     let log_dir = format!("{}-{}", args.log_dir, ts);
     let raft_log_store_data_dir = format!("{}-{}", args.raft_log_store_data_dir, ts);
+    let file_cache_dir = format!("{}-{}", args.file_cache_dir, ts);
     mkdir_if_not_exists(&log_dir).await;
     mkdir_if_not_exists(&raft_log_store_data_dir).await;
+    mkdir_if_not_exists(&file_cache_dir).await;
 
     // Init log.
     println!("Init log...");
@@ -262,6 +267,9 @@ pub async fn run(args: Args, options: Options) {
         config.rudder.port = rudder_config.port;
         config.raft_log_store.persist = args.persist;
         config.host = LOCALHOST.to_string();
+        if let TieredCacheConfig::FileCache(cfg) = &mut config.tiered_cache {
+            cfg.dir = file_cache_dir.to_owned();
+        }
         config
     };
     let exhauster_config_template: ExhausterConfig = {
@@ -297,6 +305,9 @@ pub async fn run(args: Args, options: Options) {
         let wheel_config = {
             let mut config = wheel_config_template.clone();
             config.raft_log_store.log_dir_path = format!("{}/{}", raft_log_store_data_dir, i);
+            if let TieredCacheConfig::FileCache(cfg) = &mut config.tiered_cache {
+                cfg.dir = format!("{}/{}", cfg.dir, i);
+            }
             config.id = i + options.wheel_node_id_base;
             config.port = i as u16 + options.wheel_port_base;
             config.prometheus.port = i as u16 + options.wheel_prometheus_port_base;

@@ -29,12 +29,13 @@ use runkv_proto::kv::KvResponse;
 use runkv_proto::wheel::raft_service_server::RaftServiceServer;
 use runkv_proto::wheel::wheel_service_server::WheelServiceServer;
 use runkv_storage::components::{
-    BlockCache, LsmTreeMetrics, LsmTreeMetricsRef, SstableStore, SstableStoreOptions,
-    SstableStoreRef,
+    Block, BlockCache, BlockCacheEventListener, LsmTreeMetrics, LsmTreeMetricsRef, SstableStore,
+    SstableStoreOptions, SstableStoreRef,
 };
 use runkv_storage::manifest::{VersionManager, VersionManagerOptions};
 use runkv_storage::raft_log_store::store::RaftLogStoreOptions;
 use runkv_storage::raft_log_store::RaftLogStore;
+use runkv_storage::tiered_cache::TieredCache;
 use runkv_storage::{MemObjectStore, ObjectStoreRef, S3ObjectStore};
 use service::{Wheel, WheelOptions};
 use tonic::transport::Server;
@@ -86,7 +87,10 @@ pub async fn build_wheel_with_object_store(
 ) -> Result<(Wheel, Vec<BoxedWorker>)> {
     let lsm_tree_metrics = Arc::new(LsmTreeMetrics::new(config.id));
 
-    let sstable_store = build_sstable_store(config, object_store, lsm_tree_metrics.clone())?;
+    let tiered_cache = build_tiered_cache(config).await?;
+
+    let sstable_store =
+        build_sstable_store(config, object_store, tiered_cache, lsm_tree_metrics.clone())?;
 
     let version_manager = build_version_manager(config, sstable_store.clone())?;
 
@@ -144,12 +148,78 @@ async fn build_object_store(config: &WheelConfig) -> ObjectStoreRef {
     }
 }
 
+#[cfg(not(target_os = "linux"))]
+async fn build_tiered_cache(
+    _config: &WheelConfig,
+) -> Result<TieredCache<(u64, usize), Box<Block>>> {
+    Ok(TieredCache::none())
+}
+
+#[cfg(target_os = "linux")]
+async fn build_tiered_cache(config: &WheelConfig) -> Result<TieredCache<(u64, usize), Box<Block>>> {
+    use runkv_storage::tiered_cache::file_cache::cache::FileCacheOptions;
+    use runkv_storage::tiered_cache::TieredCacheMetricsBuilder;
+
+    use crate::config::TieredCacheConfig;
+
+    match &config.tiered_cache {
+        TieredCacheConfig::None => Ok(TieredCache::none()),
+        TieredCacheConfig::FileCache(cfg) => {
+            let options = FileCacheOptions {
+                dir: cfg.dir.to_owned(),
+                capacity: cfg
+                    .capacity
+                    .parse::<ByteSize>()
+                    .map_err(Error::config_err)?
+                    .0 as usize,
+                total_buffer_capacity: cfg
+                    .total_buffer_capacity
+                    .parse::<ByteSize>()
+                    .map_err(Error::config_err)?
+                    .0 as usize,
+                cache_file_fallocate_unit: cfg
+                    .cache_file_fallocate_unit
+                    .parse::<ByteSize>()
+                    .map_err(Error::config_err)?
+                    .0 as usize,
+                cache_meta_fallocate_unit: cfg
+                    .cache_meta_fallocate_unit
+                    .parse::<ByteSize>()
+                    .map_err(Error::config_err)?
+                    .0 as usize,
+                cache_file_max_write_size: cfg
+                    .cache_file_max_write_size
+                    .parse::<ByteSize>()
+                    .map_err(Error::config_err)?
+                    .0 as usize,
+                flush_buffer_hooks: vec![],
+            };
+
+            let metrics = Arc::new(TieredCacheMetricsBuilder::new(config.id).file());
+
+            use runkv_storage::tiered_cache::file_cache::cache::ShardedFileCache;
+            let sharded_file_cache = ShardedFileCache::open(options, metrics)
+                .await
+                .map_err(Error::err)?;
+            Ok(TieredCache::ShardedFileCache(sharded_file_cache))
+            // use runkv_storage::tiered_cache::file_cache::cache::FileCache;
+            // let file_cache = FileCache::open(options, metrics)
+            //     .await
+            //     .map_err(Error::err)?;
+            // Ok(TieredCache::FileCache(file_cache))
+        }
+    }
+}
+
 fn build_sstable_store(
     config: &WheelConfig,
     object_store: ObjectStoreRef,
+    tiered_cache: TieredCache<(u64, usize), Box<Block>>,
     metrics: LsmTreeMetricsRef,
 ) -> Result<SstableStoreRef> {
-    let block_cache = BlockCache::new(
+    let listener = Arc::new(BlockCacheEventListener::new(tiered_cache.clone()));
+
+    let block_cache = BlockCache::with_event_listener(
         config
             .cache
             .block_cache_capacity
@@ -157,6 +227,7 @@ fn build_sstable_store(
             .map_err(Error::config_err)?
             .0 as usize,
         metrics,
+        listener,
     );
     let sstable_store_options = SstableStoreOptions {
         path: config.data_path.clone(),
@@ -168,6 +239,7 @@ fn build_sstable_store(
             .parse::<ByteSize>()
             .map_err(Error::config_err)?
             .0 as usize,
+        tiered_cache,
     };
     let sstable_store = SstableStore::new(sstable_store_options);
     Ok(Arc::new(sstable_store))
