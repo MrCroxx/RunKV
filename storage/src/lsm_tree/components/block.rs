@@ -14,9 +14,12 @@ use crate::utils::{
 };
 use crate::{Error, Result};
 
+#[derive(Clone, Debug)]
 pub struct Block {
-    /// Uncompressed entries data.
+    /// Uncompressed entries data + encoded restart points.
     data: Vec<u8>,
+    /// Uncompressed entries data len.
+    data_len: usize,
     /// Restart points.
     restart_points: Vec<u32>,
 }
@@ -47,6 +50,10 @@ impl Block {
             }
         };
 
+        Ok(Self::from_raw(buf))
+    }
+
+    pub fn from_raw(buf: Vec<u8>) -> Self {
         // Decode restart points.
         let n_restarts = (&buf[buf.len() - 4..]).get_u32_le();
         let data_len = buf.len() - 4 - n_restarts as usize * 4;
@@ -56,17 +63,18 @@ impl Block {
             restart_points.push(restart_points_buf.get_u32_le());
         }
 
-        Ok(Block {
-            data: buf[..data_len].to_vec(),
+        Block {
+            data: buf,
+            data_len,
             restart_points,
-        })
+        }
     }
 
     /// Entries data len.
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         assert!(!self.data.is_empty());
-        self.data.len()
+        self.data_len
     }
 
     /// Get restart point by index.
@@ -96,10 +104,17 @@ impl Block {
     }
 
     pub fn slice(&self, range: Range<usize>) -> &[u8] {
+        if range.end > self.data_len {
+            panic!("out of range {} > {}", range.end, self.data_len);
+        }
         &self.data[range]
     }
 
     pub fn data(&self) -> &[u8] {
+        &self.data[..self.data_len]
+    }
+
+    pub fn raw(&self) -> &[u8] {
         &self.data
     }
 }
@@ -309,11 +324,10 @@ impl BlockBuilder {
 #[cfg(test)]
 mod tests {
 
-    use std::sync::Arc;
-
     use test_log::test;
 
     use super::*;
+    use crate::components::BlockHolder;
     use crate::lsm_tree::iterator::{BlockIterator, Seek};
     use crate::utils::full_key;
 
@@ -326,8 +340,8 @@ mod tests {
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
         let buf = builder.build();
-        let block = Arc::new(Block::decode(&buf).unwrap());
-        let mut bi = BlockIterator::new(block);
+        let block = Box::new(Block::decode(&buf).unwrap());
+        let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek(Seek::First).unwrap();
         assert!(bi.is_valid());
@@ -365,8 +379,8 @@ mod tests {
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
         let buf = builder.build();
-        let block = Arc::new(Block::decode(&buf).unwrap());
-        let mut bi = BlockIterator::new(block);
+        let block = Box::new(Block::decode(&buf).unwrap());
+        let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek(Seek::First).unwrap();
         assert!(bi.is_valid());
@@ -401,8 +415,8 @@ mod tests {
         builder.add(&full_key(b"k2", u64::MAX / 2), b"v21");
         builder.add(&full_key(b"k20000", u64::MAX), b"v22");
         let buf = builder.build();
-        let block = Arc::new(Block::decode(&buf).unwrap());
-        let mut bi = BlockIterator::new(block);
+        let block = Box::new(Block::decode(&buf).unwrap());
+        let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek(Seek::First).unwrap();
         assert!(bi.is_valid());

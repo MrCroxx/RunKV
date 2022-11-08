@@ -453,6 +453,7 @@ mod tests {
         BlockCache, BlockMeta, CachePolicy, Sstable, SstableBuilder, SstableBuilderOptions,
         SstableMeta, SstableStore, SstableStoreOptions,
     };
+    use crate::tiered_cache::TieredCache;
     use crate::utils::full_key;
     use crate::MemObjectStore;
 
@@ -830,6 +831,7 @@ mod tests {
             object_store,
             block_cache,
             meta_cache_capacity: 65536,
+            tiered_cache: TieredCache::none(),
         };
         Arc::new(SstableStore::new(sstable_store_options))
     }

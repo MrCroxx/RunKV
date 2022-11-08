@@ -373,12 +373,10 @@ impl SstableBuilder {
 #[cfg(test)]
 mod tests {
 
-    use std::sync::Arc;
-
     use test_log::test;
 
     use super::*;
-    use crate::components::Block;
+    use crate::components::{Block, BlockHolder};
     use crate::iterator::{BlockIterator, Seek};
 
     #[test]
@@ -404,7 +402,9 @@ mod tests {
 
         let begin = meta.block_metas[0].offset;
         let end = meta.block_metas[0].offset + meta.block_metas[0].len;
-        let mut bi = BlockIterator::new(Arc::new(Block::decode(&data[begin..end]).unwrap()));
+        let mut bi = BlockIterator::new(BlockHolder::from_owned_block(Box::new(
+            Block::decode(&data[begin..end]).unwrap(),
+        )));
         bi.seek(Seek::First).unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k01", 1)[..], bi.key());
@@ -418,7 +418,9 @@ mod tests {
 
         let begin = meta.block_metas[1].offset;
         let end = meta.block_metas[1].offset + meta.block_metas[1].len;
-        let mut bi = BlockIterator::new(Arc::new(Block::decode(&data[begin..end]).unwrap()));
+        let mut bi = BlockIterator::new(BlockHolder::from_owned_block(Box::new(
+            Block::decode(&data[begin..end]).unwrap(),
+        )));
         bi.seek(Seek::First).unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k04", 4)[..], bi.key());
@@ -454,7 +456,9 @@ mod tests {
 
         let begin = meta.block_metas[0].offset;
         let end = meta.block_metas[0].offset + meta.block_metas[0].len;
-        let mut bi = BlockIterator::new(Arc::new(Block::decode(&data[begin..end]).unwrap()));
+        let mut bi = BlockIterator::new(BlockHolder::from_owned_block(Box::new(
+            Block::decode(&data[begin..end]).unwrap(),
+        )));
         bi.seek(Seek::First).unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k01", 1)[..], bi.key());
@@ -468,7 +472,9 @@ mod tests {
 
         let begin = meta.block_metas[1].offset;
         let end = meta.block_metas[1].offset + meta.block_metas[1].len;
-        let mut bi = BlockIterator::new(Arc::new(Block::decode(&data[begin..end]).unwrap()));
+        let mut bi = BlockIterator::new(BlockHolder::from_owned_block(Box::new(
+            Block::decode(&data[begin..end]).unwrap(),
+        )));
         bi.seek(Seek::First).unwrap();
         assert!(bi.is_valid());
         assert_eq!(&full_key(b"k04", 4)[..], bi.key());

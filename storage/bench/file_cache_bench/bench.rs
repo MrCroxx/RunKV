@@ -19,7 +19,6 @@ use std::time::{Duration, Instant};
 use bytes::{Buf, BufMut};
 use futures::future::join_all;
 use itertools::Itertools;
-use prometheus::Registry;
 use rand::{Rng, SeedableRng};
 use runkv_storage::tiered_cache::file_cache::cache::{FileCacheOptions, ShardedFileCache};
 use runkv_storage::tiered_cache::file_cache::metrics::FileCacheMetrics;
@@ -73,7 +72,7 @@ pub async fn run(args: Args, stop: oneshot::Receiver<()>) {
     };
 
     let cache: ShardedFileCache<SHARDS, Index, CacheValue> =
-        ShardedFileCache::open(options, Arc::new(FileCacheMetrics::new(Registry::new())))
+        ShardedFileCache::open(options, Arc::new(FileCacheMetrics::new(0)))
             .await
             .unwrap();
 

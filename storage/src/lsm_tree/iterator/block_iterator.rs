@@ -1,16 +1,15 @@
 use std::cmp::Ordering;
 use std::ops::Range;
-use std::sync::Arc;
 
 use super::Seek;
-use crate::components::{Block, KeyPrefix};
+use crate::components::{BlockHolder, KeyPrefix};
 use crate::utils::compare_full_key;
 use crate::Result;
 
 /// [`BlockIterator`] is used to read kv pairs in a block.
 pub struct BlockIterator {
     /// Block that iterates on.
-    block: Arc<Block>,
+    block: BlockHolder,
     /// Current restart point index.
     restart_point_index: usize,
     /// Current offset.
@@ -25,7 +24,7 @@ pub struct BlockIterator {
 }
 
 impl BlockIterator {
-    pub fn new(block: Arc<Block>) -> Self {
+    pub fn new(block: BlockHolder) -> Self {
         Self {
             block,
             offset: usize::MAX,
@@ -205,14 +204,14 @@ pub mod tests {
     use test_log::test;
 
     use super::*;
-    use crate::components::{BlockBuilder, BlockBuilderOptions};
+    use crate::components::{Block, BlockBuilder, BlockBuilderOptions};
     use crate::iterator::Iterator;
     use crate::utils::full_key;
 
     pub struct AsyncBlockIterator(BlockIterator);
 
     impl AsyncBlockIterator {
-        pub fn new(block: Arc<Block>) -> Self {
+        pub fn new(block: BlockHolder) -> Self {
             AsyncBlockIterator(BlockIterator::new(block))
         }
     }
@@ -252,7 +251,9 @@ pub mod tests {
         builder.add(&full_key(b"k04", 4), b"v04");
         builder.add(&full_key(b"k05", 5), b"v05");
         let buf = builder.build();
-        BlockIterator::new(Arc::new(Block::decode(&buf).unwrap()))
+        BlockIterator::new(BlockHolder::from_owned_block(Box::new(
+            Block::decode(&buf).unwrap(),
+        )))
     }
 
     #[test]

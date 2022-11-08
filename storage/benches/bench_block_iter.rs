@@ -1,9 +1,7 @@
-use std::sync::Arc;
-
 use bytes::BufMut;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use runkv_common::coding::CompressionAlgorithm;
-use runkv_storage::components::{Block, BlockBuilder, BlockBuilderOptions};
+use runkv_storage::components::{Block, BlockBuilder, BlockBuilderOptions, BlockHolder};
 use runkv_storage::iterator::{BlockIterator, Seek};
 
 const TABLES_PER_SSTABLE: u32 = 10;
@@ -11,16 +9,16 @@ const KEYS_PER_TABLE: u64 = 100;
 const RESTART_INTERVAL: usize = 16;
 const BLOCK_CAPACITY: usize = TABLES_PER_SSTABLE as usize * KEYS_PER_TABLE as usize * 64;
 
-fn block_iter_next(block: Arc<Block>) {
-    let mut iter = BlockIterator::new(block);
+fn block_iter_next(block: Box<Block>) {
+    let mut iter = BlockIterator::new(BlockHolder::from_owned_block(block));
     iter.seek(Seek::First).unwrap();
     while iter.is_valid() {
         iter.next().unwrap();
     }
 }
 
-fn block_iter_prev(block: Arc<Block>) {
-    let mut iter = BlockIterator::new(block);
+fn block_iter_prev(block: Box<Block>) {
+    let mut iter = BlockIterator::new(BlockHolder::from_owned_block(block));
     iter.seek(Seek::Last).unwrap();
     while iter.is_valid() {
         iter.prev().unwrap();
@@ -28,7 +26,7 @@ fn block_iter_prev(block: Arc<Block>) {
 }
 
 fn bench_block_iter(c: &mut Criterion) {
-    let block = Arc::new(build_block(TABLES_PER_SSTABLE, KEYS_PER_TABLE));
+    let block = Box::new(build_block(TABLES_PER_SSTABLE, KEYS_PER_TABLE));
 
     println!("block size: {}", block.len());
 
@@ -60,7 +58,7 @@ fn bench_block_iter(c: &mut Criterion) {
         },
     );
 
-    let mut iter = BlockIterator::new(block);
+    let mut iter = BlockIterator::new(BlockHolder::from_owned_block(block));
     iter.seek(Seek::First).unwrap();
     for t in 1..=TABLES_PER_SSTABLE {
         for i in 1..=KEYS_PER_TABLE {

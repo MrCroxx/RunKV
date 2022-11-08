@@ -389,8 +389,6 @@ mod tests {
     use std::collections::HashMap;
     use std::path::Path;
 
-    use prometheus::Registry;
-
     use super::super::metrics::FileCacheMetrics;
     use super::super::test_utils::{datasize, key, FlushHolder, TestCacheKey, TestCacheValue};
     use super::super::utils::ModuloHasherBuilder;
@@ -447,7 +445,7 @@ mod tests {
         FileCache::open_with_hasher(
             options,
             ModuloHasherBuilder,
-            Arc::new(FileCacheMetrics::new(Registry::new())),
+            Arc::new(FileCacheMetrics::new(0)),
         )
         .await
         .unwrap()

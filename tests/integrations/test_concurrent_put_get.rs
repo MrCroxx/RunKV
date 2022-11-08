@@ -35,6 +35,11 @@ async fn test_concurrent_put_get() {
         .to_str()
         .unwrap()
         .to_string();
+    let file_cache_dir = Path::new(tempdir.path())
+        .join("filecache")
+        .to_str()
+        .unwrap()
+        .to_string();
 
     let args = Args {
         wheels: 1,
@@ -47,6 +52,7 @@ async fn test_concurrent_put_get() {
         raft_log_store_data_dir,
         persist: "none".to_string(),
         log_dir,
+        file_cache_dir,
     };
 
     run(args, options).await;

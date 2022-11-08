@@ -230,6 +230,7 @@ mod tests {
         SstableStore, SstableStoreOptions,
     };
     use crate::lsm_tree::TEST_DEFAULT_RESTART_INTERVAL;
+    use crate::tiered_cache::TieredCache;
     use crate::utils::full_key;
     use crate::MemObjectStore;
 
@@ -261,6 +262,7 @@ mod tests {
             object_store,
             block_cache,
             meta_cache_capacity: 1024,
+            tiered_cache: TieredCache::none(),
         };
         let sstable_store = Arc::new(SstableStore::new(options));
         let (meta, data) = build_sstable_for_test();
