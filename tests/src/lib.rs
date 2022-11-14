@@ -19,7 +19,7 @@ use runkv_proto::rudder::control_service_client::ControlServiceClient;
 use runkv_proto::rudder::{AddKeyRangesRequest, AddWheelsRequest};
 use runkv_rudder::config::RudderConfig;
 use runkv_rudder::{bootstrap_rudder, build_rudder_with_object_store};
-use runkv_storage::MemObjectStore;
+use runkv_storage::{MemObjectStore, ObjectStore, S3ObjectStore};
 use runkv_wheel::config::{TieredCacheConfig, WheelConfig};
 use runkv_wheel::{bootstrap_wheel, build_wheel_with_object_store};
 use tonic::transport::Channel;
@@ -84,6 +84,10 @@ pub struct Args {
 
     #[clap(long, default_value = ".run/tmp/bench-kv/filecache")]
     pub file_cache_dir: String,
+
+    /// 1. memory => "memory://" 2. minio => "minio://key:secret@address:port/bucket"
+    #[clap(long, default_value = "memory://")]
+    pub s3_uri: String,
 }
 
 fn concat_toml(path1: &str, path2: &str) -> String {
@@ -285,7 +289,15 @@ pub async fn run(args: Args, options: Options) {
     // Connect object store.
     // TODO: Support S3.
     println!("Connect object store...");
-    let object_store = Arc::new(MemObjectStore::default());
+    let object_store: Arc<dyn ObjectStore> = match args.s3_uri.split("://").collect_vec().as_slice()
+    {
+        ["memory", ..] => Arc::new(MemObjectStore::default()),
+        ["minio", ..] => {
+            // minio://key:secret@address:port/bucket
+            Arc::new(S3ObjectStore::new_with_minio(&args.s3_uri).await)
+        }
+        [args @ ..] => panic!("not valid s3 url: {:?}", args),
+    };
 
     // Build and bootstrap rudder.
     println!("Bootstrap rudder...");
