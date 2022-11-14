@@ -186,6 +186,20 @@ impl ClusterInitializer {
     }
 }
 
+enum ObjectStoreFactory {
+    Memory(Arc<MemObjectStore>),
+    Minio(String),
+}
+
+impl ObjectStoreFactory {
+    async fn produce(&self) -> Arc<dyn ObjectStore> {
+        match self {
+            Self::Memory(mem) => mem.clone(),
+            Self::Minio(uri) => Arc::new(S3ObjectStore::new_with_minio(uri).await),
+        }
+    }
+}
+
 async fn assert_put(client: &RunkvClient, key: Vec<u8>, value: Vec<u8>) {
     client.put(key, value).await.unwrap();
 }
@@ -286,23 +300,17 @@ pub async fn run(args: Args, options: Options) {
         config
     };
 
-    // Connect object store.
-    // TODO: Support S3.
-    println!("Connect object store...");
-    let object_store: Arc<dyn ObjectStore> = match args.s3_uri.split("://").collect_vec().as_slice()
-    {
-        ["memory", ..] => Arc::new(MemObjectStore::default()),
-        ["minio", ..] => {
-            // minio://key:secret@address:port/bucket
-            Arc::new(S3ObjectStore::new_with_minio(&args.s3_uri).await)
-        }
+    // Parse object store args.
+    let object_store_factory = match args.s3_uri.split("://").collect_vec().as_slice() {
+        ["memory", ..] => ObjectStoreFactory::Memory(Arc::new(MemObjectStore::default())),
+        ["minio", ..] => ObjectStoreFactory::Minio(args.s3_uri.clone()),
         [args @ ..] => panic!("not valid s3 url: {:?}", args),
     };
 
     // Build and bootstrap rudder.
     println!("Bootstrap rudder...");
     let (rudder, rudder_workers) =
-        build_rudder_with_object_store(&rudder_config, object_store.clone())
+        build_rudder_with_object_store(&rudder_config, object_store_factory.produce().await)
             .await
             .unwrap();
     let rudder_config_clone = rudder_config.clone();
@@ -326,7 +334,7 @@ pub async fn run(args: Args, options: Options) {
             config
         };
         let (wheel, wheel_workers) =
-            build_wheel_with_object_store(&wheel_config, object_store.clone())
+            build_wheel_with_object_store(&wheel_config, object_store_factory.produce().await)
                 .await
                 .unwrap();
         tokio::spawn(async move { bootstrap_wheel(&wheel_config, wheel, wheel_workers).await });
@@ -341,10 +349,12 @@ pub async fn run(args: Args, options: Options) {
             config.port = i as u16 + options.exhauster_port_base;
             config
         };
-        let (exhuaster, exhauster_workers) =
-            build_exhauster_with_object_store(&exhauster_config, object_store.clone())
-                .await
-                .unwrap();
+        let (exhuaster, exhauster_workers) = build_exhauster_with_object_store(
+            &exhauster_config,
+            object_store_factory.produce().await,
+        )
+        .await
+        .unwrap();
         tokio::spawn(async move {
             bootstrap_exhauster(&exhauster_config, exhuaster, exhauster_workers).await
         });

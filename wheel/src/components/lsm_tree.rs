@@ -56,15 +56,7 @@ struct ObjectStoreLsmTreeCore {
 
     memtables: RwLock<Memtables>,
 
-    _metrics: LsmTreeMetricsRef,
-    // ----- critical section protected by rwlock -----
-    // /// Current mutable memtable.
-    // memtable: RefCell<Memtable>,
-    // /// Immutable memtabls, waiting to be uploaded to S3.
-    // immutable_memtables: RefCell<VecDeque<Memtable>>,
-    // /// Use a external lock to tighten the critical section.
-    // rwlock: RwLock<PhantomData<Memtable>>,
-    // ----- critical section protected by rwlock -----
+    metrics: LsmTreeMetricsRef,
 }
 
 impl ObjectStoreLsmTreeCore {
@@ -78,7 +70,7 @@ impl ObjectStoreLsmTreeCore {
                 immutable_memtables: VecDeque::with_capacity(32),
             }),
 
-            _metrics: options.metrics.clone(),
+            metrics: options.metrics.clone(),
 
             options,
         }
@@ -199,6 +191,7 @@ impl ObjectStoreLsmTreeCore {
             let mut imm = MemtableWithCtx::new(self.options.write_buffer_capacity);
             std::mem::swap(&mut imm, &mut guard.memtable);
             guard.immutable_memtables.push_front(imm);
+            self.metrics.rotate_memtable_counter.inc();
         }
         guard.memtable.table.put(key, value, sequence);
         assert!(
@@ -215,6 +208,11 @@ impl ObjectStoreLsmTreeCore {
             guard.memtable.max_sequence,
         );
         guard.memtable.max_sequence = sequence;
+
+        self.metrics
+            .active_memtable_size_gauge
+            .set(guard.memtable.table.mem_size() as f64);
+
         drop(guard);
 
         Ok(())
