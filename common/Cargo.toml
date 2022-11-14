@@ -51,6 +51,7 @@ test-log = "0.2.10"
 [features]
 console = ["console-subscriber"]
 trace-notify-pool = []
+tracing = []
 
 [[bench]]
 name = "bench_sharded_hash_map"
