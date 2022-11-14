@@ -58,7 +58,7 @@ dependencies = [
 script = '''
 #!/bin/bash
 # run minio
-tmux new -d -s runkv-minio ${PREFIX_BIN}/minio server --address 127.0.0.1:9000 --console-address 127.0.0.1:9090 ${PREFIX_DATA}
+tmux new -d -s runkv-minio ${PREFIX_BIN}/minio server --address 0.0.0.0:9000 --console-address 0.0.0.0:9090 ${PREFIX_DATA}
 # run jaeger
 tmux new -d -s runkv-jaeger ${PREFIX_BIN}/jaeger
 # run prometheus
