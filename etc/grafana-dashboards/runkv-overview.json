@@ -3874,7 +3874,7 @@
               }
             ]
           },
-          "unit": "s"
+          "unit": "none"
         },
         "overrides": []
       },
@@ -3883,6 +3883,516 @@
         "w": 12,
         "x": 0,
         "y": 156
+      },
+      "id": 71,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "avg(irate(lsm_tree_internal_ops_counter_vec[1m])) by (op)",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "{{op}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Internal OPs",
+      "transformations": [
+        {
+          "id": "concatenate",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {
+              "append_log_entries-p50": 1,
+              "append_log_entries-p50 · Time": 0,
+              "append_log_entries-p90": 3,
+              "append_log_entries-p90 · Time": 2,
+              "append_log_entries-p99": 5,
+              "append_log_entries-p99 · Time": 4,
+              "apply_log_entries-p50": 13,
+              "apply_log_entries-p50 · Time": 12,
+              "apply_log_entries-p90": 15,
+              "apply_log_entries-p90 · Time": 14,
+              "apply_log_entries-p99": 17,
+              "apply_log_entries-p99 · Time": 16,
+              "send_messages-p50": 7,
+              "send_messages-p50 · Time": 6,
+              "send_messages-p90": 9,
+              "send_messages-p90 · Time": 8,
+              "send_messages-p99": 11,
+              "send_messages-p99 · Time": 10
+            },
+            "renameByName": {}
+          }
+        }
+      ],
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PEDE6B306CC9C0CD0"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Latency",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "decbytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 156
+      },
+      "id": 72,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "avg(lsm_tree_internal_gauge_vec{ type=\"active_memtable_size\" })",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "active-memtable-size",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Internal Gauges",
+      "transformations": [
+        {
+          "id": "concatenate",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {
+              "append_log_entries-p50": 1,
+              "append_log_entries-p50 · Time": 0,
+              "append_log_entries-p90": 3,
+              "append_log_entries-p90 · Time": 2,
+              "append_log_entries-p99": 5,
+              "append_log_entries-p99 · Time": 4,
+              "apply_log_entries-p50": 13,
+              "apply_log_entries-p50 · Time": 12,
+              "apply_log_entries-p90": 15,
+              "apply_log_entries-p90 · Time": 14,
+              "apply_log_entries-p99": 17,
+              "apply_log_entries-p99 · Time": 16,
+              "send_messages-p50": 7,
+              "send_messages-p50 · Time": 6,
+              "send_messages-p90": 9,
+              "send_messages-p90 · Time": 8,
+              "send_messages-p99": 11,
+              "send_messages-p99 · Time": 10
+            },
+            "renameByName": {}
+          }
+        }
+      ],
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PEDE6B306CC9C0CD0"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Latency",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 164
+      },
+      "id": 73,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "avg(irate(lsm_tree_internal_ops_counter_vec[1m])) by (op, node)",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "{{op}}-{{node}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Internal OPs - Instance",
+      "transformations": [
+        {
+          "id": "concatenate",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {
+              "append_log_entries-p50": 1,
+              "append_log_entries-p50 · Time": 0,
+              "append_log_entries-p90": 3,
+              "append_log_entries-p90 · Time": 2,
+              "append_log_entries-p99": 5,
+              "append_log_entries-p99 · Time": 4,
+              "apply_log_entries-p50": 13,
+              "apply_log_entries-p50 · Time": 12,
+              "apply_log_entries-p90": 15,
+              "apply_log_entries-p90 · Time": 14,
+              "apply_log_entries-p99": 17,
+              "apply_log_entries-p99 · Time": 16,
+              "send_messages-p50": 7,
+              "send_messages-p50 · Time": 6,
+              "send_messages-p90": 9,
+              "send_messages-p90 · Time": 8,
+              "send_messages-p99": 11,
+              "send_messages-p99 · Time": 10
+            },
+            "renameByName": {}
+          }
+        }
+      ],
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PEDE6B306CC9C0CD0"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Latency",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "decbytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 164
+      },
+      "id": 74,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "avg(lsm_tree_internal_gauge_vec{ type=\"active_memtable_size\" }) by (node)",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "active-memtable-size-{{node}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Internal Gauges - Instance",
+      "transformations": [
+        {
+          "id": "concatenate",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {
+              "append_log_entries-p50": 1,
+              "append_log_entries-p50 · Time": 0,
+              "append_log_entries-p90": 3,
+              "append_log_entries-p90 · Time": 2,
+              "append_log_entries-p99": 5,
+              "append_log_entries-p99 · Time": 4,
+              "apply_log_entries-p50": 13,
+              "apply_log_entries-p50 · Time": 12,
+              "apply_log_entries-p90": 15,
+              "apply_log_entries-p90 · Time": 14,
+              "apply_log_entries-p99": 17,
+              "apply_log_entries-p99 · Time": 16,
+              "send_messages-p50": 7,
+              "send_messages-p50 · Time": 6,
+              "send_messages-p90": 9,
+              "send_messages-p90 · Time": 8,
+              "send_messages-p99": 11,
+              "send_messages-p99 · Time": 10
+            },
+            "renameByName": {}
+          }
+        }
+      ],
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PEDE6B306CC9C0CD0"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Latency",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 172
       },
       "id": 52,
       "options": {
@@ -4033,7 +4543,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 156
+        "y": 172
       },
       "id": 57,
       "options": {
@@ -4124,7 +4634,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 164
+        "y": 180
       },
       "id": 58,
       "options": {
@@ -4275,7 +4785,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 164
+        "y": 180
       },
       "id": 59,
       "options": {
@@ -4312,7 +4822,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 172
+        "y": 188
       },
       "id": 61,
       "panels": [],
@@ -4379,7 +4889,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 173
+        "y": 189
       },
       "id": 62,
       "options": {
@@ -4530,7 +5040,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 173
+        "y": 189
       },
       "id": 63,
       "options": {
@@ -4621,7 +5131,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 181
+        "y": 197
       },
       "id": 66,
       "options": {
@@ -4772,7 +5282,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 181
+        "y": 197
       },
       "id": 67,
       "options": {
@@ -4863,7 +5373,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 189
+        "y": 205
       },
       "id": 64,
       "options": {
@@ -5014,7 +5524,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 189
+        "y": 205
       },
       "id": 65,
       "options": {
@@ -5105,7 +5615,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 197
+        "y": 213
       },
       "id": 68,
       "options": {
@@ -5256,7 +5766,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 197
+        "y": 213
       },
       "id": 69,
       "options": {
@@ -5293,7 +5803,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 205
+        "y": 221
       },
       "id": 56,
       "panels": [],
@@ -5385,7 +5895,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 206
+        "y": 222
       },
       "id": 54,
       "options": {
@@ -5460,6 +5970,6 @@
   "timezone": "",
   "title": "RunKV Overview",
   "uid": "kJf6Tv_nk",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

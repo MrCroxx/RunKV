@@ -613,11 +613,17 @@ where
         let futures = raft_node_msgs
             .into_iter()
             .map(|(raft_node, msgs)| {
-                let mut client = self.raft_clients.get(&raft_node).unwrap().clone();
-                async move { client.send(msgs).await }
+                let mut client = self.raft_clients.remove(&raft_node).unwrap();
+                async move {
+                    client.send(msgs).await?;
+                    Ok::<_, Error>((raft_node, client))
+                }
             })
             .collect_vec();
-        future::try_join_all(futures).await?;
+
+        for (raft_node, client) in future::try_join_all(futures).await? {
+            assert!(self.raft_clients.insert(raft_node, client).is_none());
+        }
 
         let elapsed = start.elapsed();
         self.metrics
