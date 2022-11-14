@@ -4384,7 +4384,7 @@
               }
             ]
           },
-          "unit": "s"
+          "unit": "none"
         },
         "overrides": []
       },
@@ -4393,6 +4393,261 @@
         "w": 12,
         "x": 0,
         "y": 172
+      },
+      "id": 75,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "irate(lsm_tree_internal_ops_counter_vec[1m])",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "{{op}}-{{node}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Internal OPs - Raft Group",
+      "transformations": [
+        {
+          "id": "concatenate",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {
+              "append_log_entries-p50": 1,
+              "append_log_entries-p50 · Time": 0,
+              "append_log_entries-p90": 3,
+              "append_log_entries-p90 · Time": 2,
+              "append_log_entries-p99": 5,
+              "append_log_entries-p99 · Time": 4,
+              "apply_log_entries-p50": 13,
+              "apply_log_entries-p50 · Time": 12,
+              "apply_log_entries-p90": 15,
+              "apply_log_entries-p90 · Time": 14,
+              "apply_log_entries-p99": 17,
+              "apply_log_entries-p99 · Time": 16,
+              "send_messages-p50": 7,
+              "send_messages-p50 · Time": 6,
+              "send_messages-p90": 9,
+              "send_messages-p90 · Time": 8,
+              "send_messages-p99": 11,
+              "send_messages-p99 · Time": 10
+            },
+            "renameByName": {}
+          }
+        }
+      ],
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PEDE6B306CC9C0CD0"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Latency",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "decbytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 172
+      },
+      "id": 76,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PEDE6B306CC9C0CD0"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "lsm_tree_internal_gauge_vec{ type=\"active_memtable_size\" }",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "active-memtable-size-{{node}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Internal Gauges - Raft Grounp",
+      "transformations": [
+        {
+          "id": "concatenate",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {
+              "append_log_entries-p50": 1,
+              "append_log_entries-p50 · Time": 0,
+              "append_log_entries-p90": 3,
+              "append_log_entries-p90 · Time": 2,
+              "append_log_entries-p99": 5,
+              "append_log_entries-p99 · Time": 4,
+              "apply_log_entries-p50": 13,
+              "apply_log_entries-p50 · Time": 12,
+              "apply_log_entries-p90": 15,
+              "apply_log_entries-p90 · Time": 14,
+              "apply_log_entries-p99": 17,
+              "apply_log_entries-p99 · Time": 16,
+              "send_messages-p50": 7,
+              "send_messages-p50 · Time": 6,
+              "send_messages-p90": 9,
+              "send_messages-p90 · Time": 8,
+              "send_messages-p99": 11,
+              "send_messages-p99 · Time": 10
+            },
+            "renameByName": {}
+          }
+        }
+      ],
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PEDE6B306CC9C0CD0"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Latency",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 180
       },
       "id": 52,
       "options": {
@@ -4543,7 +4798,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 172
+        "y": 180
       },
       "id": 57,
       "options": {
@@ -4617,8 +4872,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4634,7 +4888,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 180
+        "y": 188
       },
       "id": 58,
       "options": {
@@ -4768,8 +5022,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4785,7 +5038,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 180
+        "y": 188
       },
       "id": 59,
       "options": {
@@ -4822,7 +5075,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 188
+        "y": 196
       },
       "id": 61,
       "panels": [],
@@ -4872,8 +5125,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4889,7 +5141,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 189
+        "y": 197
       },
       "id": 62,
       "options": {
@@ -5023,8 +5275,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5040,7 +5291,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 189
+        "y": 197
       },
       "id": 63,
       "options": {
@@ -5114,8 +5365,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5131,7 +5381,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 197
+        "y": 205
       },
       "id": 66,
       "options": {
@@ -5265,8 +5515,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5282,7 +5531,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 197
+        "y": 205
       },
       "id": 67,
       "options": {
@@ -5356,8 +5605,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5373,7 +5621,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 205
+        "y": 213
       },
       "id": 64,
       "options": {
@@ -5507,8 +5755,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5524,7 +5771,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 205
+        "y": 213
       },
       "id": 65,
       "options": {
@@ -5598,8 +5845,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5615,7 +5861,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 213
+        "y": 221
       },
       "id": 68,
       "options": {
@@ -5749,8 +5995,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5766,7 +6011,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 213
+        "y": 221
       },
       "id": 69,
       "options": {
@@ -5803,7 +6048,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 221
+        "y": 229
       },
       "id": 56,
       "panels": [],
@@ -5853,8 +6098,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5895,7 +6139,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 222
+        "y": 230
       },
       "id": 54,
       "options": {
@@ -5970,6 +6214,6 @@
   "timezone": "",
   "title": "RunKV Overview",
   "uid": "kJf6Tv_nk",
-  "version": 2,
+  "version": 1,
   "weekStart": ""
 }

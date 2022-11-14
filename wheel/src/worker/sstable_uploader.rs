@@ -10,7 +10,7 @@ use runkv_proto::manifest::SstableInfo;
 use runkv_proto::rudder::rudder_service_client::RudderServiceClient;
 use runkv_proto::rudder::InsertL0Request;
 use runkv_storage::components::{
-    CachePolicy, Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef,
+    CachePolicy, LsmTreeMetricsRef, Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef,
 };
 use runkv_storage::manifest::{ManifestError, VersionManager};
 use runkv_storage::utils::{sequence, user_key, value};
@@ -23,6 +23,7 @@ use crate::error::{Error, Result};
 pub struct SstableUploaderOptions {
     pub raft_node: u64,
     pub lsm_tree: ObjectStoreLsmTree,
+    pub lsm_tree_metrics: LsmTreeMetricsRef,
     pub sstable_store: SstableStoreRef,
     pub version_manager: VersionManager,
     pub sstable_capacity: usize,
@@ -39,6 +40,7 @@ pub struct SstableUploader {
     raft_node: u64,
     options: SstableUploaderOptions,
     lsm_tree: ObjectStoreLsmTree,
+    lsm_tree_metrics: LsmTreeMetricsRef,
     sstable_store: SstableStoreRef,
     version_manager: VersionManager,
     channel_pool: ChannelPool,
@@ -77,6 +79,7 @@ impl SstableUploader {
         Self {
             raft_node: options.raft_node,
             lsm_tree: options.lsm_tree.clone(),
+            lsm_tree_metrics: options.lsm_tree_metrics.clone(),
             sstable_store: options.sstable_store.clone(),
             version_manager: options.version_manager.clone(),
             channel_pool: options.channel_pool.clone(),
@@ -158,6 +161,7 @@ impl SstableUploader {
             .put(&sst, data, CachePolicy::Fill)
             .await?;
         debug!("sst {} uploaded", id);
+        self.lsm_tree_metrics.flush_memtable_counter.inc();
         Ok(SstableInfo { id, data_size })
     }
 

@@ -123,7 +123,7 @@ impl RaftManager {
             version_manager: self.version_manager.clone(),
             metrics: self.lsm_tree_options.metrics.clone(),
         };
-        let lsm_tree = ObjectStoreLsmTree::new(lsm_tree_options);
+        let lsm_tree = ObjectStoreLsmTree::new(lsm_tree_options.clone());
 
         // Build raft group log store.
         self.raft_log_store.add_group(raft_node).await?;
@@ -188,6 +188,7 @@ impl RaftManager {
             raft_node,
             rudder_node_id: self.rudder_node_id,
             lsm_tree: lsm_tree.clone(),
+            lsm_tree_metrics: lsm_tree_options.metrics.clone(),
             sstable_store: self.sstable_store.clone(),
             version_manager: self.version_manager.clone(),
             sstable_capacity: self.lsm_tree_options.sstable_capacity,
