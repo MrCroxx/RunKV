@@ -56,5 +56,5 @@ env_logger = "*"
 test-log = "0.2.10"
 
 [features]
-tracing = []
+tracing = ["runkv-common/tracing"]
 deadlock = []

@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use bytes::{Buf, BufMut};
-use futures::future;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use prost::Message;
@@ -621,7 +620,14 @@ where
             })
             .collect_vec();
 
-        for (raft_node, client) in future::try_join_all(futures).await? {
+        let handles = futures
+            .into_iter()
+            .map(|future| tokio::spawn(future))
+            .collect_vec();
+
+        for handle in handles {
+            let result = handle.await.map_err(Error::err)?;
+            let (raft_node, client) = result?;
             assert!(self.raft_clients.insert(raft_node, client).is_none());
         }
 
