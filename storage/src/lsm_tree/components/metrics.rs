@@ -28,6 +28,7 @@ lazy_static! {
 
 pub struct LsmTreeMetrics {
     pub rotate_memtable_counter: prometheus::Counter,
+    pub flush_memtable_counter: prometheus::Counter,
 
     pub active_memtable_size_gauge: prometheus::Gauge,
 
@@ -43,6 +44,10 @@ impl LsmTreeMetrics {
         Self {
             rotate_memtable_counter: INTERNAL_OPS_COUNTER_VEC
                 .get_metric_with_label_values(&["rotate_memtable", &node.to_string()])
+                .unwrap(),
+
+            flush_memtable_counter: INTERNAL_OPS_COUNTER_VEC
+                .get_metric_with_label_values(&["flush_memtable", &node.to_string()])
                 .unwrap(),
 
             active_memtable_size_gauge: INTERNAL_GAUGE_VEC

@@ -58,3 +58,4 @@ test-log = "0.2.10"
 [features]
 tracing = ["runkv-common/tracing"]
 deadlock = []
+verbose-release-log = ["tracing/release_max_level_trace"]

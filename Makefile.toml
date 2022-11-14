@@ -27,7 +27,8 @@ category = "Misc"
 description = "Clean data by deleting files in .run/data and ./run/log folder."
 dependencies = ["prepare"]
 script = '''
-#!@duckscript
+#!/bin/bash
+set -e
 rm -rf "${PREFIX_DATA}"
 rm -rf "${PREFIX_LOG}"
 '''
@@ -38,7 +39,7 @@ alias = "dev"
 [tasks.dev]
 category = "Develop"
 description = "Start development envirorment."
-dependencies = ["pre-dev"]
+dependencies = ["pre-dev", "setup-minio"]
 script = '''
 #!@duckscript
 echo success
@@ -65,11 +66,18 @@ tmux new -d -s runkv-jaeger ${PREFIX_BIN}/jaeger
 tmux new -d -s runkv-prometheus ${PREFIX_BIN}/prometheus/prometheus --config.file=etc/prometheus.yml --web.listen-address=0.0.0.0:9091 --storage.tsdb.path=${PREFIX_DATA}/prometheus-data
 # run grafana
 tmux new -d -s runkv-grafana ${PREFIX_BIN}/grafana/bin/grafana-server -homepath .run/bin/grafana -config etc/grafana.ini
-# create test bucket
-tmux new -d -s runkv-mcli ' \
-${PREFIX_BIN}/mcli alias set local http://127.0.0.1:9000 minioadmin minioadmin ; \
-${PREFIX_BIN}/mcli mb local/test ; \
-'
+sleep 2
+'''
+
+[tasks.setup-minio]
+category = "Misc"
+description = "Clean minio data with mcli."
+dependencies = ["prepare"]
+script = '''
+#!/bin/bash
+set -e
+${PREFIX_BIN}/mcli alias set local http://127.0.0.1:9000 minioadmin minioadmin
+${PREFIX_BIN}/mcli mb --quiet local/test
 '''
 
 [tasks.k]

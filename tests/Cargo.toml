@@ -41,3 +41,4 @@ tracing = "0.1"
 [features]
 tracing = ["runkv-wheel/tracing"]
 deadlock = ["parking_lot/deadlock_detection"]
+verbose-release-log = ["tracing/release_max_level_trace"]

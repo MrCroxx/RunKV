@@ -47,6 +47,15 @@ deadlock = [
 ]
 console = ["tokio/tracing", "runkv-common/console"]
 trace-notify-pool = ["runkv-common/trace-notify-pool"]
+verbose-release-log = [
+    "tracing/release_max_level_trace",
+    "runkv-common/verbose-release-log",
+    "runkv-exhauster/verbose-release-log",
+    "runkv-rudder/verbose-release-log",
+    "runkv-storage/verbose-release-log",
+    "runkv-tests/verbose-release-log",
+    "runkv-wheel/verbose-release-log",
+]
 
 [[bin]]
 name = "bench_kv"

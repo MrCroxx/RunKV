@@ -1,5 +1,5 @@
 use isahc::config::Configurable;
-use tracing_subscriber::filter::{EnvFilter, Targets};
+use tracing_subscriber::filter::Targets;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
@@ -45,12 +45,32 @@ pub fn init_runkv_logger(service: &str, id: u64, log_path: &str) -> LogGuard {
     };
 
     let fmt_layer = {
+        let runkv_log_level = if cfg!(feature = "verbose-release-log") || cfg!(debug_assertions) {
+            tracing::Level::DEBUG
+        } else {
+            tracing::Level::INFO
+        };
+
+        // Configure RunKV's own crates to log at TRACE level, and ignore all third-party crates.
+        let filter = Targets::new()
+            // Enable trace for most modules.
+            .with_target("runkv_common", runkv_log_level)
+            .with_target("runkv_storage", runkv_log_level)
+            .with_target("runkv_rudder", runkv_log_level)
+            .with_target("runkv_wheel", runkv_log_level)
+            .with_target("runkv_exhauster", runkv_log_level)
+            .with_target("runkv_tests", runkv_log_level)
+            .with_target("openraft::raft", tracing::Level::INFO)
+            .with_target("raft", tracing::Level::INFO)
+            .with_target("events", tracing::Level::WARN);
+
         tracing_subscriber::fmt::layer()
             .with_span_events(FmtSpan::ACTIVE)
             .with_target(true)
             .with_level(true)
             .with_writer(file_appender)
             .with_ansi(false)
+            .with_filter(filter)
     };
 
     if jaeger_enabled {
@@ -87,10 +107,7 @@ pub fn init_runkv_logger(service: &str, id: u64, log_path: &str) -> LogGuard {
             .with(opentelemetry_layer)
             .init();
     } else {
-        tracing_subscriber::registry()
-            .with(EnvFilter::from_default_env())
-            .with(fmt_layer)
-            .init();
+        tracing_subscriber::registry().with(fmt_layer).init();
     }
 
     guard

@@ -86,6 +86,7 @@ trace = [
     "tracing-subscriber",
     "tracing/release_max_level_trace",
 ]
+verbose-release-log = ["tracing/release_max_level_trace"]
 
 [[bench]]
 name = "bench_block_iter"
