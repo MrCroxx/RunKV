@@ -12,7 +12,7 @@ use crate::tiered_cache::{TieredCacheEntry, TieredCacheValue};
 use crate::utils::lru_cache::{CacheableEntry, LruCache, LruCacheEventListener};
 use crate::{Error, Result};
 
-const SHARD_BITS: usize = 5;
+const SHARD_BITS: usize = 6;
 
 enum BlockEntry {
     Cache(CacheableEntry<(u64, usize), Box<Block>>),

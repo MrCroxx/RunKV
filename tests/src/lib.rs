@@ -5,9 +5,9 @@ use std::time::{Duration, Instant};
 
 use bytes::BufMut;
 use clap::Parser;
-use futures::future;
 use itertools::Itertools;
-use rand::{thread_rng, Rng};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use runkv_client::client::{RunkvClient, RunkvClientOptions};
 use runkv_common::log::init_runkv_logger;
 use runkv_common::time::timestamp;
@@ -98,21 +98,29 @@ fn concat_toml(path1: &str, path2: &str) -> String {
     s
 }
 
-fn key(group: u8, i: u64, size: usize) -> Vec<u8> {
+#[allow(clippy::uninit_vec)]
+fn key(group: u8, i: u64, size: usize, rng: &mut impl Rng) -> Vec<u8> {
     let mut buf = Vec::with_capacity(size);
-    buf.put_u8(b'k');
-    buf.put_u8(group);
-    buf.put_u64(i);
-    buf.put_slice(&vec![b' '; size - 10]);
+    unsafe {
+        buf.set_len(size);
+    }
+    rng.fill(&mut buf[..]);
+    (&mut buf[0..1]).put_u8(b'k');
+    (&mut buf[1..2]).put_u8(group);
+    (&mut buf[2..10]).put_u64(i);
     buf
 }
 
-fn value(group: u8, i: u64, size: usize) -> Vec<u8> {
+#[allow(clippy::uninit_vec)]
+fn value(group: u8, i: u64, size: usize, rng: &mut impl Rng) -> Vec<u8> {
     let mut buf = Vec::with_capacity(size);
-    buf.put_u8(b'v');
-    buf.put_u8(group);
-    buf.put_u64(i);
-    buf.put_slice(&vec![b' '; size - 10]);
+    unsafe {
+        buf.set_len(size);
+    }
+    rng.fill(&mut buf[..]);
+    (&mut buf[0..1]).put_u8(b'v');
+    (&mut buf[1..2]).put_u8(group);
+    (&mut buf[2..10]).put_u64(i);
     buf
 }
 
@@ -414,12 +422,17 @@ pub async fn run(args: Args, options: Options) {
             (1..=args.concurrency).map(move |c| {
                 let client_clone = runkv_client_clone.clone();
                 async move {
-                    let mut rng = thread_rng();
+                    let mut rng = StdRng::seed_from_u64(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_nanos() as u64,
+                    );
 
                     let client = client_clone.clone();
 
-                    let key = key(group, c, args.key_size);
-                    let value = value(group, c, args.value_size);
+                    let key = key(group, c, args.key_size, &mut rng);
+                    let value = value(group, c, args.value_size, &mut rng);
 
                     for _ in 0..args.r#loop {
                         tokio::time::sleep(Duration::from_millis(rng.gen_range(0..10))).await;
@@ -444,7 +457,13 @@ pub async fn run(args: Args, options: Options) {
 
     println!("Start kv operations...");
 
-    future::join_all(futures).await;
+    let handles = futures
+        .into_iter()
+        .map(|future| tokio::spawn(future))
+        .collect_vec();
+    for handle in handles {
+        handle.await.unwrap();
+    }
 
     println!("elapsed: {:.3?}", start.elapsed());
     println!("Finish.");

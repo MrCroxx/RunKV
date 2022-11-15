@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -10,7 +11,7 @@ use runkv_common::packer::{Item, Packer};
 use runkv_common::Worker;
 use runkv_storage::raft_log_store::entry::RaftLogBatchBuilder;
 use serde::{Deserialize, Serialize};
-use tracing::{trace, warn};
+use tracing::{trace, warn, Instrument};
 
 use crate::components::command::Command;
 use crate::components::fsm::Fsm;
@@ -29,7 +30,9 @@ lazy_static! {
             "raft_latency_histogram_vec",
             "raft latency histogram vec",
             &["op", "node", "group", "raft_node"],
-            vec![0.001, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0]
+            vec![
+                0.001, 0.002, 0.003, 0.005, 0.007, 0.01, 0.02, 0.03, 0.05, 0.07, 0.1, 0.2, 0.5, 1.0
+            ]
         )
         .unwrap();
     static ref RAFT_THROUGHPUT_GAUGE_VEC: prometheus::GaugeVec = prometheus::register_gauge_vec!(
@@ -56,6 +59,7 @@ struct RaftMetrics {
 
     send_messages_latency_histogram: prometheus::Histogram,
     send_messages_throughput_gauge: prometheus::Gauge,
+    send_one_message_latency_histogram: prometheus::Histogram,
 
     handle_ready_latency_histogram: prometheus::Histogram,
 
@@ -109,6 +113,14 @@ impl RaftMetrics {
                     &raft_node.to_string(),
                 ])
                 .unwrap(),
+            send_one_message_latency_histogram: RAFT_LATENCY_HISTOGRAM_VEC
+                .get_metric_with_label_values(&[
+                    "send_one_message",
+                    &node.to_string(),
+                    &group.to_string(),
+                    &raft_node.to_string(),
+                ])
+                .unwrap(),
 
             handle_ready_latency_histogram: RAFT_LATENCY_HISTOGRAM_VEC
                 .get_metric_with_label_values(&[
@@ -146,6 +158,8 @@ impl RaftMetrics {
         }
     }
 }
+
+type RaftMetricsRef = Arc<RaftMetrics>;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Proposal {
@@ -259,7 +273,7 @@ where
 
     fsm: F,
 
-    metrics: RaftMetrics,
+    metrics: RaftMetricsRef,
 }
 
 impl<RN, F> std::fmt::Debug for RaftWorker<RN, F>
@@ -368,7 +382,11 @@ where
             command_packer: options.command_packer,
             message_packer: options.message_packer,
 
-            metrics: RaftMetrics::new(options.node, options.group, options.raft_node),
+            metrics: Arc::new(RaftMetrics::new(
+                options.node,
+                options.group,
+                options.raft_node,
+            )),
         })
     }
 
@@ -613,10 +631,14 @@ where
             .into_iter()
             .map(|(raft_node, msgs)| {
                 let mut client = self.raft_clients.remove(&raft_node).unwrap();
+                let metrics = self.metrics.clone();
                 async move {
+                    let timer = metrics.send_one_message_latency_histogram.start_timer();
                     client.send(msgs).await?;
+                    timer.observe_duration();
                     Ok::<_, Error>((raft_node, client))
                 }
+                .instrument(tracing::trace_span!("send_one"))
             })
             .collect_vec();
 
