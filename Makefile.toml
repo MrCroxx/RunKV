@@ -92,4 +92,5 @@ tmux send-keys -t runkv-minio C-c
 tmux send-keys -t runkv-jaeger C-c
 tmux send-keys -t runkv-prometheus C-c
 tmux send-keys -t runkv-grafana C-c
+sleep 2
 '''
