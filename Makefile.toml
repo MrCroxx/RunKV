@@ -63,7 +63,7 @@ tmux new -d -s runkv-minio ${PREFIX_BIN}/minio server --address 0.0.0.0:9000 --c
 # run jaeger
 tmux new -d -s runkv-jaeger ${PREFIX_BIN}/jaeger
 # run prometheus
-tmux new -d -s runkv-prometheus ${PREFIX_BIN}/prometheus/prometheus --config.file=etc/prometheus.yml --web.listen-address=0.0.0.0:9091 --storage.tsdb.path=${PREFIX_DATA}/prometheus-data
+tmux new -d -s runkv-prometheus ${PREFIX_BIN}/prometheus/prometheus --config.file=etc/prometheus.yml --web.listen-address=0.0.0.0:9091 --storage.tsdb.path=${PREFIX_STAGE}/prometheus-data
 # run grafana
 tmux new -d -s runkv-grafana ${PREFIX_BIN}/grafana/bin/grafana-server -homepath .run/bin/grafana -config etc/grafana.ini
 sleep 2

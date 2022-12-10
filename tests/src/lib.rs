@@ -88,6 +88,9 @@ pub struct Args {
     /// 1. memory => "memory://" 2. minio => "minio://key:secret@address:port/bucket"
     #[clap(long, default_value = "memory://")]
     pub s3_uri: String,
+
+    #[clap(long, default_value = "1.0")]
+    pub mc: f64,
 }
 
 fn concat_toml(path1: &str, path2: &str) -> String {
@@ -457,6 +460,8 @@ pub async fn run(args: Args, options: Options) {
 
     println!("Start kv operations...");
 
+    let hmock = tokio::spawn(mock(args.mc));
+
     let handles = futures
         .into_iter()
         .map(|future| tokio::spawn(future))
@@ -468,5 +473,21 @@ pub async fn run(args: Args, options: Options) {
     println!("elapsed: {:.3?}", start.elapsed());
     println!("Finish.");
 
+    hmock.abort();
+
     drop(log_guard);
+}
+
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref COST: prometheus::Counter = prometheus::register_counter!("cost", "cost").unwrap();
+}
+
+async fn mock(c: f64) {
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        COST.inc_by(c);
+        tokio::task::consume_budget().await;
+    }
 }

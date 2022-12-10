@@ -27,3 +27,12 @@ update_ci:
 
 bench_kv:
 	RUNKV_METRICS=true RUST_BACKTRACE=1 cargo run --release --package runkv-bench --bin bench_kv
+
+bench_runkv:
+	./run k || true && rm -rf .run/tmp/bench-kv && ./run d && cargo build --release --package runkv-bench --bin bench_kv --features "verbose-release-log" && RUNKV_METRICS=true RUST_BACKTRACE=1 RUST_LOG=debug ./target/release/bench_kv --persist none --wheels 6 --loop 600 --groups 12 --s3-uri minio://minioadmin:minioadmin@127.0.0.1:9000/test --key-size 512 --value-size 512 --concurrency 10 --mc 0.1
+
+bench_rocksdb_cloud_like:
+	./run k || true && rm -rf .run/tmp/bench-kv && ./run d && cargo build --release --package runkv-bench --bin bench_kv --features "verbose-release-log" && RUNKV_METRICS=true RUST_BACKTRACE=1 RUST_LOG=debug ./target/release/bench_kv --persist none --wheels 6 --loop 600 --groups 12 --s3-uri minio://minioadmin:minioadmin@127.0.0.1:9000/test --key-size 512 --value-size 512 --concurrency 8 --mc 0.06
+
+bench_tikv_like:
+	./run k || true && rm -rf .run/tmp/bench-kv && ./run d && cargo build --release --package runkv-bench --bin bench_kv --features "verbose-release-log" && RUNKV_METRICS=true RUST_BACKTRACE=1 RUST_LOG=debug ./target/release/bench_kv --persist none --wheels 6 --loop 600 --groups 12 --s3-uri minio://minioadmin:minioadmin@127.0.0.1:9000/test --key-size 512 --value-size 512 --concurrency 10 --mc 0.15

@@ -54,6 +54,7 @@ async fn test_multi_raft_group_concurrent_put_get() {
         log_dir,
         file_cache_dir,
         s3_uri: "memory://".to_string(),
+        mc: 0f64,
     };
 
     run(args, options).await;

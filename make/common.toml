@@ -10,6 +10,7 @@ PREFIX_CONFIG = "${PREFIX}/config"
 PREFIX_DATA = "${PREFIX}/data"
 PREFIX_LOG = "${PREFIX}/log"
 PREFIX_TMP = "${PREFIX}/tmp"
+PREFIX_STAGE = "${PREFIX}/stage"
 
 [tasks.prepare]
 private = true
@@ -23,4 +24,5 @@ mkdir "${PREFIX_BIN}"
 mkdir "${PREFIX_TMP}"
 mkdir "${PREFIX_DATA}"
 mkdir "${PREFIX_LOG}"
+mkdir "${PREFIX_STAGE}"
 '''
